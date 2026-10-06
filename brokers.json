@@ -1,0 +1,282 @@
+[
+  {
+    "method": "Web form — search your listing, paste its URL, confirm by email",
+    "name": "Spokeo",
+    "optout_url": "https://www.spokeo.com/optout",
+    "region": "US / Global",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — find your record, submit opt-out, confirm by email",
+    "name": "BeenVerified",
+    "optout_url": "https://www.beenverified.com/app/optout/search",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Suppression request — find listing, verify by phone call",
+    "name": "Whitepages",
+    "optout_url": "https://www.whitepages.com/suppression-requests",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — find your record and request removal",
+    "name": "TruePeopleSearch",
+    "optout_url": "https://www.truepeoplesearch.com/removal",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — find your record and request removal",
+    "name": "FastPeopleSearch",
+    "optout_url": "https://www.fastpeoplesearch.com/removal",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — search, select record, confirm by email",
+    "name": "PeopleFinders",
+    "optout_url": "https://www.peoplefinders.com/opt-out",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Privacy centre — submit opt-out with the email on the record",
+    "name": "Intelius",
+    "optout_url": "https://www.intelius.com/opt-out",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — find record via suppression tool",
+    "name": "TruthFinder",
+    "optout_url": "https://www.truthfinder.com/opt-out",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — find record via suppression tool",
+    "name": "Instant Checkmate",
+    "optout_url": "https://www.instantcheckmate.com/opt-out",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — claim/remove your profile page",
+    "name": "Radaris",
+    "optout_url": "https://radaris.com/removal",
+    "region": "US / Global",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — submit your listing URL",
+    "name": "ThatsThem",
+    "optout_url": "https://thatsthem.com/opt-out",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — paste profile URL, confirm by email",
+    "name": "Nuwber",
+    "optout_url": "https://nuwber.com/removal",
+    "region": "US / Global",
+    "type": "People search"
+  },
+  {
+    "method": "Privacy page / email privacy@mylife.com — may require phone verification",
+    "name": "MyLife",
+    "optout_url": "https://www.mylife.com/privacy",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — find and remove your record",
+    "name": "CheckPeople",
+    "optout_url": "https://checkpeople.com/opt-out",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Privacy page — opt-out via BeenVerified suppression tool",
+    "name": "PeopleLooker",
+    "optout_url": "https://www.peoplelooker.com/privacy",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — enter phone number, confirm removal",
+    "name": "USPhoneBook",
+    "optout_url": "https://www.usphonebook.com/opt-out",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — submit listing URL",
+    "name": "SearchPeopleFree",
+    "optout_url": "https://www.searchpeoplefree.com/opt-out",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — submit your address page URL",
+    "name": "ClustrMaps",
+    "optout_url": "https://clustrmaps.com/bl/opt-out",
+    "region": "US / Global",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — find and remove your record",
+    "name": "NeighborWho",
+    "optout_url": "https://www.neighborwho.com/opt-out",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — submit record URL from your profile page",
+    "name": "VoterRecords",
+    "optout_url": "https://voterrecords.com/opt-out",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — find record, confirm by email",
+    "name": "AdvancedBackgroundChecks",
+    "optout_url": "https://www.advancedbackgroundchecks.com/optout",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form / email — request record removal",
+    "name": "Social Catfish",
+    "optout_url": "https://socialcatfish.com/opt-out",
+    "region": "US / Global",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — find and remove your record",
+    "name": "InfoTracer",
+    "optout_url": "https://members.infotracer.com/optout.aspx",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — submit your PeekYou profile URL",
+    "name": "PeekYou",
+    "optout_url": "https://www.peekyou.com/about/contact/optout",
+    "region": "Global",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — find and remove your record",
+    "name": "PublicRecordsNow",
+    "optout_url": "https://www.publicrecordsnow.com/opt-out",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — removal request with listing details",
+    "name": "SearchQuarry",
+    "optout_url": "https://searchquarry.com/removal-request",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — find record, opt out, confirm",
+    "name": "FamilyTreeNow",
+    "optout_url": "https://www.familytreenow.com/optout",
+    "region": "US",
+    "type": "People search"
+  },
+  {
+    "method": "Web form — submit listing URL",
+    "name": "Cocofinder",
+    "optout_url": "https://cocofinder.com/opt-out",
+    "region": "US / Global",
+    "type": "People search"
+  },
+  {
+    "method": "Opt-out portal — AboutTheData / privacy request form",
+    "name": "Acxiom",
+    "optout_url": "https://www.acxiom.com/privacy/opt-out",
+    "region": "Global",
+    "type": "Data broker (marketing)"
+  },
+  {
+    "method": "Data subject request form — deletion / opt-out of sale",
+    "name": "Epsilon",
+    "optout_url": "https://legal.epsilon.com/dsr",
+    "region": "US / Global",
+    "type": "Data broker (marketing)"
+  },
+  {
+    "method": "Opt-out registry — submit email / advertising IDs",
+    "name": "Oracle Data Cloud",
+    "optout_url": "https://datacloudoptout.oracle.com",
+    "region": "Global",
+    "type": "Data broker (marketing)"
+  },
+  {
+    "method": "Consumer portal — opt out / freeze where eligible",
+    "name": "LexisNexis Risk Solutions",
+    "optout_url": "https://consumer.risk.lexisnexis.com/consumerDisclosurePortal",
+    "region": "US / Global",
+    "type": "Data broker (risk)"
+  },
+  {
+    "method": "Privacy centre — opt out of marketing data sharing",
+    "name": "Experian",
+    "optout_url": "https://www.experian.com/privacy/opt-out",
+    "region": "US / Global",
+    "type": "Credit bureau / broker"
+  },
+  {
+    "method": "Privacy centre — opt-out choices for marketing use",
+    "name": "Equifax",
+    "optout_url": "https://www.equifax.com/personal/privacy-statement/opt-out",
+    "region": "US / Global",
+    "type": "Credit bureau / broker"
+  },
+  {
+    "method": "Privacy centre — opt-out choices for marketing use",
+    "name": "TransUnion",
+    "optout_url": "https://www.transunion.com/privacy/opt-out",
+    "region": "US / Global",
+    "type": "Credit bureau / broker"
+  },
+  {
+    "method": "Privacy request form — deletion / do-not-sell",
+    "name": "CoreLogic",
+    "optout_url": "https://www.corelogic.com/privacy/opt-out",
+    "region": "US",
+    "type": "Data broker (property)"
+  },
+  {
+    "method": "Do-not-sell / deletion request form or email",
+    "name": "Data Axle (InfoUSA)",
+    "optout_url": "https://www.data-axle.com/privacy-policy/do-not-sell",
+    "region": "US",
+    "type": "Data broker (marketing)"
+  },
+  {
+    "method": "Ad opt-out page — browser / device level",
+    "name": "Epsilon (Conversant)",
+    "optout_url": "https://www.conversantmedia.com/optout",
+    "region": "Global",
+    "type": "Data broker (ad tech)"
+  },
+  {
+    "method": "Your Privacy Choices — deletion / opt-out request",
+    "name": "LiveRamp",
+    "optout_url": "https://liveramp.com/privacy/your-privacy-choices",
+    "region": "Global",
+    "type": "Data broker (ad tech)"
+  },
+  {
+    "method": "Privacy page — data subject request",
+    "name": "Neustar (TransUnion)",
+    "optout_url": "https://www.transunion.com/privacy",
+    "region": "US / Global",
+    "type": "Data broker (identity)"
+  }
+]

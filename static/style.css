@@ -1,0 +1,40 @@
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf8}
+a{color:#8ab4ff}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:#111831;position:sticky;top:0;z-index:5}
+.brand{font-weight:800;font-size:20px}
+.topbar nav a{margin-left:16px;text-decoration:none;font-size:14px}
+main{max-width:880px;margin:0 auto;padding:20px 16px 60px}
+.hero{text-align:center;padding:28px 8px 8px}
+.hero h1{font-size:32px;margin:0 0 10px}
+.sub{color:#aebadd;max-width:640px;margin:0 auto}
+.card{background:#141b36;border:1px solid #26305c;border-radius:14px;padding:20px;margin-top:22px}
+.card.warn{border-color:#6b4d1f;background:#241d10}
+h2{margin-top:0;font-size:21px}
+h3{font-size:16px;margin:18px 0 8px}
+label{display:block;margin:12px 0;font-size:14px;color:#c6cdea}
+input,select,textarea{width:100%;margin-top:6px;padding:11px;border-radius:9px;border:1px solid #33407a;background:#0d1330;color:#fff;font-size:15px}
+button{background:#3b6cff;color:#fff;border:0;border-radius:9px;padding:11px 18px;font-size:15px;font-weight:600;cursor:pointer}
+button:hover{background:#2f5ce0}
+.btnLink{display:inline-block;background:#26305c;color:#fff;text-decoration:none;border-radius:9px;padding:11px 18px;font-size:15px;font-weight:600}
+.hint{color:#93a0c9;font-size:13px}
+.status{margin-top:14px;padding:12px;border-radius:9px;background:#1b2a52}
+.status.err{background:#4a1d24}
+.scoreRow{display:flex;gap:18px;align-items:center;margin-top:16px;flex-wrap:wrap}
+.scoreBox{background:#0d1330;border:1px solid #33407a;border-radius:12px;padding:14px 20px;text-align:center}
+.scoreBox span{font-size:38px;font-weight:800;display:block}
+.scoreBox small{color:#93a0c9}
+.breachChip{display:inline-block;background:#33203a;border:1px solid #6d3a5e;color:#ffd7ec;border-radius:999px;padding:5px 12px;margin:3px;font-size:13px}
+.tags a,.tag{display:inline-block;background:#1b2a52;border-radius:999px;padding:6px 12px;margin:3px;font-size:13px;text-decoration:none}
+.broker{border:1px solid #26305c;border-radius:11px;padding:13px 15px;margin-top:10px;background:#101736}
+.broker .bhead{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center}
+.broker .bname{font-weight:700}
+.broker .bmeta{color:#93a0c9;font-size:12px}
+.broker select{width:auto;margin:0;padding:7px}
+.broker .bbtns{margin-top:9px;display:flex;gap:8px;flex-wrap:wrap}
+.broker .bbtns a,.broker .bbtns button{font-size:13px;padding:8px 12px}
+.st-removed{opacity:.62}
+.rowBtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:center}
+footer{text-align:center;color:#7785b3;font-size:13px;margin-top:28px}
+textarea{font-family:ui-monospace,monospace;font-size:13px}
+@media(max-width:560px){.hero h1{font-size:25px}.topbar nav{display:none}}

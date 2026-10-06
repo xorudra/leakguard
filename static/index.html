@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LeakGuard — Find &amp; remove your leaked data</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">🛡️ LeakGuard</div>
+  <nav>
+    <a href="#scan">Scan</a>
+    <a href="#removal">Removal Centre</a>
+    <a href="#google">Google</a>
+    <a href="#honest">Honest limits</a>
+  </nav>
+</header>
+
+<main>
+  <section class="hero">
+    <h1>Your data got leaked. Find it. Remove it.</h1>
+    <p class="sub">Free scan against real breach databases, then a guided removal centre for the
+    data brokers and people-search sites that sell your name, phone and address.</p>
+  </section>
+
+  <section id="scan" class="card">
+    <h2>1 — Leak scan</h2>
+    <form id="scanForm">
+      <label>Email address *
+        <input type="email" id="email" required placeholder="you@example.com" autocomplete="email">
+      </label>
+      <label>Password to check (optional)
+        <input type="password" id="password" placeholder="Checked safely — never sent or stored" autocomplete="off">
+      </label>
+      <p class="hint">Password check uses Have I Been Pwned k-anonymity: only the first 5 characters of its
+      SHA-1 hash are sent. Your password never leaves this page in plain form and is never stored.</p>
+      <button type="submit" id="scanBtn">Scan my data</button>
+    </form>
+    <div id="scanStatus" class="status" hidden></div>
+    <div id="scanResults" hidden>
+      <div class="scoreRow">
+        <div class="scoreBox"><span id="scoreNum">–</span><small>Exposure score / 100</small></div>
+        <div>
+          <p id="scoreText"></p>
+          <p class="hint" id="sourceText"></p>
+        </div>
+      </div>
+      <h3>Breaches containing this email</h3>
+      <div id="breachList"></div>
+      <div id="exposedBox" hidden>
+        <h3>Types of data exposed</h3>
+        <div id="exposedTags" class="tags"></div>
+      </div>
+      <div id="passwordBox" hidden>
+        <h3>Password check</h3>
+        <p id="passwordText"></p>
+      </div>
+      <h3>What to do next</h3>
+      <ol id="nextSteps"></ol>
+    </div>
+  </section>
+
+  <section id="removal" class="card">
+    <h2>2 — Removal Centre (data brokers &amp; people-search sites)</h2>
+    <p>These companies sell your data. Each one legally has to remove it when you ask —
+    under India's <strong>DPDP Act §12</strong>, GDPR Art. 17, or CCPA. Work through the list:
+    open the opt-out, use the letter generator if they ask for a written request, and mark your progress.
+    Progress is saved only in your browser.</p>
+    <div class="letterBox">
+      <h3>Deletion request letter generator</h3>
+      <label>Your full name <input type="text" id="lgName" placeholder="Rudra"></label>
+      <label>Your email <input type="email" id="lgEmail" placeholder="you@example.com"></label>
+      <label>Your city / country <input type="text" id="lgCity" placeholder="City, India"></label>
+      <label>Law to cite
+        <select id="lgLaw">
+          <option value="dpdp">India — DPDP Act 2023, §12 (right to erasure)</option>
+          <option value="gdpr">EU/UK — GDPR Article 17 (right to erasure)</option>
+          <option value="ccpa">California — CCPA (right to delete / opt out of sale)</option>
+        </select>
+      </label>
+      <p class="hint">Pick a broker below and tap “Letter” — the letter is generated with that broker's name. Or generate a generic one:</p>
+      <button type="button" id="genericLetterBtn">Generate generic letter</button>
+      <textarea id="letterOut" rows="12" hidden readonly></textarea>
+      <div class="rowBtns" id="letterBtns" hidden>
+        <button type="button" id="copyLetterBtn">Copy letter</button>
+        <button type="button" id="downloadLetterBtn">Download .txt</button>
+      </div>
+    </div>
+    <p id="brokerProgress" class="hint"></p>
+    <div id="brokerList"></div>
+  </section>
+
+  <section id="google" class="card">
+    <h2>3 — Google exposure</h2>
+    <p>Check what a stranger finds when they Google you, and get it removed from search:</p>
+    <label>Your full name <input type="text" id="gName" placeholder="Your name"></label>
+    <label>Phone (optional) <input type="text" id="gPhone" placeholder="+91 …"></label>
+    <div class="rowBtns">
+      <button type="button" id="gSearchBtn">Build my Google searches</button>
+      <a class="btnLink" href="https://myactivity.google.com/results-about-you" target="_blank" rel="noopener">Open Google “Results about you” →</a>
+    </div>
+    <div id="gLinks" class="tags"></div>
+    <p class="hint">“Results about you” is Google's own tool: it finds search results showing your address,
+    phone or email and lets you request their removal from Google Search. Note: that hides the result on Google —
+    removing it at the broker (step 2) deletes it at the source.</p>
+  </section>
+
+  <section id="honest" class="card warn">
+    <h2>The honest limits</h2>
+    <ul>
+      <li><strong>Can be removed:</strong> data brokers, people-search sites, and Google search results — they must answer a legal erasure request.</li>
+      <li><strong>Cannot be removed:</strong> a breach dump already copied to Telegram, dark-web forums or torrents. No tool on earth can delete every copy. Anyone promising that is lying.</li>
+      <li><strong>So the real defence is both:</strong> remove what's removable, and change any password that appears in a breach — everywhere you reused it.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <p>LeakGuard · Free &amp; open source · Scans use XposedOrNot and Have I Been Pwned · No scan data is stored on this server.</p>
+  </footer>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

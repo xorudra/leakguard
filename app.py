@@ -241,7 +241,10 @@ class Handler(BaseHTTPRequestHandler):
                 profile = {}
             profile = {k: str(v)[:200] for k, v in profile.items()
                        if k in ("full_name", "email", "phone", "city", "listing_url")}
-            result = agent_engine.probe_broker(broker, profile)
+            if payload.get("deep"):
+                result = agent_engine.probe_with_browser_fallback(broker, profile)
+            else:
+                result = agent_engine.probe_broker(broker, profile)
             # Free-lane fallback: only when script matching found a form it
             # could not fill, and the user's own free gateway is configured.
             if result.get("forms") and not result.get("fillable"):

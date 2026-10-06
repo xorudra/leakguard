@@ -1,0 +1,7 @@
+# Optional — only for the Agent Mode browser-probe layer.
+# The app runs fine without these (HTTP probe only).
+playwright>=1.44
+# Plus a Chromium: use your system Chrome/Chromium, or:
+#   python3 -m playwright install chromium
+# On networks whose proxy Chromium cannot authenticate to, run
+# proxy_relay.py and set LEAKGUARD_BROWSER_PROXY=http://127.0.0.1:8899

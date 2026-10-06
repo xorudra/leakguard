@@ -326,7 +326,7 @@ async function probeBroker(broker, btn) {
     const resp = await fetch("/api/agent/probe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ broker, profile: agentProfile() }),
+      body: JSON.stringify({ broker, profile: agentProfile(), deep: true }),
     });
     const d = await resp.json();
     if (!resp.ok) throw new Error(d.error || "Probe failed");
@@ -348,6 +348,11 @@ async function probeBroker(broker, btn) {
       lines.push(d.fillable ? "✅ This form is script-fillable." : "Form found, but a blocker stops auto-fill.");
     }
     (d.blockers || []).forEach((b) => lines.push("🚧 " + b));
+    if (d.browser && d.browser.available) {
+      lines.push("🌐 Browser check: " + (d.browser.reachable ? "page rendered (" + (d.browser.title || "untitled") + ")" : "could not render either") + (d.browser.challenge ? " — bot-check challenge shown" : ""));
+    } else if (d.browser) {
+      lines.push("🌐 Browser check: not available on this server (HTTP probe only)");
+    }
     if (d.free_lane_used) lines.push("Free lane (your gateway) classified the unknown fields — 0 Claude tokens used.");
     lines.forEach((t) => {
       const p = document.createElement("p");

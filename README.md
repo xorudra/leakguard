@@ -10,7 +10,9 @@ A free, GUI-based tool (web UI, no CLI) that:
 4. **Removes (manual path)** — a Removal Centre with the same 40 brokers: opt-out links, a tracking board (saved in your browser), and a one-click **erasure-request letter generator** citing India's DPDP Act §12, GDPR Art. 17, or CCPA.
 5. **Google** — builds the searches a stranger would run on you and links Google's own *Results about you* removal tool.
 
-> **Field reality (measured, Oct 2026):** probing the top brokers from a server IP, most big people-search sites answer scripts with 403 (bot protection) or require email/phone verification — Spokeo's opt-out page was reachable and its form readable. The probe exists precisely so you see this per broker instead of a fake "removed ✓". A headless-browser layer (Playwright) for the JavaScript/bot-walled sites is the planned v2.1; CAPTCHA, email-confirmation and phone-verification steps will always need the user — by design.
+> **Field reality (measured, Oct 2026, updated for v2.1):** ThatsThem's opt-out moved to `/optout` (fixed) and Acxiom's official form is the `isapps.acxiom.com` page (fixed, HTTP 200). With the **browser probe** (Playwright + real Chromium, `browser_probe.py`), Spokeo's opt-out form renders fully — fields `url` + `email` — and its CAPTCHA-at-submit is detected and reported. BeenVerified / Whitepages still refuse **this dev server's datacenter network** in both HTTP and browser modes (403 / connection failures): that's IP reputation, not a code bug — Agent Mode is designed to also run on the user's own machine/IP (like a local app), where those walls are far lower. Nuwber's whole domain was unreachable from this network during testing. CAPTCHA, email-confirmation and phone-verification steps will always need the user — by design.
+>
+> **Browser layer setup (optional):** `pip install -r requirements-optional.txt` and have any Chromium/Chrome installed. If your network's proxy can't be used by Chromium directly, run `python3 proxy_relay.py` (a local no-auth CONNECT relay to your env proxy) and set `LEAKGUARD_BROWSER_PROXY=http://127.0.0.1:8899`. Set `LEAKGUARD_NO_BROWSER=1` to disable the layer.
 
 ### The honest limits
 - **Can be removed:** data brokers, people-search sites, Google search results — they must answer a legal erasure request.
@@ -41,7 +43,8 @@ Environment: `PORT` (default 8000), `HOST` (default 0.0.0.0).
 
 - **v1:** breach + password scan, exposure score, Removal Centre (40 brokers), letter generator, Google tools.
 - **v2 (this):** Agent Mode in the same GUI — playbooks, personal removal plan, live form probe with blocker detection, guarded submission, optional free-lane field classification. One LeakGuard, one repo.
-- **v2.1:** headless-browser (Playwright) runner for JavaScript/bot-walled opt-out pages; email-confirmation tracking.
+- **v2.1 (this):** headless-browser (Playwright) probe layer for JavaScript/bot-walled opt-out pages, fixed ThatsThem + Acxiom opt-out URLs, local proxy relay for locked-down networks.
+- **v2.2:** browser form *filling* (not just probing) for rendered forms; email-confirmation tracking.
 - **v3:** 150+ brokers; recurring monitoring — re-scan monthly, alert when an email appears in a *new* breach or a broker re-lists you.
 
 ## License

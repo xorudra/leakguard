@@ -1,1 +1,212 @@
-{"Acxiom":{"automation":"http_form","flow":["Open the Acxiom opt-out page","Choose which categories to opt out of (all of them)","Enter name, email and address and submit","Confirm via email if prompted"],"needs":[],"notes":"Marketing-data broker — opt-out stops sale/sharing of your marketing profile."},"BeenVerified":{"automation":"http_form","flow":["Open the opt-out search page and find your record (name + state)","Select the record and enter your email","Click the confirmation link BeenVerified emails you","Removal completes after email confirmation"],"needs":["email_confirm"],"notes":"Runs PeopleLooker's suppression too (same company)."},"Epsilon":{"automation":"http_form","flow":["Open the Epsilon data-subject request form","Request deletion + opt-out of sale","Submit with your name and email","Watch your inbox for their confirmation"],"needs":[],"notes":""},"FastPeopleSearch":{"automation":"http_form","flow":["Open the removal page","Find your record and open it","Confirm removal on the record page","Re-check after a few hours"],"needs":["captcha_possible"],"notes":"Sister site of TruePeopleSearch — same flow."},"Instant Checkmate":{"automation":"http_form","flow":["Use the PeopleConnect suppression tool (linked from the opt-out page)","Verify your email, find your record, suppress it","Covers Instant Checkmate + TruthFinder + Intelius in one run"],"needs":["email_confirm"],"notes":"See Intelius playbook — same suppression backend."},"Intelius":{"automation":"http_form","flow":["Open the Intelius privacy / opt-out page (PeopleConnect suppression)","Enter the email used on your record and verify it","Search and select your record in the suppression tool","Confirm suppression"],"needs":["email_confirm"],"notes":"Suppression is run by PeopleConnect and covers Intelius, TruthFinder, Instant Checkmate and US Search together."},"LexisNexis Risk Solutions":{"automation":"http_form","flow":["Open the LexisNexis consumer portal","Choose opt-out / freeze where eligible","Submit the form; some requests ask for ID to verify identity","Save the confirmation reference in the tracker notes"],"needs":["id_possible"],"notes":"Risk/insurance data — some records are legally retained; opt-out limits marketing use."},"MyLife":{"automation":"email_request","flow":["Generate the erasure letter in LeakGuard (DPDP/GDPR/CCPA)","Send it to privacy@mylife.com with your profile URL","If they refuse, call their privacy line and reference the letter date","Mark Rejected in the tracker if refused — re-file in 30 days"],"needs":["phone_or_email"],"notes":"MyLife often resists web-form removal; a dated written request is the reliable path."},"Nuwber":{"automation":"http_form","flow":["Find your Nuwber profile and copy its URL","Open the removal page and paste the URL + your email","Click the confirmation link in their email","Re-check the profile"],"needs":["listing_url","email_confirm"],"notes":""},"PeopleFinders":{"automation":"http_form","flow":["Open the opt-out page and search your name","Select your record","Enter your email and submit","Confirm from the email if one arrives"],"needs":["email_confirm"],"notes":""},"Radaris":{"automation":"browser_required","flow":["Find your Radaris profile and copy the URL","Open the removal page, paste the URL","Complete their verification prompts","Re-check the profile after 3-5 days"],"needs":["listing_url","account_possible"],"notes":"Radaris is known for slow / resistant removals — the tracker will flag it for re-filing after 7 days."},"Spokeo":{"automation":"http_form","flow":["Search your name on spokeo.com and copy your listing URL","Open the opt-out page and paste the listing URL + your email","Open the confirmation email from Spokeo and click the removal link","Listing usually disappears within 24-48h — re-check and mark Removed"],"needs":["listing_url","email_confirm"],"notes":"Email confirmation is mandatory; the script can pre-fill but cannot click your mailbox link."},"ThatsThem":{"automation":"http_form","flow":["Open the opt-out page","Enter your name, email, phone and address exactly as listed","Submit the opt-out","Re-check your listing URL after 24h"],"needs":["captcha_possible"],"notes":""},"TruePeopleSearch":{"automation":"http_form","flow":["Open the removal page","Find your record and open it","Tick the confirmation boxes and submit removal","Re-check the record URL — it should return 'not found'"],"needs":["captcha_possible"],"notes":"Sometimes shows a checkbox CAPTCHA; if the probe reports CAPTCHA, finish in a browser."},"TruthFinder":{"automation":"http_form","flow":["Use the PeopleConnect suppression tool (linked from the opt-out page)","Verify your email, find your record, suppress it","Covers TruthFinder + Intelius + Instant Checkmate in one run"],"needs":["email_confirm"],"notes":"See Intelius playbook — same suppression backend."},"Whitepages":{"automation":"browser_required","flow":["Find your listing on whitepages.com and copy its URL","Open the suppression page and paste the URL","Verify ownership with the automated phone call code","Submit — premium listings may need a Whitepages account"],"needs":["listing_url","phone_verify"],"notes":"Phone-call verification means a human finishes this one; the agent prepares everything before that step."}}
+{
+  "Acxiom": {
+    "automation": "browser_required",
+    "needs": [
+      "captcha",
+      "email_confirm"
+    ],
+    "flow": [
+      "Open the official Acxiom opt-out form (isapps.acxiom.com)",
+      "Select the segments to suppress: mailing address, phone, email",
+      "Enter your name, emails, phones and addresses",
+      "Complete the CAPTCHA and submit",
+      "Click the confirmation link Acxiom emails you and submit again to finalize"
+    ],
+    "notes": "Form verified live (HTTP 200) Oct 2026. CAPTCHA + email confirmation are mandatory, so the agent prepares and a human finishes those two steps. India contact per Acxiom: Datenschutz@acxiom.com."
+  },
+  "BeenVerified": {
+    "automation": "http_form",
+    "flow": [
+      "Open the opt-out search page and find your record (name + state)",
+      "Select the record and enter your email",
+      "Click the confirmation link BeenVerified emails you",
+      "Removal completes after email confirmation"
+    ],
+    "needs": [
+      "email_confirm"
+    ],
+    "notes": "Runs PeopleLooker's suppression too (same company)."
+  },
+  "Epsilon": {
+    "automation": "http_form",
+    "flow": [
+      "Open the Epsilon data-subject request form",
+      "Request deletion + opt-out of sale",
+      "Submit with your name and email",
+      "Watch your inbox for their confirmation"
+    ],
+    "needs": [],
+    "notes": ""
+  },
+  "FastPeopleSearch": {
+    "automation": "http_form",
+    "flow": [
+      "Open the removal page",
+      "Find your record and open it",
+      "Confirm removal on the record page",
+      "Re-check after a few hours"
+    ],
+    "needs": [
+      "captcha_possible"
+    ],
+    "notes": "Sister site of TruePeopleSearch — same flow."
+  },
+  "Instant Checkmate": {
+    "automation": "http_form",
+    "flow": [
+      "Use the PeopleConnect suppression tool (linked from the opt-out page)",
+      "Verify your email, find your record, suppress it",
+      "Covers Instant Checkmate + TruthFinder + Intelius in one run"
+    ],
+    "needs": [
+      "email_confirm"
+    ],
+    "notes": "See Intelius playbook — same suppression backend."
+  },
+  "Intelius": {
+    "automation": "http_form",
+    "flow": [
+      "Open the Intelius privacy / opt-out page (PeopleConnect suppression)",
+      "Enter the email used on your record and verify it",
+      "Search and select your record in the suppression tool",
+      "Confirm suppression"
+    ],
+    "needs": [
+      "email_confirm"
+    ],
+    "notes": "Suppression is run by PeopleConnect and covers Intelius, TruthFinder, Instant Checkmate and US Search together."
+  },
+  "LexisNexis Risk Solutions": {
+    "automation": "http_form",
+    "flow": [
+      "Open the LexisNexis consumer portal",
+      "Choose opt-out / freeze where eligible",
+      "Submit the form; some requests ask for ID to verify identity",
+      "Save the confirmation reference in the tracker notes"
+    ],
+    "needs": [
+      "id_possible"
+    ],
+    "notes": "Risk/insurance data — some records are legally retained; opt-out limits marketing use."
+  },
+  "MyLife": {
+    "automation": "email_request",
+    "flow": [
+      "Generate the erasure letter in LeakGuard (DPDP/GDPR/CCPA)",
+      "Send it to privacy@mylife.com with your profile URL",
+      "If they refuse, call their privacy line and reference the letter date",
+      "Mark Rejected in the tracker if refused — re-file in 30 days"
+    ],
+    "needs": [
+      "phone_or_email"
+    ],
+    "notes": "MyLife often resists web-form removal; a dated written request is the reliable path."
+  },
+  "Nuwber": {
+    "automation": "http_form",
+    "flow": [
+      "Find your Nuwber profile and copy its URL",
+      "Open the removal page and paste the URL + your email",
+      "Click the confirmation link in their email",
+      "Re-check the profile"
+    ],
+    "needs": [
+      "listing_url",
+      "email_confirm"
+    ],
+    "notes": ""
+  },
+  "PeopleFinders": {
+    "automation": "http_form",
+    "flow": [
+      "Open the opt-out page and search your name",
+      "Select your record",
+      "Enter your email and submit",
+      "Confirm from the email if one arrives"
+    ],
+    "needs": [
+      "email_confirm"
+    ],
+    "notes": ""
+  },
+  "Radaris": {
+    "automation": "browser_required",
+    "flow": [
+      "Find your Radaris profile and copy the URL",
+      "Open the removal page, paste the URL",
+      "Complete their verification prompts",
+      "Re-check the profile after 3-5 days"
+    ],
+    "needs": [
+      "listing_url",
+      "account_possible"
+    ],
+    "notes": "Radaris is known for slow / resistant removals — the tracker will flag it for re-filing after 7 days."
+  },
+  "Spokeo": {
+    "automation": "http_form",
+    "flow": [
+      "Search your name on spokeo.com and copy your listing URL",
+      "Open the opt-out page and paste the listing URL + your email",
+      "Open the confirmation email from Spokeo and click the removal link",
+      "Listing usually disappears within 24-48h — re-check and mark Removed"
+    ],
+    "needs": [
+      "listing_url",
+      "email_confirm"
+    ],
+    "notes": "Email confirmation is mandatory; the script can pre-fill but cannot click your mailbox link."
+  },
+  "ThatsThem": {
+    "automation": "http_form",
+    "flow": [
+      "Open the opt-out page",
+      "Enter your name, email, phone and address exactly as listed",
+      "Submit the opt-out",
+      "Re-check your listing URL after 24h"
+    ],
+    "needs": [
+      "captcha_possible"
+    ],
+    "notes": "Opt-out URL fixed Oct 2026: /optout (the old /opt-out returns 404)."
+  },
+  "TruePeopleSearch": {
+    "automation": "http_form",
+    "flow": [
+      "Open the removal page",
+      "Find your record and open it",
+      "Tick the confirmation boxes and submit removal",
+      "Re-check the record URL — it should return 'not found'"
+    ],
+    "needs": [
+      "captcha_possible"
+    ],
+    "notes": "Sometimes shows a checkbox CAPTCHA; if the probe reports CAPTCHA, finish in a browser."
+  },
+  "TruthFinder": {
+    "automation": "http_form",
+    "flow": [
+      "Use the PeopleConnect suppression tool (linked from the opt-out page)",
+      "Verify your email, find your record, suppress it",
+      "Covers TruthFinder + Intelius + Instant Checkmate in one run"
+    ],
+    "needs": [
+      "email_confirm"
+    ],
+    "notes": "See Intelius playbook — same suppression backend."
+  },
+  "Whitepages": {
+    "automation": "browser_required",
+    "flow": [
+      "Find your listing on whitepages.com and copy its URL",
+      "Open the suppression page and paste the URL",
+      "Verify ownership with the automated phone call code",
+      "Submit — premium listings may need a Whitepages account"
+    ],
+    "needs": [
+      "listing_url",
+      "phone_verify"
+    ],
+    "notes": "Phone-call verification means a human finishes this one; the agent prepares everything before that step."
+  }
+}

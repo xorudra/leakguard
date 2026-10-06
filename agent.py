@@ -206,6 +206,70 @@ def probe_broker(broker_name, profile=None):
     return result
 
 
+def browser_probe(url, timeout=70):
+    """Run browser_probe.py in a subprocess (a hung page can never hang the
+    server). Returns its dict, or None if the browser layer is unavailable."""
+    import subprocess
+    script = BASE / "browser_probe.py"
+    if not script.exists() or os.environ.get("LEAKGUARD_NO_BROWSER") == "1":
+        return None
+    try:
+        out = subprocess.run(
+            ["python3", str(script), url],
+            capture_output=True, text=True, timeout=timeout,
+            env={**os.environ})
+        data = json.loads(out.stdout.strip().splitlines()[-1])
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def probe_with_browser_fallback(broker_name, profile=None):
+    """HTTP probe first; if the page blocks scripts / needs JavaScript /
+    can't be filled, fall back to the real-browser probe and merge."""
+    result = probe_broker(broker_name, profile)
+    if result.get("error"):
+        return result
+    b = browser_probe(result["url"])
+    if not b:
+        result["via"] = "http"
+        result["browser"] = {"available": False}
+        return result
+    result["browser"] = {"available": True, "reachable": b.get("reachable"),
+                         "status": b.get("status"), "title": b.get("title"),
+                         "challenge": b.get("challenge")}
+    result["via"] = "http+browser"
+    if b.get("reachable"):
+        result["reachable"] = True
+        result["status"] = b.get("status") or result.get("status")
+        bforms = []
+        for form in b.get("forms", []):
+            payload, unmapped = match_fields(form.get("fields", []), profile or {})
+            bforms.append({
+                "action": form.get("action") or result["url"],
+                "method": form.get("method", "GET"),
+                "fields": form.get("fields", []),
+                "unmapped_fields": unmapped,
+            })
+            if payload and not result.get("payload_preview"):
+                result["payload_preview"] = payload
+        if bforms:
+            result["forms"] = bforms
+        # Browser blockers are the ground truth when the page rendered;
+        # keep them, drop the now-misleading HTTP-only ones.
+        http_blockers = result.get("blockers", [])
+        rendered = bool(b.get("forms")) or b.get("challenge")
+        if rendered:
+            result["blockers"] = b.get("blockers", [])
+        else:
+            result["blockers"] = list(dict.fromkeys(http_blockers + b.get("blockers", [])))
+        result["fillable"] = bool(result.get("payload_preview")) and not b.get("challenge") \
+            and not any("CAPTCHA" in x for x in result.get("blockers", []))
+    else:
+        result["blockers"] = list(dict.fromkeys(result.get("blockers", []) + b.get("blockers", [])))
+    return result
+
+
 def submit_form(form_action, method, payload, timeout=15):
     """Submit a prepared payload. Only called behind the GUI's explicit
     per-broker 'Submit' action — never automatically."""

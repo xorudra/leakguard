@@ -70,9 +70,9 @@
     "type": "People search"
   },
   {
-    "method": "Web form — submit your listing URL",
+    "method": "Web form — enter your details exactly as listed, submit opt-out",
     "name": "ThatsThem",
-    "optout_url": "https://thatsthem.com/opt-out",
+    "optout_url": "https://thatsthem.com/optout",
     "region": "US",
     "type": "People search"
   },
@@ -196,9 +196,9 @@
     "type": "People search"
   },
   {
-    "method": "Opt-out portal — AboutTheData / privacy request form",
+    "method": "Official opt-out form — choose segments (mail/phone/email), complete CAPTCHA, confirm via emailed link",
     "name": "Acxiom",
-    "optout_url": "https://www.acxiom.com/privacy/opt-out",
+    "optout_url": "https://isapps.acxiom.com/optout/optout.aspx",
     "region": "Global",
     "type": "Data broker (marketing)"
   },

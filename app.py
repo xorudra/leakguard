@@ -34,6 +34,8 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import agent as agent_engine
+
 BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
 BROKERS_FILE = BASE / "brokers.json"
@@ -197,19 +199,87 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "service": "leakguard"})
         return self._json(404, {"error": "Not found"})
 
-    def do_POST(self):
-        parsed = urllib.parse.urlparse(self.path)
-        if parsed.path != "/api/scan":
-            return self._json(404, {"error": "Not found"})
+    def _read_json_body(self):
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = 0
         if length <= 0 or length > MAX_BODY:
-            return self._json(400, {"error": "Bad request size"})
+            return None
         try:
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            return json.loads(self.rfile.read(length).decode("utf-8"))
         except Exception:
+            return None
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/agent/plan":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._json(400, {"error": "Invalid JSON"})
+            profile = {
+                "full_name": str(payload.get("full_name", ""))[:120],
+                "email": str(payload.get("email", ""))[:200],
+                "phone": str(payload.get("phone", ""))[:40],
+                "city": str(payload.get("city", ""))[:120],
+            }
+            if not profile["full_name"] and not profile["email"]:
+                return self._json(400, {"error": "Enter at least a name or an email"})
+            return self._json(200, {
+                "profile": profile,
+                "plan": agent_engine.build_plan(profile),
+                "free_lane": agent_engine.free_lane_status(),
+                "engine": "zero-token scripts (playbooks + live form probe); free-lane fallback only if configured",
+            })
+        if parsed.path == "/api/agent/probe":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._json(400, {"error": "Invalid JSON"})
+            broker = str(payload.get("broker", ""))[:80]
+            profile = payload.get("profile") or {}
+            if not isinstance(profile, dict):
+                profile = {}
+            profile = {k: str(v)[:200] for k, v in profile.items()
+                       if k in ("full_name", "email", "phone", "city", "listing_url")}
+            result = agent_engine.probe_broker(broker, profile)
+            # Free-lane fallback: only when script matching found a form it
+            # could not fill, and the user's own free gateway is configured.
+            if result.get("forms") and not result.get("fillable"):
+                status = agent_engine.free_lane_status()
+                if status.get("configured") and status.get("reachable"):
+                    fields = result["forms"][0].get("fields", [])
+                    mapping = agent_engine.free_lane_classify(fields, list(agent_engine.PROFILE_FIELDS.keys()))
+                    if mapping:
+                        result["free_lane_mapping"] = mapping
+                        result["free_lane_used"] = True
+            return self._json(200, result)
+        if parsed.path == "/api/agent/submit":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._json(400, {"error": "Invalid JSON"})
+            if payload.get("confirm") is not True:
+                return self._json(400, {"error": "Submission needs explicit confirmation"})
+            broker = str(payload.get("broker", ""))[:80]
+            action = str(payload.get("form_action", ""))[:1000]
+            method = str(payload.get("method", "POST")).upper()
+            data = payload.get("payload") or {}
+            # SSRF guard: the form action must live on the broker's own host.
+            brokers = {b["name"]: b for b in agent_engine.load_brokers()}
+            known = brokers.get(broker)
+            host = urllib.parse.urlparse(action).netloc.lower()
+            allowed = set()
+            for b in brokers.values():
+                allowed.add(urllib.parse.urlparse(b["optout_url"]).netloc.lower())
+            if not known or host not in allowed:
+                return self._json(400, {"error": "Form action is not on a known broker host"})
+            if method not in ("GET", "POST") or not isinstance(data, dict) or len(data) > 30:
+                return self._json(400, {"error": "Bad submission"})
+            clean = {str(k)[:80]: str(v)[:500] for k, v in data.items()}
+            return self._json(200, agent_engine.submit_form(action, method, clean))
+        if parsed.path != "/api/scan":
+            return self._json(404, {"error": "Not found"})
+        payload = self._read_json_body()
+        if payload is None:
             return self._json(400, {"error": "Invalid JSON"})
         email = str(payload.get("email", "")).strip().lower()
         password = payload.get("password") or ""

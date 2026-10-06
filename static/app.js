@@ -97,6 +97,7 @@ function renderScan(d) {
     ol.appendChild(li);
   });
   if ($("lgEmail") && !$("lgEmail").value) $("lgEmail").value = d.email;
+  if ($("agEmail") && !$("agEmail").value) $("agEmail").value = d.email;
 }
 
 /* ---------------- Letter generator ---------------- */
@@ -246,6 +247,128 @@ async function loadBrokers() {
   }
 }
 loadBrokers();
+
+/* ---------------- Agent Mode (zero-token) ---------------- */
+function agentProfile() {
+  return {
+    full_name: $("agName").value.trim(),
+    email: $("agEmail").value.trim(),
+    phone: $("agPhone").value.trim(),
+    city: $("agCity").value.trim(),
+  };
+}
+$("planBtn").addEventListener("click", async () => {
+  const profile = agentProfile();
+  const btn = $("planBtn");
+  btn.disabled = true;
+  btn.textContent = "Building plan…";
+  try {
+    const resp = await fetch("/api/agent/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profile),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "Plan failed");
+    $("laneStatus").textContent = data.free_lane && data.free_lane.configured
+      ? (data.free_lane.reachable ? "Free lane: connected (your gateway)" : "Free lane: configured but not reachable — script mode continues")
+      : "Free lane: not configured — pure script mode (0 tokens)";
+    const wrap = $("planList");
+    wrap.innerHTML = "";
+    data.plan.forEach((item) => {
+      const div = document.createElement("div");
+      div.className = "broker";
+      const head = document.createElement("div");
+      head.className = "bhead";
+      const nm = document.createElement("span");
+      nm.className = "bname";
+      nm.textContent = item.broker;
+      const meta = document.createElement("span");
+      meta.className = "bmeta";
+      meta.textContent = item.automation.replace("_", " ") + (item.needs.length ? " · needs: " + item.needs.join(", ").replace(/_/g, " ") : "");
+      head.appendChild(nm); head.appendChild(meta);
+      const flow = document.createElement("p");
+      flow.className = "hint";
+      flow.textContent = item.flow.join(" → ");
+      const btns = document.createElement("div");
+      btns.className = "bbtns";
+      const probe = document.createElement("button");
+      probe.type = "button";
+      probe.textContent = "Probe live form";
+      probe.addEventListener("click", () => probeBroker(item.broker, probe));
+      const open = document.createElement("a");
+      open.className = "btnLink";
+      open.href = item.optout_url; open.target = "_blank"; open.rel = "noopener";
+      open.textContent = "Open opt-out →";
+      const search = document.createElement("a");
+      search.className = "btnLink";
+      search.href = item.search_url; search.target = "_blank"; search.rel = "noopener";
+      search.textContent = "Find my listing";
+      btns.appendChild(probe); btns.appendChild(open); btns.appendChild(search);
+      div.appendChild(head); div.appendChild(flow); div.appendChild(btns);
+      wrap.appendChild(div);
+    });
+    $("planBox").hidden = false;
+    if (profile.email && !$("lgEmail").value) $("lgEmail").value = profile.email;
+    if (profile.full_name && !$("lgName").value) $("lgName").value = profile.full_name;
+  } catch (err) {
+    $("laneStatus").textContent = err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Build my removal plan";
+  }
+});
+
+async function probeBroker(broker, btn) {
+  btn.disabled = true;
+  btn.textContent = "Probing…";
+  try {
+    const resp = await fetch("/api/agent/probe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ broker, profile: agentProfile() }),
+    });
+    const d = await resp.json();
+    if (!resp.ok) throw new Error(d.error || "Probe failed");
+    $("probeBox").hidden = false;
+    $("probeTitle").textContent = "Probe: " + d.broker;
+    const out = $("probeOut");
+    out.innerHTML = "";
+    const lines = [];
+    lines.push(d.reachable ? "✅ Page reachable (HTTP " + d.status + ")" : "⚠️ Not directly reachable (HTTP " + (d.status || "—") + ")");
+    if (d.forms && d.forms.length) {
+      d.forms.forEach((f, i) => {
+        lines.push("Form " + (i + 1) + ": " + f.method + " → " + f.action);
+        lines.push("Fields: " + (f.fields.map((x) => x.name || x.type).join(", ") || "none readable"));
+        if (f.unmapped_fields && f.unmapped_fields.length) lines.push("Unmapped fields: " + f.unmapped_fields.join(", "));
+      });
+    }
+    if (d.payload_preview && Object.keys(d.payload_preview).length) {
+      lines.push("Agent can pre-fill: " + Object.entries(d.payload_preview).map(([k, v]) => k + " = " + v).join(" · "));
+      lines.push(d.fillable ? "✅ This form is script-fillable." : "Form found, but a blocker stops auto-fill.");
+    }
+    (d.blockers || []).forEach((b) => lines.push("🚧 " + b));
+    if (d.free_lane_used) lines.push("Free lane (your gateway) classified the unknown fields — 0 Claude tokens used.");
+    lines.forEach((t) => {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.style.color = "#c6cdea";
+      p.textContent = t;
+      out.appendChild(p);
+    });
+    $("probeBox").scrollIntoView({ behavior: "smooth", block: "center" });
+  } catch (err) {
+    $("probeBox").hidden = false;
+    $("probeTitle").textContent = "Probe: " + broker;
+    $("probeOut").innerHTML = "";
+    const p = document.createElement("p");
+    p.textContent = err.message;
+    $("probeOut").appendChild(p);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Probe live form";
+  }
+}
 
 /* ---------------- Google searches ---------------- */
 $("gSearchBtn").addEventListener("click", () => {

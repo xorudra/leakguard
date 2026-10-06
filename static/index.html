@@ -11,6 +11,7 @@
   <div class="brand">🛡️ LeakGuard</div>
   <nav>
     <a href="#scan">Scan</a>
+    <a href="#agent">Agent Mode</a>
     <a href="#removal">Removal Centre</a>
     <a href="#google">Google</a>
     <a href="#honest">Honest limits</a>
@@ -61,8 +62,34 @@
     </div>
   </section>
 
+  <section id="agent" class="card">
+    <h2>2 — Agent Mode (zero-token, automatic)</h2>
+    <p>The agent does the boring work with <strong>plain scripts — no AI, no tokens</strong>:
+    it builds your removal plan from per-broker playbooks, then probes each broker's live opt-out page,
+    reads its real form, and pre-fills your details. If a page hides behind a CAPTCHA, a login or a
+    JavaScript wall, the agent says so honestly and hands that one back to you with everything prepared.
+    If a form can't be understood, it may ask <em>your own</em> free gateway (FreeLLMAPI) — never Claude.</p>
+    <label>Your full name <input type="text" id="agName" placeholder="Rudra"></label>
+    <label>Your email <input type="email" id="agEmail" placeholder="you@example.com"></label>
+    <label>Phone (optional) <input type="text" id="agPhone" placeholder="+91 …"></label>
+    <label>City / country (optional) <input type="text" id="agCity" placeholder="City, India"></label>
+    <div class="rowBtns">
+      <button type="button" id="planBtn">Build my removal plan</button>
+      <span id="laneStatus" class="hint"></span>
+    </div>
+    <div id="planBox" hidden>
+      <h3>Your removal plan</h3>
+      <p class="hint">Probe = the agent visits that broker's opt-out page right now and reports the real form and blockers. Nothing is submitted without your explicit tap.</p>
+      <div id="planList"></div>
+    </div>
+    <div id="probeBox" hidden>
+      <h3 id="probeTitle">Probe result</h3>
+      <div id="probeOut"></div>
+    </div>
+  </section>
+
   <section id="removal" class="card">
-    <h2>2 — Removal Centre (data brokers &amp; people-search sites)</h2>
+    <h2>3 — Removal Centre (manual list &amp; letter)</h2>
     <p>These companies sell your data. Each one legally has to remove it when you ask —
     under India's <strong>DPDP Act §12</strong>, GDPR Art. 17, or CCPA. Work through the list:
     open the opt-out, use the letter generator if they ask for a written request, and mark your progress.
@@ -92,7 +119,7 @@
   </section>
 
   <section id="google" class="card">
-    <h2>3 — Google exposure</h2>
+    <h2>4 — Google exposure</h2>
     <p>Check what a stranger finds when they Google you, and get it removed from search:</p>
     <label>Your full name <input type="text" id="gName" placeholder="Your name"></label>
     <label>Phone (optional) <input type="text" id="gPhone" placeholder="+91 …"></label>
@@ -103,7 +130,7 @@
     <div id="gLinks" class="tags"></div>
     <p class="hint">“Results about you” is Google's own tool: it finds search results showing your address,
     phone or email and lets you request their removal from Google Search. Note: that hides the result on Google —
-    removing it at the broker (step 2) deletes it at the source.</p>
+    removing it at the broker (Agent Mode / Removal Centre) deletes it at the source.</p>
   </section>
 
   <section id="honest" class="card warn">

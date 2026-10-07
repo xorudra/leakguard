@@ -417,7 +417,10 @@ class TestGraphDb(ServerMixin, unittest.TestCase):
         # Fresh user: an honestly empty graph.
         status, _h, body = self.graph(cookie)
         self.assertEqual(status, 200, body)
-        self.assertEqual(body, {"nodes": [], "edges": []})
+        self.assertEqual(body, {
+            "nodes": [], "edges": [],
+            "propagation": {"entries": [], "rollups": []},
+        })
 
         # Save the breached fixture address + scanning consent, scan.
         status, _h, ident = self.request_json(
@@ -516,6 +519,26 @@ class TestGraphDb(ServerMixin, unittest.TestCase):
                           and n["label"] == "Spokeo"]
         self.assertEqual(len(spokeo_sources), 1)
 
+        # Propagation (Phases 104/152): the Spokeo source lists the
+        # one matcher-accepted broker, with the queued case shown
+        # as in_progress (and its exact ledger status alongside).
+        # The mock breach sources match no broker and stay empty.
+        prop = g["propagation"]
+        by_source = {e["source"]["name"]: e for e in prop["entries"]}
+        self.assertEqual(by_source["Spokeo"]["brokers"], [{
+            "slug": "spokeo", "name": "Spokeo",
+            "status": "in_progress", "case_status": "queued",
+        }])
+        self.assertEqual(by_source["MockBreach2024"]["brokers"], [])
+        self.assertEqual(by_source["MockComboList"]["brokers"], [])
+        self.assertEqual(len(prop["rollups"]), 1)
+        self.assertEqual(prop["rollups"][0]["identifier"]["label"],
+                         "b•••@example.com")
+        self.assertEqual(prop["rollups"][0]["counts"], {
+            "verified_removed": 0, "submitted": 0, "in_progress": 1,
+            "needs_human": 0, "blocked": 0, "not_started": 0,
+        })
+
         # Bearer access (the extension's path): same graph, no cookie.
         status, _h, tok = self.request_json(
             "POST", "/api/tokens", body={"name": "extension"},
@@ -531,4 +554,7 @@ class TestGraphDb(ServerMixin, unittest.TestCase):
         cookie_b, _uid_b = self.register()
         status, _h, gb = self.graph(cookie_b)
         self.assertEqual(status, 200, gb)
-        self.assertEqual(gb, {"nodes": [], "edges": []})
+        self.assertEqual(gb, {
+            "nodes": [], "edges": [],
+            "propagation": {"entries": [], "rollups": []},
+        })

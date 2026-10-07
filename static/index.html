@@ -226,6 +226,22 @@
       broker (or sits on the broker's own site). Details are shown masked, exactly as everywhere
       else here.</p>
       <div id="graphWrap"></div>
+      <div id="propagationWrap"></div>
+
+      <h3>Privacy policy checker</h3>
+      <p class="hint">Paste another service's privacy policy — or give the address of its
+      policy page — and LeakGuard runs a fixed keyword checklist over it: selling or sharing,
+      advertising and tracking, retention, your rights, contact details, security practices,
+      children's information, policy changes and sharing with other companies. It is an
+      automated keyword checklist, not a legal verdict: a phrase being present does not prove
+      a company behaves that way, and a phrase being absent does not prove the opposite.</p>
+      <label>Policy page address (optional) <input type="url" id="policyUrl" placeholder="https://example.com/privacy" autocomplete="off"></label>
+      <label>Or paste the policy text <textarea id="policyText" rows="8" maxlength="65536" placeholder="Paste the policy text here"></textarea></label>
+      <div class="rowBtns">
+        <button type="button" id="policyCheckBtn" class="btnGhost">Check this policy</button>
+        <span id="policyStatus" class="hint"></span>
+      </div>
+      <div id="policyResults"></div>
 
       <h3>API access</h3>
       <p class="hint">For your own scripts: an API token lets a program read your LeakGuard data
@@ -589,6 +605,17 @@
     <p>There is no advertising, no analytics tracking, and no selling or sharing of data
     with anyone beyond the processors above.</p>
 
+    <h3>Where data lives</h3>
+    <ul>
+      <li><strong>The app</strong> runs on Render in <strong>Oregon, United States</strong>.</li>
+      <li><strong>The database</strong> is hosted by Neon in <strong>AWS ap-southeast-1
+      (Singapore)</strong>. It stores the encrypted and hashed forms described above.</li>
+      <li><strong>Email and scan sources</strong> receive only the specific data each request
+      needs, as described in “Who else processes data” and in the full
+      <a href="/privacy">privacy policy</a>. LeakGuard does not choose a different region
+      per user; these are fixed locations for the current free services.</li>
+    </ul>
+
     <h3>How long things are kept</h3>
     <ul>
       <li>Sessions: deleted 7 days after they expire or are revoked.</li>
@@ -622,15 +649,154 @@
       LeakGuard stores only the passkey's public half) are available in the Privacy Center.</li>
     </ul>
 
+    <h3>Responsible disclosure</h3>
+    <p>Security research in scope covers this live website and the public LeakGuard
+    repository. Please act in good faith: test only with accounts and data you own, do not
+    access or change another person's data, do not disrupt the service or run high-volume
+    automated attacks, and give us a reasonable chance to fix a problem before publishing
+    details. If you follow these rules, LeakGuard treats your research as authorized for
+    the purpose of this disclosure policy and will not ask a platform or provider to act
+    against you for the report itself.</p>
+    <p>LeakGuard does <strong>not</strong> offer a paid bug bounty or other rewards. Reports
+    are still welcome and credited only if you ask to be named.</p>
+
     <h3>Security contact</h3>
     <p>Found a security problem? Email the project security contact:
     <strong>forapikeyonly2008@gmail.com</strong>. Our machine-readable contact file is at
     <a href="/.well-known/security.txt">/.well-known/security.txt</a>.</p>
   </section>
 
+  <section id="privacyPolicy" class="card" hidden>
+    <h2>Privacy policy</h2>
+    <p><strong>Effective date: 7 October 2026.</strong> This policy describes what the
+    LeakGuard code running on this site actually does. It claims no certification or
+    formal compliance status.</p>
+
+    <h3>Information stored for an account</h3>
+    <ul>
+      <li><strong>Account email:</strong> stored as a keyed HMAC lookup value, an
+      AES-256-GCM encrypted value, and a masked display form — not in plain text.</li>
+      <li><strong>Saved details:</strong> emails, phone numbers, names, addresses,
+      usernames and domains you save are stored the same way: encrypted, with an HMAC
+      lookup value and a masked display form.</li>
+      <li><strong>Passwords and sign-in:</strong> account passwords are stored only as
+      Argon2id hashes. Session, reset and API tokens are stored only as SHA-256 hashes.
+      Two-factor secrets are encrypted. For a passkey, only its public key is stored.</li>
+      <li><strong>Scan and removal records:</strong> findings record the provider, source,
+      exposed field names, confidence and an evidence hash — not the raw saved detail.
+      Removal cases record the broker, status and evidence. If a removal letter is
+      generated, it necessarily contains the details you supplied for that letter and is
+      shown only in your account.</li>
+      <li><strong>Settings, permissions and notifications:</strong> your consent history,
+      monitoring choices and in-app notifications are stored so those features work.</li>
+    </ul>
+
+    <h3>What is not stored in logs</h3>
+    <p>Passwords are never stored in plain text. Application and audit records are built
+    not to contain plaintext saved details, passwords, sign-in tokens or vault keys. The
+    audit trail uses actions, identifiers for records inside the system, and counts; it
+    contains no email or saved-detail values.</p>
+
+    <h3>Anonymous Quick Scan</h3>
+    <p>The Quick Scan needs no account and creates no server-side scan record. The email
+    is processed during that request and the result is returned to your browser; it is
+    not saved as an account scan. If you also check a password, only the first five
+    characters of its SHA-1 hash are sent to Have I Been Pwned and the match is made by
+    LeakGuard. Your browser keeps a small last-scan summary (the email, breach count,
+    score and date) in its own local storage on your device so it can show a change next
+    time; that summary is not a server-side LeakGuard record.</p>
+
+    <h3>Processors and scan sources</h3>
+    <table class="policyTable">
+      <thead><tr><th>Service</th><th>Role</th><th>Location / data involved</th></tr></thead>
+      <tbody>
+        <tr><td>Render</td><td>Application hosting</td><td>Oregon, United States; runs the LeakGuard service</td></tr>
+        <tr><td>Neon</td><td>Database</td><td>AWS ap-southeast-1, Singapore; stores the encrypted and hashed account data above</td></tr>
+        <tr><td>Brevo</td><td>Email delivery</td><td>Receives the recipient email address and message when LeakGuard sends a reset or notification email</td></tr>
+        <tr><td>XposedOrNot</td><td>Email breach source</td><td>Receives the email address being checked</td></tr>
+        <tr><td>Have I Been Pwned</td><td>Password exposure source</td><td>Receives only a five-character SHA-1 prefix, never the password</td></tr>
+        <tr><td>DuckDuckGo</td><td>Public-web discovery</td><td>Receives the public search query used for a scan</td></tr>
+        <tr><td>Cloudflare DoH and crt.sh</td><td>Domain information</td><td>Receive the domain being checked for public DNS and certificate records</td></tr>
+      </tbody>
+    </table>
+    <p>There is no advertising, analytics tracking, or sale of account data in LeakGuard.</p>
+
+    <h3>Retention, export and deletion</h3>
+    <ul>
+      <li>Saved details stay until you remove them or delete the account.</li>
+      <li>Sessions and password-reset tokens are purged seven days after expiry or revocation;
+      notifications are kept for 90 days.</li>
+      <li>Deleting an account signs you out and makes the account inaccessible. Its owned
+      data is hard-deleted after 30 days. A privacy-free audit record of actions and counts
+      may remain; it contains no email or saved-detail values.</li>
+      <li>In the Privacy Center you can download your data as JSON or CSV after entering
+      your password again. The export includes your account email and saved details in
+      full because they are yours; protect the file.</li>
+    </ul>
+
+    <h3>Contact</h3>
+    <p>For privacy questions or requests, use
+    <a href="https://github.com/xorudra/leakguard/issues" target="_blank" rel="noopener">GitHub Issues</a>.
+    Do not post passwords, tokens, keys, or a full data export in a public issue.</p>
+  </section>
+
+  <section id="terms" class="card" hidden>
+    <h2>Terms of use</h2>
+    <p><strong>Effective date: 7 October 2026.</strong></p>
+    <h3>Use LeakGuard only for data you may act on</h3>
+    <p>You may use LeakGuard only for your own personal data, or for another person's data
+    when that person has authorized you to act for them. Do not use it to investigate,
+    expose, harass or act on another person's information without authorization.</p>
+    <h3>Your account and devices</h3>
+    <p>Keep your password, authenticator, passkeys and devices secure. You are responsible
+    for actions taken through your signed-in account. Tell us through the support page if
+    you believe your account has been misused.</p>
+    <h3>No guarantee of removal</h3>
+    <p>LeakGuard can submit and track removal requests, prepare letters, and verify a
+    listing again. The broker or site holding a listing decides whether and when to act.
+    A submitted request is not a completed removal; LeakGuard uses “verified removed” only
+    after a later check supports it. Copies of breach data already spread to Telegram,
+    dark-web forums, torrents or private collections cannot be recalled by LeakGuard.</p>
+    <h3>Service availability</h3>
+    <p>LeakGuard is a free service running on free infrastructure. It is provided as-is,
+    may sleep when idle, may be unavailable, and may change. Scan sources are third-party
+    services and may be incomplete, delayed or unreachable. Do not rely on LeakGuard as
+    your only protection: use unique passwords and two-factor authentication on important
+    accounts.</p>
+    <h3>Acceptable use</h3>
+    <p>Do not bypass security controls, CAPTCHAs, login walls or rate limits; do not attack
+    the service; and do not use LeakGuard for unlawful activity. We may suspend activity
+    that threatens the service or another person's data.</p>
+  </section>
+
+  <section id="supportPage" class="card" hidden>
+    <h2>Support</h2>
+    <p>Support is provided on a best-effort basis. There is no promised response time.</p>
+    <h3>How to ask for help</h3>
+    <p>Open an issue in the public repository:
+    <a href="https://github.com/xorudra/leakguard/issues" target="_blank" rel="noopener">github.com/xorudra/leakguard/issues</a>.
+    Say which page or feature you used, what you expected, what happened, the approximate
+    time, and the type of device and browser. If an error message showed a request ID,
+    include that request ID — it contains no personal data.</p>
+    <h3>Never send these</h3>
+    <p>Never post a password, API token, session link, API key, vault key, one-time code,
+    or a full data export. Support does not need them and will never ask for them.</p>
+    <h3>Other kinds of help</h3>
+    <ul>
+      <li><strong>Security problem:</strong> do not open a public issue. Use the responsible
+      disclosure contact on the <a href="/trust">Trust &amp; security</a> page.</li>
+      <li><strong>Privacy question:</strong> read the <a href="/privacy">privacy policy</a>
+      first; it describes the stored data, processors, export and deletion.</li>
+      <li><strong>A finding is wrong:</strong> open the finding in your Privacy Center and
+      use its “Dispute or correct this” guidance; if it is not yours, use “Not me”.</li>
+      <li><strong>A removal is stuck:</strong> open the case in your removal queue — it
+      shows the current status and the next step LeakGuard can honestly give.</li>
+    </ul>
+  </section>
+
   <footer>
     <p>LeakGuard · Free to use · Scans use XposedOrNot and Have I Been Pwned · No scan data is stored on this server.</p>
-    <p><a href="/trust">Trust &amp; security</a></p>
+    <p><a href="/trust">Trust &amp; security</a> · <a href="/privacy">Privacy policy</a> · <a href="/terms">Terms of use</a> · <a href="/support">Support</a></p>
     <p><a href="https://leakguard-hh8e.onrender.com">Website</a> · <a href="https://github.com/xorudra/leakguard" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/xorudra/siteguard" target="_blank" rel="noopener">SiteGuard (sister project)</a></p>
   </footer>
 </main>

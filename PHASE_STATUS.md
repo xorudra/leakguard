@@ -97,8 +97,8 @@ NA = the surface the phase governs does not exist in this deployment.*
 | 79 — Disaster recovery | P0 | DONE | `docs/DISASTER_RECOVERY.md` (Batch C, 2026-10-07): what backs up where (Neon free-plan PITR — the only database backup, stated as such), RPO phrased as bounded by the console-visible free-plan PITR window, RTO as the drill observation (under an hour end-to-end), the 2026-10-07 drill evidence (19 tables / 40 brokers / 8 migrations / 15 users), and a step-by-step restore procedure (freeze writes → branch from PITR → verify counts → repoint `DATABASE_URL` + `MIGRATION_DATABASE_URL` → redeploy → verify → unfreeze) | |
 | 80 — Incident response | P2 | DONE | `docs/INCIDENT_RESPONSE.md` (Batch C, 2026-10-07): severity ladder SEV-1..4, first-30-minutes checklist, the Batch B kill switches with their variables and restore step, a rotation table (vault keys as a planned re-encryption maintenance — no automated tooling, stated plainly; DB role passwords; Brevo key; GitHub PAT; user passwords via the product flow only), the product's honesty rules applied to incident comms (never claim an unevidenced removal or breach scope), and a post-incident review step | |
 | 81 — Legal/privacy architecture | P3 | PARTIAL | `remediation/letters.py` cites DPDP §12 / GDPR Art. 17 / CCPA from per-law templates | Jurisdiction behavior is letter templates, not configurable regional rules (see Phase 168) |
-| 82 — Privacy policy | P3 | PARTIAL | `/trust` page states actual collection, providers, retention, deletion (in `static/index.html`) | No standalone formal privacy-policy document/route |
-| 83 — Terms | P3 | PARTIAL | Honest-limits copy in the product and on `/trust` matches actual capabilities | No standalone Terms document/route |
+| 82 — Privacy policy | P3 | DONE | Standalone `/privacy` route + section in `static/index.html` (Batch D2): stored data, vault/HMAC scheme, Quick Scan retention (no server record; browser-local summary disclosed), processor table, retention/export/deletion, effective 7 Oct 2026; no certification claims | |
+| 83 — Terms | P3 | DONE | Standalone `/terms` route + section in `static/index.html` (Batch D2): own/authorized data only, account responsibilities, no removal guarantee, breach copies cannot be recalled, as-is free infrastructure | |
 | 84 — Trust center | P3 | DONE | `/trust` route; every claim traceable to code; no certification claims (claim-reviewed in Stages S13/S15) | |
 | 85 — Reporting | P3 | PARTIAL | Privacy export, timeline, admin aggregates | No generated exposure/remediation report documents |
 | 86 — API | P1 | DONE | `accounts/api_tokens.py` — read-only Bearer tokens (migration `0008`) accepted on six read endpoints only; README API section; production (parent-verified) | |
@@ -117,9 +117,9 @@ NA = the surface the phase governs does not exist in this deployment.*
 | 99 — Notification emails | P1 | DONE | `monitoring/notify.py` plain-text templates carry minimal content (no identifier values); production reset-email round trip (parent-verified) | |
 | 100 — Browser extension foundation | P3 | DONE | `extension/` Manifest V3 — storage permission only, single host permission, token-only auth; deterministic zip via `tools/build_extension_zip.py` | |
 | 101 — Mobile foundation | P3 | DONE | `static/manifest.webmanifest` + `static/sw.js` (shell-only caching); token API reusable by future clients; no native app claimed | |
-| 102 — Privacy policy analyzer | P3 | NOT_DONE | No analyzer exists in the codebase | Not implemented (optional P3) |
+| 102 — Privacy policy analyzer | P3 | DONE | `POST /api/tools/policy-analyzer` + `dashboard/policy_analyzer.py` (Batch D2): signed-in deterministic keyword checklist (9 checks, found/unclear/not_found, ≤8-word matched phrases, length/readability stats, disclaimer); URL path SSRF-guarded, 5s timeout, 256KB cap; Privacy Center UI; `tests/test_batch_d2.py` | |
 | 103 — Exposure graph | P3 | DONE | `GET /api/graph` + `dashboard/graph.py` — masked identifier → source → broker nodes/edges from real rows only | |
-| 104 — Source propagation | P3 | NOT_DONE | Graph edges are `found_in` and `removal` only (`dashboard/graph.py`) | Propagation analysis absent; cross-source causality deliberately not claimed |
+| 104 — Source propagation | P3 | DONE | `GET /api/graph` gains a `propagation` section (`dashboard/graph.py`, Batch D2): per source, only brokers the S8 matcher accepts, with normalized + exact case status (no case → `not_started`); per-identifier rollups; UI list reads “Brokers LeakGuard can act on for this source” — spread/causality beyond the matcher deliberately not claimed | |
 | 105 — Business model | P3 | CUT | Owner deferred all paid/monetization until he explicitly says otherwise ("free for me, free for users until I say to make paid") | |
 | 106 — CI/CD | P2 | DONE | `.github/workflows/tests.yml` (Batch A): push + PR + weekly scheduled run — Python 3.12, `pip install -r requirements.txt pgserver`, `node --check static/app.js`, full unittest discovery; migrations auto-run at startup (`db/migrate.py`) | Deploys remain manual via the Render dashboard (deliberate — Render auto-deploy does not fire reliably); no dependency-scanning automation (see 107) |
 | 107 — Dependency security | P0 | DONE | `requirements.txt` — 3 runtime deps, version-ranged; stdlib-first minimizes surface; **`requirements.lock`** (Batch A): exact-version snapshot of requirements.txt + pgserver's resolution (12 packages), generated in a throwaway venv via `pip freeze`, with the regeneration procedure in its header and README's Supply chain note | The lock pins versions, not artifact hashes; automated vulnerability scanning is not wired (the weekly CI run surfaces resolution drift) |
@@ -141,10 +141,10 @@ NA = the surface the phase governs does not exist in this deployment.*
 | 123 — Admin system health | P3 | PARTIAL | `GET /api/admin/overview` — counts by status, provider health, db status (`accounts/admin.py`) | No queue-depth, latency, or worker-health metrics |
 | 124 — Provider cost monitoring | P2 | PARTIAL | HealthTracker counts successes/failures/latency per provider (`providers/base.py`); all providers are free | No quota/budget tracking or spend alerting (spend is ₹0 by owner rule) |
 | 125 — Source health dashboard | P2 | PARTIAL | `GET /api/providers/health`; admin overview carries case counts by status — plus per-broker source health (Batch C, 2026-10-07): `source_health` in `GET /api/admin/overview` (brokers by latest sweep state, changed/unreachable slug lists, last_checked_at, from `remediation/source_checks.py`), rendered in the Admin card | No per-broker *verification-success* or workflow-health dashboard yet — what exists is opt-out-page reachability/change, not per-broker removal-outcome rates |
-| 126 — Support | P3 | NOT_DONE | No support workflow or tooling in the repo | Support is the owner's mailbox only; nothing auditable in-product |
+| 126 — Support | P3 | DONE | Standalone `/support` route + section (Batch D2): GitHub Issues intake, what to include, never-send list (passwords/keys/exports), routes to disclosure/privacy/dispute guidance; “best effort”, no SLA promised | |
 | 127 — Security disclosure | P3 | DONE | `/.well-known/security.txt` served (Contact, Expires 2027-10-07, Canonical); security contact also on `/trust`; production (parent-verified) | |
-| 128 — Bug bounty foundation | P3 | NOT_DONE | `security.txt` covers disclosure only | No bug-bounty documentation prepared |
-| 129 — Data residency | P3 | NOT_DONE | Regions are fixed platform choices (Render Oregon; Neon ap-southeast-1 Singapore) | No data-residency configuration or design |
+| 128 — Bug bounty foundation | P3 | DONE | `/trust` gains a Responsible disclosure section (Batch D2): scope = live site + public repo, good-faith rules and safe-harbor wording, and the plain statement that no paid bounty or rewards are offered | |
+| 129 — Data residency | P3 | DONE | `/trust` “Where data lives” section + `/privacy` processor table (Batch D2): app on Render Oregon (US), database on Neon AWS ap-southeast-1 (Singapore), fixed locations honestly stated as not user-configurable | |
 | 130 — Subprocessors | P3 | DONE | `/trust` lists every processor: Render, Neon, Brevo, XposedOrNot, Have I Been Pwned, DuckDuckGo, Cloudflare DoH, crt.sh | |
 | 131 — Documentation | P2 | DONE | `README.md` (Operations, API, layout, Privacy, FAQ), `CURRENT_STATE.md`, `MIGRATION_PLAN.md`, `extension/README.md` | |
 | 132 — Migration documentation | P2 | DONE | `MIGRATION_PLAN.md` — stage map, owner rules, outcome section, gaps register | |
@@ -167,7 +167,7 @@ NA = the surface the phase governs does not exist in this deployment.*
 | 149 — Development reporting | P1 | PARTIAL | Per-stage completion reports, descriptive commits, `MIGRATION_PLAN.md` outcome section | Reports live in chat/git history, not per-cycle report files in the repo |
 | 150 — Final implementation rule | P1 | DONE | Completion was never declared from UI/docs alone — every stage is evidenced by code, tests, and production checks (this table cites them) | |
 | 151 — Exposure graph implementation | P3 | DONE | `GET /api/graph` owner/Bearer-scoped with masked labels only (`tests/test_extensions.py`) | |
-| 152 — Propagation analysis | P3 | NOT_DONE | Same state as Phase 104 | Propagation analysis absent; unsupported causality deliberately not claimed |
+| 152 — Propagation analysis | P3 | DONE | Same implementation as Phase 104 (Batch D2): the graph's `propagation` entries + per-identifier status rollups, computed only from latest-scan findings, the broker registry and the case ledger | |
 | 153 — Removal policy engine | P2 | PARTIAL | Deterministic policy embodied in `remediation/engine.py` probe transitions, consent re-checks, and channel derivation (`remediation/registry_seed.py`) | No standalone versioned policy-engine module |
 | 154 — Human review queue | P2 | DONE | `GET /api/remediation/queue` — needs_human cases with exact reasons, next steps, and ready-to-send letters | |
 | 155 — Verification evidence | P2 | DONE | `verification_checks` (migration `0005`) stores method + outcome + evidence_ref for every check, including `unknown` | |
@@ -201,11 +201,11 @@ NA = the surface the phase governs does not exist in this deployment.*
 
 | Status | Count |
 |---|---|
-| DONE | 124 |
-| PARTIAL | 35 |
-| NOT_DONE | 8 |
+| DONE | 132 |
+| PARTIAL | 33 |
+| NOT_DONE | 2 |
 | CUT (owner rule) | 11 |
 | NA (surface does not exist) | 3 |
 | **Total** | **181** |
 
-Open by tier — **P0:** 173, 180 (all PARTIAL — none is an active production exposure; they are depth gaps: production-readiness evidence and the final gate). **P1:** 25, 149. **P2:** 31, 40, 66, 67, 76, 77, 96, 109, 111, 115, 116, 119, 124, 125, 137, 141, 153, 158, 160, 162, 166, 175, 178. **P3:** 57, 58, 59, 81, 82, 83, 85, 98, 102, 104, 123, 126, 128, 129, 152, 168.
+Open by tier — **P0:** 173, 180 (all PARTIAL — none is an active production exposure; they are depth gaps: production-readiness evidence and the final gate). **P1:** 25, 149. **P2:** 31, 40, 66, 67, 76, 77, 96, 109, 111, 115, 116, 119, 124, 125, 137, 141, 153, 158, 160, 162, 166, 175, 178. **P3:** 57, 58, 59, 81, 85, 98, 123, 168.

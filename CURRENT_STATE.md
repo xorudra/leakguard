@@ -38,8 +38,8 @@ at `e31e016`.*
 ## C. Architecture Inventory
 
 - **Entry points:** `app.py` (HTTP server, all routes), `agent.py` (deterministic broker agent — the remediation core), `local_agent.py` (residential-IP runner for the user's own device), `browser_probe.py` (local Playwright probe), `proxy_relay.py` (dev-only egress relay for this VM)
-- **Modules:** `core/` (errors, context/request-ids, security headers + CSRF, logging, rate limiter, retention, feature flags / emergency switches), `accounts/` (auth, sessions, totp, webauthn + cbor, consents, identifiers, households, domains, admin, audit, api_tokens, privacy export, passwords), `providers/` (base HTTP client, registry, xposedornot, hibp_passwords, ddg_discovery, username_platforms, domain_intel, mock), `scanning/` (orchestrator, jobs, worker, normalize, correlation, risk, feedback, disputes), `remediation/` (engine, service, worker, verify, verify_sources, registry_seed, letters, source_checks), `monitoring/` (scheduler, diff, events, notify, service), `dashboard/` (service = Action Center, graph), `db/` (pool, migrate), `vault/` (crypto, store)
-- **Routes:** ~45 `/api/...` routes (every one also answering under the canonical `/api/v1/...` spelling — Phase 88) — anonymous (`/api/scan`, `/api/agent/*`, `/api/brokers`, `/api/providers/health`, `/api/health`), account (auth, consents, identifiers, domains, household, privacy export), scanning (`/api/scans`), remediation (`/api/remediation/run|cases|queue`), monitoring (`/api/monitoring/settings|timeline`, `/api/notifications`), dashboard (`/api/action-center`, `/api/graph`), tokens (`/api/tokens`), admin (`/api/admin/overview|audit`), plus `/trust`, `/reset`, `/.well-known/security.txt`, PWA assets (`/sw.js`, `/static/manifest.webmanifest`, icons)
+- **Modules:** `core/` (errors, context/request-ids, security headers + CSRF, logging, rate limiter, retention, feature flags / emergency switches), `accounts/` (auth, sessions, totp, webauthn + cbor, consents, identifiers, households, domains, admin, audit, api_tokens, privacy export, passwords), `providers/` (base HTTP client, registry, xposedornot, hibp_passwords, ddg_discovery, username_platforms, domain_intel, mock), `scanning/` (orchestrator, jobs, worker, normalize, correlation, risk, feedback, disputes), `remediation/` (engine, service, worker, verify, verify_sources, registry_seed, letters, source_checks), `monitoring/` (scheduler, diff, events, notify, service), `dashboard/` (service = Action Center, graph, policy_analyzer), `db/` (pool, migrate), `vault/` (crypto, store)
+- **Routes:** ~45 `/api/...` routes (every one also answering under the canonical `/api/v1/...` spelling — Phase 88) — anonymous (`/api/scan`, `/api/agent/*`, `/api/brokers`, `/api/providers/health`, `/api/health`), account (auth, consents, identifiers, domains, household, privacy export), scanning (`/api/scans`), remediation (`/api/remediation/run|cases|queue`), monitoring (`/api/monitoring/settings|timeline`, `/api/notifications`), dashboard (`/api/action-center`, `/api/graph`), tools (`/api/tools/policy-analyzer`), tokens (`/api/tokens`), admin (`/api/admin/overview|audit`), plus `/trust`, `/privacy`, `/terms`, `/support`, `/reset`, `/.well-known/security.txt`, PWA assets (`/sw.js`, `/static/manifest.webmanifest`, icons)
 - **Services:** in-process workers — scan worker (SKIP LOCKED, hand-started jobs claimed before scheduled ones, backoff, dead after 3 attempts), remediation worker (5 concurrent, 40s probe budget), monitoring scheduler (hourly tick, period-bucketed idempotency, paused users skipped), retention worker (daily; its loop also hosts the broker source sweep — SSRF-guarded re-fetch + hash compare of every broker opt-out page, `remediation/source_checks.py`)
 - **Providers:** XposedOrNot (email breaches), HIBP Pwned Passwords (k-anonymity), DuckDuckGo discovery, username presence (13 platforms), domain intel (Cloudflare DoH + crt.sh); MockProvider behind `LEAKGUARD_PROVIDERS=mock`, always flagged
 - **Database models:** users, sessions, consents, password_reset_tokens, identifiers, domains, scan_jobs, findings, finding_feedback, broker_source_checks, brokers, remediation_cases, remediation_attempts, verification_checks, user_settings, notifications, households, household_members, audit_log, api_tokens, passkey_credentials, webauthn_challenges
@@ -96,6 +96,8 @@ at `e31e016`.*
 | Owner admin (counts only) + audit log | Yes | Yes | Yes | Yes — no PII in output, test-asserted | README Operations | `accounts/admin.py`, `accounts/audit.py` |
 | Read-only API tokens | Yes | Yes | Yes | Yes — structural read-only wall | README API | `accounts/api_tokens.py`; Stage S13 E2E |
 | Trust center + security.txt | Yes | Yes | Yes | Yes | `/trust` itself | `static/index.html`, `/.well-known/security.txt` |
+| Privacy policy analyzer (keyword checklist) | Yes | Not yet — ships with Batch D2 deploy | Yes — fixture/control/SSRF tests | Yes — session-gated, SSRF-guarded fetch, nothing stored | Privacy Center copy + disclaimer | `dashboard/policy_analyzer.py`; `tests/test_batch_d2.py` |
+| Privacy / Terms / Support pages + propagation list | Yes | Not yet — ships with Batch D2 deploy | Yes | Yes — masked labels only, matcher-only associations | `/privacy`, `/terms`, `/support`, `/trust` additions | `static/index.html`, `dashboard/graph.py` (`propagation`) |
 | Exposure map (graph) | Yes | Yes | Yes | Yes — masked labels only | Privacy Center copy | `dashboard/graph.py`; Stage S14 checks |
 | Browser extension (sideload) | Yes | Packaged + statically verified; not store-published | Yes | Yes — token-only, single host permission | `extension/README.md` | `extension/`, `tools/build_extension_zip.py` |
 | PWA (installable) | Yes | Yes — manifest/SW/icons serve 200 with correct types | Yes | Yes — SW caches shell only, never `/api/` | README | `static/manifest.webmanifest`, `static/sw.js` |
@@ -109,9 +111,9 @@ evidence, and gap). Summary counts:
 
 | Status | Count |
 |---|---|
-| DONE | 124 |
-| PARTIAL | 35 |
-| NOT_DONE | 8 |
+| DONE | 132 |
+| PARTIAL | 33 |
+| NOT_DONE | 2 |
 | CUT (owner rule: AI phases + business model) | 11 |
 | NA (surface does not exist: file uploads, webhooks, containers) | 3 |
 | **Total** | **181** |
@@ -132,9 +134,7 @@ spec:
    (Phases 173, 180 PARTIAL) — everything runs against the one live
    service; there is no staging environment to rehearse against
    (Phase 109).
-3. **WebAuthn/passkeys absent** (Phase 4 PARTIAL) — TOTP is the strongest
-   available factor.
-4. **No anomaly alerting and no automated dependency vulnerability
+3. **No anomaly alerting and no automated dependency vulnerability
    scanning** — the security-events *view* exists (Phase 62 DONE) and
    acceptance evidence is consolidated (`docs/ACCEPTANCE.md`, Phases
    147/148 DONE), but nothing watches the view, and the Phase 107 lock
@@ -153,10 +153,10 @@ means "no longer indexed as of the check".
 Only genuinely open items, P0 → P3 (full detail in `PHASE_STATUS.md` and in
 `MIGRATION_PLAN.md` → "Final Remaining Implementation — order of work"):
 
-- **P0:** WebAuthn/passkeys (4) → production-readiness evidence
+- **P0:** production-readiness evidence
   (173) → re-run the Phase 180 final gate. *(Batch A closed 69, 70,
   106, 107; Batch A.1 closed 73, 78, 170; Batch C closed 79, 174,
-  62, 147, 148.)*
+  62, 147, 148; Batch D1 closed 4.)*
 - **P1:** stored finding lifecycle states (25) → per-cycle report
   files in-repo (149). *(Batch B closed 88, 49, 142.)*
 - **P2:** scan budget engine
@@ -171,13 +171,11 @@ Only genuinely open items, P0 → P3 (full detail in `PHASE_STATUS.md` and in
   (115, 116) → browser-probe allowlists (137, 166) → legacy-surface
   cleanup decision (178). *(Batch B closed 159, 120; Batch C closed
   32, 156, 157, 80.)*
-- **P3:** organizations or a documented permanent no (57–59) → formal
-  privacy policy + terms documents (82, 83) → report documents (85) →
-  admin health depth (123) → support workflow
-  (126) → bug-bounty page (128) → data-residency note/design (129) →
-  localization preparation (98) → privacy-policy analyzer (102) →
-  propagation analysis (104, 152) → regional policy rules (168) → legal
-  architecture hardening (81).
+- **P3:** organizations or a documented permanent no (57–59) → report
+  documents (85) → admin health depth (123) → localization preparation
+  (98) → regional policy rules (168) → legal architecture hardening
+  (81). *(Batch D1 closed 4; Batch D2 closed 82, 83, 102, 104, 126,
+  128, 129, 152.)*
 
 ## J. Definition of Current Reality
 
@@ -218,8 +216,8 @@ Only genuinely open items, P0 → P3 (full detail in `PHASE_STATUS.md` and in
   based and username presence covers 13 platforms; findings are
   labelled exact/probable/weak and weak correlation is never upgraded
   to fact.
-- Serve organizations/multi-tenant workspaces, offer passkeys, produce
-  generated report documents, or run a staging environment — see
+- Serve organizations/multi-tenant workspaces, produce generated
+  report documents, or run a staging environment — see
   `PHASE_STATUS.md` for the full open list.
 - Send more than 300 emails/day (Brevo free) or stay awake while idle
   (Render free sleeps; ~50s wake).

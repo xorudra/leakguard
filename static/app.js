@@ -1203,7 +1203,119 @@ function renderGraph(d) {
     "amber = waiting / needs you · orange = request sent · grey = queued · " +
     "red = blocked or reappeared.";
   wrap.appendChild(legend);
+  renderPropagation(d.propagation);
 }
+
+const PROPAGATION_STATUS_LABEL = {
+  verified_removed: "Verified removed",
+  submitted: "Submitted",
+  in_progress: "In progress",
+  needs_human: "Needs you",
+  blocked: "Blocked",
+  not_started: "Not started",
+};
+
+function renderPropagation(propagation) {
+  const wrap = $("propagationWrap");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  const heading = document.createElement("h4");
+  heading.textContent = "Brokers LeakGuard can act on for this source";
+  wrap.appendChild(heading);
+  const note = document.createElement("p");
+  note.className = "hint";
+  note.textContent = "Only brokers matched to a source by LeakGuard's removal matcher are listed. " +
+    "A broker that is not listed has not been matched to that source.";
+  wrap.appendChild(note);
+  const entries = (propagation && propagation.entries) || [];
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent = "No source-to-broker matches yet.";
+    wrap.appendChild(empty);
+    return;
+  }
+  const list = document.createElement("ul");
+  list.className = "propagationList";
+  entries.forEach((entry) => {
+    if (!entry.brokers || !entry.brokers.length) {
+      const item = document.createElement("li");
+      item.textContent = entry.source.name + " → no matched broker";
+      list.appendChild(item);
+      return;
+    }
+    entry.brokers.forEach((broker) => {
+      const item = document.createElement("li");
+      item.textContent = entry.source.name + " → " + broker.name + " → " +
+        (PROPAGATION_STATUS_LABEL[broker.status] || broker.status);
+      list.appendChild(item);
+    });
+  });
+  wrap.appendChild(list);
+}
+
+/* ----- privacy policy checker (Phase 102) ----- */
+const POLICY_STATUS_LABEL = {
+  found: "Found",
+  not_found: "Not found",
+  unclear: "Mentioned, but unclear",
+};
+
+function renderPolicyResults(data) {
+  const wrap = $("policyResults");
+  wrap.innerHTML = "";
+  const disclaimer = document.createElement("p");
+  disclaimer.className = "hint";
+  disclaimer.textContent = data.disclaimer;
+  wrap.appendChild(disclaimer);
+  const stats = document.createElement("p");
+  stats.textContent = data.stats.word_count.toLocaleString() + " words · average sentence: " +
+    data.stats.average_sentence_words + " words";
+  wrap.appendChild(stats);
+  const list = document.createElement("ul");
+  list.className = "policyChecks";
+  (data.checks || []).forEach((check) => {
+    const item = document.createElement("li");
+    const label = document.createElement("strong");
+    label.textContent = check.label + ": ";
+    item.appendChild(label);
+    item.appendChild(document.createTextNode(
+      (POLICY_STATUS_LABEL[check.status] || check.status) + ". "));
+    if (check.matched_phrase) {
+      item.appendChild(document.createTextNode(
+        "Matched phrase: “" + check.matched_phrase + "”. "));
+    }
+    item.appendChild(document.createTextNode(check.note));
+    list.appendChild(item);
+  });
+  wrap.appendChild(list);
+}
+
+$("policyCheckBtn").addEventListener("click", async () => {
+  const url = $("policyUrl").value.trim();
+  const text = $("policyText").value.trim();
+  const status = $("policyStatus");
+  if ((url && text) || (!url && !text)) {
+    status.textContent = "Give either a policy page address or pasted policy text — not both.";
+    return;
+  }
+  const btn = $("policyCheckBtn");
+  btn.disabled = true;
+  status.textContent = "Checking the policy…";
+  try {
+    const r = await apiJson("/api/tools/policy-analyzer", {
+      method: "POST", headers: AH,
+      body: JSON.stringify(url ? { url } : { text }),
+    });
+    if (!r.ok) throw new Error(errMsg(r.data, "The policy could not be checked"));
+    renderPolicyResults(r.data);
+    status.textContent = "Check complete.";
+  } catch (e) {
+    status.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 /* ----- my household (family profiles) -----
    A member is a grouping label only ("whose detail is this") — no
@@ -2722,13 +2834,20 @@ loadMe();
   panel.scrollIntoView();
 })();
 
-/* ---------------- Trust page (/trust) ----------------
-   The Trust section lives in the same page (hidden); the /trust
-   URL simply unhides and jumps to it. Everything else on the page
-   keeps working — the section is reading material, not a mode. */
+/* ---------------- Static information pages ----------------
+   The Trust, Privacy, Terms and Support sections live in the same
+   page (hidden); their URLs simply unhide and jump to the matching
+   section. Everything else on the page keeps working — these
+   sections are reading material, not modes. */
 (function () {
-  if (location.pathname !== "/trust") return;
-  const section = $("trust");
+  const pages = {
+    "/trust": "trust",
+    "/privacy": "privacyPolicy",
+    "/terms": "terms",
+    "/support": "supportPage",
+  };
+  const section = $(pages[location.pathname] || "");
+  if (!section) return;
   section.hidden = false;
   section.scrollIntoView();
 })();

@@ -57,6 +57,7 @@ from accounts import webauthn as webauthn_service
 from core import context, errors, flags, logging_setup, security
 from core import ratelimit as core_ratelimit
 from dashboard import graph as graph_service
+from dashboard import policy_analyzer as policy_analyzer_service
 from dashboard import service as action_center_service
 from db import pool as db_pool
 from monitoring import service as monitoring_service
@@ -400,6 +401,12 @@ class Handler(BaseHTTPRequestHandler):
             # unhides its Trust section for this path. Static content
             # — serves with or without a database, like the home page.
             return self._serve_file(STATIC / "index.html", "text/html; charset=utf-8")
+        if route in ("/privacy", "/terms", "/support"):
+            # Standalone policy, terms and support pages (Batch D2):
+            # sections of the same SPA, unhidden by app.js for these
+            # paths. Static content — no database is needed to read
+            # the rules that govern the service.
+            return self._serve_file(STATIC / "index.html", "text/html; charset=utf-8")
         if route == "/.well-known/security.txt":
             # RFC 9116 security contact (Stage S13). Static text —
             # served by the app itself, database or not.
@@ -618,7 +625,8 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/consents", "/api/identifiers", "/api/scans",
                 "/api/domains", "/api/remediation/run",
                 "/api/household/members", "/api/tokens",
-                "/api/privacy/export", "/api/findings/feedback") \
+                "/api/privacy/export", "/api/findings/feedback",
+                "/api/tools/policy-analyzer") \
                 or route.startswith("/api/domains/") \
                 or route.startswith("/api/remediation/cases/"):
             return self._accounts_post(route)
@@ -960,6 +968,17 @@ class Handler(BaseHTTPRequestHandler):
                 feedback_service.set_verdict, user["id"],
                 payload.get("finding_id"), payload.get("verdict"))
             return self._json(200, {"feedback": verdict})
+        if route == "/api/tools/policy-analyzer":
+            # Privacy policy analyzer (Phase 102): a deterministic
+            # keyword checklist over text the signed-in user pastes
+            # or one public policy page they name. Nothing is stored;
+            # the URL path is SSRF-guarded and capped inside the
+            # service (dashboard/policy_analyzer.py).
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            return self._json(200, self._call(
+                policy_analyzer_service.analyze_payload, payload))
         if route == "/api/scans":
             # Emergency control: account full scans only — the
             # anonymous Quick Scan (/api/scan) is never flag-gated.

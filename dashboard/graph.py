@@ -25,6 +25,13 @@ Honesty rules (the same discipline as the rest of the platform):
   would draw a removal path we cannot back with a case.
 * A broker node's status is its most recent case's status — the
   case ledger is the only truth about removal progress.
+* The `propagation` section (Phases 104/152) uses that same
+  conservative matcher over the caller's latest-scan findings and
+  the full broker registry. A broker is listed for a source only
+  when the matcher accepts the pair; a matched broker with no case
+  is reported as `not_started`. This is an action list — brokers
+  LeakGuard can act on for that source — not a claim about every
+  place information may have travelled.
 
 Authorization by construction (the Stage S3 pattern): the
 function takes the caller's user id and scopes every query by it.
@@ -38,8 +45,37 @@ def _source_key(provider, source_name):
     return "%s|%s" % (provider, source_name)
 
 
+_PROPAGATION_STATUSES = (
+    "verified_removed", "submitted", "in_progress", "needs_human",
+    "blocked", "not_started",
+)
+
+
+def _propagation_status(case_status):
+    """Normalize a remediation case status for propagation.
+
+    The propagation contract uses `in_progress` for work that has
+    been queued, is running, or has reappeared and therefore needs
+    another removal cycle. A failed case is grouped as `blocked`
+    for the summary, while the entry also carries the exact
+    `case_status`, so the normalization never hides the ledger's
+    own word.
+    """
+    if case_status is None:
+        return "not_started"
+    if case_status in ("queued", "running", "reappeared"):
+        return "in_progress"
+    if case_status == "failed":
+        return "blocked"
+    if case_status in _PROPAGATION_STATUSES:
+        return case_status
+    return "in_progress"
+
+
 def exposure_graph(user_id):
-    """The caller's exposure graph: {"nodes": [...], "edges": [...]}.
+    """The caller's exposure graph, plus its propagation section.
+
+    Returns {"nodes": [...], "edges": [...], "propagation": {...}}.
 
     Node shapes (all carry "id" and "type"):
       identifier — {"kind", "label"} where label is MASKED only.
@@ -48,6 +84,12 @@ def exposure_graph(user_id):
                    remediation case for that broker.
     Edge shapes: {"from", "to", "kind"} with kind "found_in"
     (identifier→source) or "removal" (source→broker).
+    Propagation shapes:
+      entries — one per (identifier, source), with only brokers
+                accepted by the conservative source matcher and
+                each broker's normalized + exact case status.
+      rollups — per-identifier counts of those broker associations
+                by normalized status, zero-filled for every status.
     """
     with pool.connection() as conn:
         latest = conn.execute(
@@ -71,6 +113,10 @@ def exposure_graph(user_id):
             " WHERE c.user_id = %s"
             " ORDER BY c.created_at DESC, c.id DESC",
             (user_id,),
+        ).fetchall()
+        broker_registry_rows = conn.execute(
+            "SELECT slug, name, optout_url, search_url FROM brokers"
+            " WHERE active = true ORDER BY name, slug",
         ).fetchall()
         identifier_ids = sorted(
             {row["identifier_id"] for row in findings
@@ -175,4 +221,110 @@ def exposure_graph(user_id):
     for from_id, to_id in sorted(removal):
         edges.append({"from": from_id, "to": to_id, "kind": "removal"})
 
-    return {"nodes": nodes, "edges": edges}
+    # --- propagation (Phases 104/152) ---
+    # For each source in the latest scan, list ONLY registry brokers
+    # accepted by the same conservative matcher used for removal
+    # edges. A matched broker with no remediation case is honestly
+    # "not_started"; an unmatched source gets an empty broker list.
+    identifier_by_id = {
+        str(row["id"]): row for row in identifier_rows
+    }
+    case_status_by_slug = {
+        slug: row["status"] for slug, row in broker_by_slug.items()
+    }
+    propagation_entries_by_key = {}
+    matched_slugs_by_key = {}
+    for row in findings:
+        identifier_id = row["identifier_id"]
+        if identifier_id is None:
+            continue
+        identifier_key = str(identifier_id)
+        if identifier_key not in identifier_by_id:
+            continue
+        source_key = _source_key(row["provider"], row["source_name"])
+        entry_key = (identifier_key, source_key)
+        if entry_key not in propagation_entries_by_key:
+            ident = identifier_by_id[identifier_key]
+            propagation_entries_by_key[entry_key] = {
+                "identifier_id": identifier_key,
+                "identifier": {
+                    "kind": ident["kind"],
+                    "label": ident["masked"],
+                },
+                "source": {
+                    "provider": row["provider"],
+                    "name": row["source_name"],
+                },
+                "brokers": [],
+            }
+            matched_slugs_by_key[entry_key] = set()
+        finding = {
+            "source_name": row["source_name"],
+            "source_url": row["source_url"],
+        }
+        for broker_row in broker_registry_rows:
+            slug = broker_row["slug"]
+            if slug in matched_slugs_by_key[entry_key]:
+                continue
+            broker = {
+                "name": broker_row["name"],
+                "slug": slug,
+                "optout_url": broker_row["optout_url"],
+                "search_url": broker_row["search_url"],
+            }
+            if _monitoring_events._broker_matches_finding(
+                    broker, finding):
+                matched_slugs_by_key[entry_key].add(slug)
+                case_status = case_status_by_slug.get(slug)
+                propagation_entries_by_key[entry_key]["brokers"].append({
+                    "slug": slug,
+                    "name": broker_row["name"],
+                    "status": _propagation_status(case_status),
+                    "case_status": case_status,
+                })
+    propagation_entries = []
+    for entry_key in sorted(
+            propagation_entries_by_key,
+            key=lambda key: (
+                propagation_entries_by_key[key]["identifier"]["kind"],
+                propagation_entries_by_key[key]["identifier"]["label"],
+                propagation_entries_by_key[key]["source"]["name"],
+                propagation_entries_by_key[key]["source"]["provider"],
+            )):
+        entry = propagation_entries_by_key[entry_key]
+        entry["brokers"].sort(
+            key=lambda broker: (broker["name"], broker["slug"]))
+        propagation_entries.append(entry)
+
+    rollups_by_identifier = {}
+    for entry in propagation_entries:
+        identifier_id = entry["identifier_id"]
+        if identifier_id not in rollups_by_identifier:
+            rollups_by_identifier[identifier_id] = {
+                "identifier_id": identifier_id,
+                "identifier": entry["identifier"],
+                "counts": {
+                    status: 0 for status in _PROPAGATION_STATUSES
+                },
+            }
+        counts = rollups_by_identifier[identifier_id]["counts"]
+        for broker in entry["brokers"]:
+            counts[broker["status"]] += 1
+    propagation_rollups = [
+        rollups_by_identifier[key]
+        for key in sorted(
+            rollups_by_identifier,
+            key=lambda identifier_id: (
+                rollups_by_identifier[identifier_id]["identifier"]["kind"],
+                rollups_by_identifier[identifier_id]["identifier"]["label"],
+            ))
+    ]
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "propagation": {
+            "entries": propagation_entries,
+            "rollups": propagation_rollups,
+        },
+    }

@@ -201,6 +201,14 @@ footer a{color:var(--muted)}
 .graphMore{stroke-dasharray:4 3}
 .graphLabel{fill:#fff;font-size:12.5px;font-weight:600}
 .graphEdge{stroke:#4d4d4d;stroke-width:1.5;opacity:.75}
+#propagationWrap{margin-top:14px}
+.propagationList{margin:8px 0 0;padding-left:20px}
+.propagationList li{margin:5px 0}
+.policyTable{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px}
+.policyTable th,.policyTable td{border:1px solid var(--line);padding:9px 10px;text-align:left;vertical-align:top}
+.policyTable th{background:var(--surface2)}
+.policyChecks{margin:10px 0;padding-left:20px}
+.policyChecks li{margin:7px 0}
 
 /* reveal on scroll (JS-added class only) */
 .reveal{opacity:0;transform:translateY(12px)}

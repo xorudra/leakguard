@@ -43,6 +43,18 @@ Invariants the writer maintains:
 * applying the same completed job twice is a no-op, and applying
   a job that a newer completed job has superseded is refused
   (stale) rather than allowed to rewind newer state.
+
+The writes are SET-BASED (Phase 25 follow-up, P2-B): the first
+implementation issued one UPDATE per identity, so a cycle with N
+identities cost N round trips — over the production
+Oregon→Singapore database link (~200 ms RTT) a 214-identity cycle
+took up to a minute to converge. apply_lifecycle now issues at
+most 5 statements however large the cycle: 3 reads (stale check,
+clock, priors) plus ONE UPDATE for every transition (births,
+reappearances, resolutions share the cycle's stamp) and ONE
+UPDATE carrying continuing identities' prior pairs over. The
+per-row IS DISTINCT FROM guard is unchanged, so a no-change
+application still writes nothing.
 """
 
 import hashlib
@@ -152,22 +164,89 @@ def broker_matches_finding(broker, finding):
 LIFECYCLE_STATES = ("open", "resolved", "reappeared")
 
 
-def _set_identity_state(conn, user_id, identity, state, changed_at):
-    """Move EVERY row of one identity to (state, changed_at).
-    Rows already carrying exactly that pair are untouched, so a
-    no-change application writes nothing and the stamp cannot
-    drift."""
-    identifier_id, provider, source_name = identity
+def _identity_values(identities):
+    """A VALUES row list matching identity tuples, plus its flat
+    parameter list. identifier_id is cast to uuid explicitly (it
+    is the one nullable component; the cast also pins the VALUES
+    column type so the join cannot mistype it)."""
+    rows_sql = ", ".join("(%s::uuid, %s, %s)" for _ in identities)
+    params = []
+    for identifier_id, provider, source_name in identities:
+        params.extend([identifier_id, provider, source_name])
+    return rows_sql, params
+
+
+def _apply_transitions(conn, user_id, assignments, stamp):
+    """Move EVERY row of each assigned identity to (state, stamp)
+    with ONE UPDATE. `assignments` is a list of (identity, state);
+    every transition in a cycle shares the same stamp (the
+    cycle's clock), so they ride a single statement whose VALUES
+    list carries the per-identity target state. Rows already
+    carrying exactly their target pair are untouched (the
+    IS DISTINCT FROM guard), so a no-change application writes
+    nothing and stamps cannot drift."""
+    if not assignments:
+        return
+    # Placeholder order in the SQL below: the SET stamp first,
+    # then the VALUES rows (identity columns + target state per
+    # row), then user_id, then the guard stamp.
+    values_sql = ", ".join(
+        "(%s::uuid, %s, %s, %s)" for _ in assignments)
+    flat = []
+    for (identifier_id, provider, source_name), state in assignments:
+        flat.extend([identifier_id, provider, source_name, state])
     conn.execute(
-        "UPDATE findings SET lifecycle_state = %s,"
-        " lifecycle_changed_at = %s"
-        " WHERE user_id = %s"
-        " AND identifier_id IS NOT DISTINCT FROM %s"
-        " AND provider = %s AND source_name = %s"
-        " AND (lifecycle_state IS DISTINCT FROM %s"
-        "      OR lifecycle_changed_at IS DISTINCT FROM %s)",
-        (state, changed_at, user_id, identifier_id, provider,
-         source_name, state, changed_at),
+        "UPDATE findings f"
+        " SET lifecycle_state = v.state, lifecycle_changed_at = %s"
+        " FROM (VALUES " + values_sql + ")"
+        " AS v(identifier_id, provider, source_name, state)"
+        " WHERE f.user_id = %s"
+        " AND f.identifier_id IS NOT DISTINCT FROM v.identifier_id"
+        " AND f.provider IS NOT DISTINCT FROM v.provider"
+        " AND f.source_name IS NOT DISTINCT FROM v.source_name"
+        " AND (f.lifecycle_state IS DISTINCT FROM v.state"
+        "      OR f.lifecycle_changed_at IS DISTINCT FROM %s)",
+        tuple([stamp] + flat + [user_id, stamp]),
+    )
+
+
+def _carry_continuing(conn, user_id, job_id, identities):
+    """Carry each continuing identity's prior (state, stamp) pair
+    onto all of its rows with ONE UPDATE. The pair copied comes
+    from a DISTINCT ON subquery over the identity's rows in OTHER
+    jobs — the same source, with the same ordering, as the priors
+    map apply_lifecycle read to classify the identity as
+    continuing — so the pair written is definitionally the pair
+    the classifier saw. Only the current job's fresh rows (born
+    with column defaults) ever differ from it; the guard leaves
+    every already-correct row untouched."""
+    if not identities:
+        return
+    rows_sql, params = _identity_values(identities)
+    conn.execute(
+        "UPDATE findings f"
+        " SET lifecycle_state = p.lifecycle_state,"
+        " lifecycle_changed_at = p.lifecycle_changed_at"
+        " FROM (VALUES " + rows_sql + ")"
+        " AS v(identifier_id, provider, source_name)"
+        " JOIN (SELECT DISTINCT ON"
+        " (identifier_id, provider, source_name)"
+        " identifier_id, provider, source_name, lifecycle_state,"
+        " lifecycle_changed_at FROM findings"
+        " WHERE user_id = %s AND job_id <> %s"
+        " ORDER BY identifier_id, provider, source_name,"
+        " discovered_at DESC, id DESC) p"
+        " ON p.identifier_id IS NOT DISTINCT FROM v.identifier_id"
+        " AND p.provider IS NOT DISTINCT FROM v.provider"
+        " AND p.source_name IS NOT DISTINCT FROM v.source_name"
+        " WHERE f.user_id = %s"
+        " AND f.identifier_id IS NOT DISTINCT FROM v.identifier_id"
+        " AND f.provider IS NOT DISTINCT FROM v.provider"
+        " AND f.source_name IS NOT DISTINCT FROM v.source_name"
+        " AND (f.lifecycle_state IS DISTINCT FROM p.lifecycle_state"
+        "      OR f.lifecycle_changed_at IS DISTINCT FROM"
+        "          p.lifecycle_changed_at)",
+        tuple(params + [user_id, job_id, user_id]),
     )
 
 
@@ -220,32 +299,36 @@ def apply_lifecycle(user_id, job, current, previous):
     prev = _by_identity(previous)
     resolved = []
     reappeared = []
-    with pool.connection() as conn:
-        for identity, row in cur.items():
-            prior = priors.get(identity)
-            if prior is None:
-                # First appearance ever: born 'open', stamped now.
-                _set_identity_state(conn, user_id, identity,
-                                    "open", now)
-            elif prior[0] == "resolved":
-                _set_identity_state(conn, user_id, identity,
-                                    "reappeared", now)
-                reappeared.append(row)
-            else:
-                # Continuing: the state (and its stamp) carry over
-                # unchanged — 'open' stays open, 'reappeared' stays
-                # reappeared until it resolves again.
-                _set_identity_state(conn, user_id, identity,
-                                    prior[0], prior[1])
-        for identity in prev:
-            if identity in cur:
-                continue
-            prior = priors.get(identity)
-            if prior is not None and prior[0] == "resolved":
-                continue  # already resolved; the stamp must not move
-            _set_identity_state(conn, user_id, identity,
-                                "resolved", now)
-            resolved.append(identity)
+    # Classify every identity first (the same decisions the
+    # per-identity loop used to write out one by one), then apply
+    # each class with a single set-based statement.
+    transitions = []  # (identity, state) — all stamped `now`
+    continuing = []   # identities carrying their prior pair over
+    for identity, row in cur.items():
+        prior = priors.get(identity)
+        if prior is None:
+            # First appearance ever: born 'open', stamped now.
+            transitions.append((identity, "open"))
+        elif prior[0] == "resolved":
+            transitions.append((identity, "reappeared"))
+            reappeared.append(row)
+        else:
+            # Continuing: the state (and its stamp) carry over
+            # unchanged — 'open' stays open, 'reappeared' stays
+            # reappeared until it resolves again.
+            continuing.append(identity)
+    for identity in prev:
+        if identity in cur:
+            continue
+        prior = priors.get(identity)
+        if prior is not None and prior[0] == "resolved":
+            continue  # already resolved; the stamp must not move
+        transitions.append((identity, "resolved"))
+        resolved.append(identity)
+    if transitions or continuing:
+        with pool.connection() as conn:
+            _apply_transitions(conn, user_id, transitions, now)
+            _carry_continuing(conn, user_id, job_id, continuing)
     return {"skipped": None, "resolved": resolved,
             "reappeared": reappeared}
 
@@ -257,7 +340,9 @@ def resolve_for_broker(user_id, broker):
     remediation/verify.py at the one moment a case becomes
     verified_removed. Findings already 'resolved' are untouched
     (their stamp is the earlier change). Returns the number of
-    identities resolved by this call."""
+    identities resolved by this call. The matched identities —
+    bounded by one broker's listings for one user — are written
+    with the same single set-based UPDATE as scan completion."""
     with pool.connection() as conn:
         rows = conn.execute(
             "SELECT id, identifier_id, provider, source_name,"
@@ -266,7 +351,7 @@ def resolve_for_broker(user_id, broker):
             (user_id,),
         ).fetchall()
         now = conn.execute("SELECT now() AS now").fetchone()["now"]
-        resolved = 0
+        assignments = []
         seen = set()
         for row in rows:
             identity = identity_of(row)
@@ -275,7 +360,6 @@ def resolve_for_broker(user_id, broker):
             seen.add(identity)
             if not broker_matches_finding(broker, row):
                 continue
-            _set_identity_state(conn, user_id, identity,
-                                "resolved", now)
-            resolved += 1
-    return resolved
+            assignments.append((identity, "resolved"))
+        _apply_transitions(conn, user_id, assignments, now)
+    return len(assignments)

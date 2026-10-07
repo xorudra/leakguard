@@ -44,6 +44,8 @@ reconciled state; nothing in this file rests on UI copy alone.*
 - **AI provider configured:** NO — none exists in the product (owner rule: AI only if free *and* unlimited; no such tier exists)
 - **Audit confidence:** High — every status in `PHASE_STATUS.md` was checked against the code (grep/read), the full suite was re-run at repository HEAD (410 passed, 19 skipped, 2026-10-07), production behavior was end-to-end verified by the parent agent on 2026-10-07 for every shipped stage, and the v2.1 reconciliation pinned the production commit from the deployment platform itself (spec §0 rule 6 satisfied with platform evidence, not inference)
 
+- **Addendum 2026-10-08 (P2-B / P2-C closeouts):** production has advanced beyond the §A pin above, which remains the 2026-10-07 reconciliation record and is not rewritten. Production ran `1387fc4` (P2-B performance & scalability, deploy `dep-db3a1b0m7kps73dik75g`) and now runs `f022399` (P2-C observability & engineering alerts, deploy `dep-db3ajprtqb8s7384mokg`, live-verified 2026-10-08 ~01:58 IST: health `db: "ok"` with migration 0013 applied, baselines 214 breaches / score 100 and password count 52,372,427, anonymous admin endpoints 404, throwaway-account E2E with exactly one scan_summary notification and account deletion). Staging runs the same commit `f022399` (deploy `dep-db3agp3tqb8s7384chp0`).
+
 ## B. Production vs Repository
 
 | Area | Repository | Production | Match? | Evidence | Action |

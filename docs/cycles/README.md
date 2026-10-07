@@ -126,6 +126,7 @@ Copy this skeleton for a new report and fill every field:
 | 2026-10-07 | [P1-B — Phase 25 stored finding lifecycle state](2026-10-07-p1b-phase-25-lifecycle.md) | `d86afa7` | Migration 0012; single lifecycle writer; live two-cycle proof on staging (214 open → 214 resolved) |
 | 2026-10-07 | [P2-A — verification records (Phases 80, 131, 132)](2026-10-07-p2a-records-80-131-132.md) | (docs closeout) | IR tabletop drill + runbook fixes; README 8 inaccuracies fixed; MIGRATION_PLAN annotated to shipped truth |
 | 2026-10-08 | [P2-B — performance & scalability (Phases 115, 116)](2026-10-08-p2b-performance-115-116.md) | `1387fc4` | Set-based lifecycle writer (5 statements); batched in-app notifications + summary-only email (kills the 215-emails/cycle storm); benchmarks + documented single-instance ceiling; flips 10.5s, ledger 17.8s live |
+| 2026-10-08 | [P2-C — observability & engineering alerts (Phases 76, 77)](2026-10-08-p2c-observability-76-77.md) | `f022399` | Error ledger (migration 0013, hash-only rollups, 30-day prune); admin metrics endpoint + overview block; four engineering alert rules on the scheduler tick with daily-deduped owner email; staging + production live-verified |
 
 All cycles through the P1 closeout are linked above.
 

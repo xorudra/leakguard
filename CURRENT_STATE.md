@@ -27,7 +27,7 @@ at `e31e016`.*
 | Area | Repository | Production | Match? | Evidence | Action |
 |---|---|---|---|---|---|
 | Authentication | Argon2id, sessions, TOTP, reset (`accounts/`) | Live; register/login/TOTP/reset E2Es passed | YES | Stage S3/S8 production checks (parent-verified 2026-10-07) | None |
-| Database | Migrations `0001`–`0008`, Neon Postgres (`db/`) | Live; health reports `db: "ok"` | YES | Production health + every account-stage E2E | None |
+| Database | Migrations `0001`–`0010`, Neon Postgres (`db/`) | Live; health reports `db: "ok"` | YES | Production health + every account-stage E2E | None |
 | Monitoring | Scheduler + diff + timeline (`monitoring/`) | Live; cadence settings + timeline verified | YES | Stage S8 production check | None |
 | Notifications | Ledger + Brevo lane (`monitoring/notify.py`) | Live; real reset email delivered via Brevo and completed end-to-end | YES | Stage S8 email-lane proof (parent-verified) | None |
 | Admin | Counts-only overview + audit (`accounts/admin.py`) | Live; non-admins get 404, admin sees counts only, no email strings in output | YES | Stage S11 production check (15/15) | None |
@@ -38,12 +38,12 @@ at `e31e016`.*
 ## C. Architecture Inventory
 
 - **Entry points:** `app.py` (HTTP server, all routes), `agent.py` (deterministic broker agent — the remediation core), `local_agent.py` (residential-IP runner for the user's own device), `browser_probe.py` (local Playwright probe), `proxy_relay.py` (dev-only egress relay for this VM)
-- **Modules:** `core/` (errors, context/request-ids, security headers + CSRF, logging, rate limiter, retention, feature flags / emergency switches), `accounts/` (auth, sessions, totp, consents, identifiers, households, domains, admin, audit, api_tokens, privacy export, passwords), `providers/` (base HTTP client, registry, xposedornot, hibp_passwords, ddg_discovery, username_platforms, domain_intel, mock), `scanning/` (orchestrator, jobs, worker, normalize, correlation, risk), `remediation/` (engine, service, worker, verify, verify_sources, registry_seed, letters), `monitoring/` (scheduler, diff, events, notify, service), `dashboard/` (service = Action Center, graph), `db/` (pool, migrate), `vault/` (crypto, store)
+- **Modules:** `core/` (errors, context/request-ids, security headers + CSRF, logging, rate limiter, retention, feature flags / emergency switches), `accounts/` (auth, sessions, totp, consents, identifiers, households, domains, admin, audit, api_tokens, privacy export, passwords), `providers/` (base HTTP client, registry, xposedornot, hibp_passwords, ddg_discovery, username_platforms, domain_intel, mock), `scanning/` (orchestrator, jobs, worker, normalize, correlation, risk, feedback, disputes), `remediation/` (engine, service, worker, verify, verify_sources, registry_seed, letters, source_checks), `monitoring/` (scheduler, diff, events, notify, service), `dashboard/` (service = Action Center, graph), `db/` (pool, migrate), `vault/` (crypto, store)
 - **Routes:** ~45 `/api/...` routes (every one also answering under the canonical `/api/v1/...` spelling — Phase 88) — anonymous (`/api/scan`, `/api/agent/*`, `/api/brokers`, `/api/providers/health`, `/api/health`), account (auth, consents, identifiers, domains, household, privacy export), scanning (`/api/scans`), remediation (`/api/remediation/run|cases|queue`), monitoring (`/api/monitoring/settings|timeline`, `/api/notifications`), dashboard (`/api/action-center`, `/api/graph`), tokens (`/api/tokens`), admin (`/api/admin/overview|audit`), plus `/trust`, `/reset`, `/.well-known/security.txt`, PWA assets (`/sw.js`, `/static/manifest.webmanifest`, icons)
-- **Services:** in-process workers — scan worker (SKIP LOCKED, hand-started jobs claimed before scheduled ones, backoff, dead after 3 attempts), remediation worker (5 concurrent, 40s probe budget), monitoring scheduler (hourly tick, period-bucketed idempotency, paused users skipped), retention worker (daily)
+- **Services:** in-process workers — scan worker (SKIP LOCKED, hand-started jobs claimed before scheduled ones, backoff, dead after 3 attempts), remediation worker (5 concurrent, 40s probe budget), monitoring scheduler (hourly tick, period-bucketed idempotency, paused users skipped), retention worker (daily; its loop also hosts the broker source sweep — SSRF-guarded re-fetch + hash compare of every broker opt-out page, `remediation/source_checks.py`)
 - **Providers:** XposedOrNot (email breaches), HIBP Pwned Passwords (k-anonymity), DuckDuckGo discovery, username presence (13 platforms), domain intel (Cloudflare DoH + crt.sh); MockProvider behind `LEAKGUARD_PROVIDERS=mock`, always flagged
-- **Database models:** users, sessions, consents, password_reset_tokens, identifiers, domains, scan_jobs, findings, brokers, remediation_cases, remediation_attempts, verification_checks, user_settings, notifications, households, household_members, audit_log, api_tokens
-- **Migrations:** `db/migrations/0001_vault.sql` … `0008_api_tokens.sql`, applied by an idempotent runner at startup
+- **Database models:** users, sessions, consents, password_reset_tokens, identifiers, domains, scan_jobs, findings, finding_feedback, broker_source_checks, brokers, remediation_cases, remediation_attempts, verification_checks, user_settings, notifications, households, household_members, audit_log, api_tokens
+- **Migrations:** `db/migrations/0001_vault.sql` … `0010_feedback_sources.sql`, applied by an idempotent runner at startup
 - **Frontend pages:** one SPA — Quick Scan, Action Center (signed-in home), Privacy Center (identifiers, consents, household, monitoring, timeline, notifications, API tokens, exposure map, export, deletion), human queue, `/trust`, `/reset`
 - **Browser automation:** Playwright probe locally only (`browser_probe.py`, subprocess-isolated); the server never runs a browser — walled brokers classify from HTTP evidence and the attempt trail records `browser: skipped on_server`
 - **External dependencies:** Render, Neon, Brevo (email), XposedOrNot, Have I Been Pwned, DuckDuckGo, Cloudflare DoH, crt.sh, UptimeRobot
@@ -108,9 +108,9 @@ evidence, and gap). Summary counts:
 
 | Status | Count |
 |---|---|
-| DONE | 110 |
-| PARTIAL | 45 |
-| NOT_DONE | 12 |
+| DONE | 123 |
+| PARTIAL | 36 |
+| NOT_DONE | 8 |
 | CUT (owner rule: AI phases + business model) | 11 |
 | NA (surface does not exist: file uploads, webhooks, containers) | 3 |
 | **Total** | **181** |
@@ -122,19 +122,22 @@ data, weakens authentication, or breaks deletion/retention today. The
 P0-tier open items are depth and verification gaps, listed first per the
 spec:
 
-1. **Backup/DR procedure is not yet written down** (Phase 79 PARTIAL) —
-   restores themselves are **tested** (drill 2026-10-07, Phases 78/170
-   DONE); what remains is the written RPO/RTO procedure.
-2. **Rollback is practised but not documented or rehearsed for the
-   database** (Phases 174, 173 PARTIAL) — app rollback = redeploy a prior
-   commit; configuration/DB rollback has no written plan.
+1. **Disaster recovery rests on one platform mechanism** (Phases 79/174
+   DONE — `docs/DISASTER_RECOVERY.md`, `docs/ROLLBACK.md`) — restores are
+   **tested** (drill 2026-10-07, Phases 78/170 DONE) and the procedure is
+   written, but the only backup is Neon free-plan PITR: its console-
+   visible history window bounds the RPO, and there is no second copy.
+2. **Production readiness / the final gate stay open on staging**
+   (Phases 173, 180 PARTIAL) — everything runs against the one live
+   service; there is no staging environment to rehearse against
+   (Phase 109).
 3. **WebAuthn/passkeys absent** (Phase 4 PARTIAL) — TOTP is the strongest
    available factor.
-4. **No distinct security-events view or anomaly alerting** (Phase 62
-   PARTIAL); **no automated dependency vulnerability scanning**
-   (the Phase 107 lock file exists; scanning does not);
-   security/privacy acceptance evidence is per-stage rather than one
-   consolidated runbook (Phases 147/148 PARTIAL).
+4. **No anomaly alerting and no automated dependency vulnerability
+   scanning** — the security-events *view* exists (Phase 62 DONE) and
+   acceptance evidence is consolidated (`docs/ACCEPTANCE.md`, Phases
+   147/148 DONE), but nothing watches the view, and the Phase 107 lock
+   file is pinned, not scanned.
 
 Platform risks (not code defects): most people-search brokers wall
 datacenter IPs — in the production acceptance run 27 of 40 cases
@@ -149,26 +152,24 @@ means "no longer indexed as of the check".
 Only genuinely open items, P0 → P3 (full detail in `PHASE_STATUS.md` and in
 `MIGRATION_PLAN.md` → "Final Remaining Implementation — order of work"):
 
-- **P0:** written backup/DR procedure (79) →
-  written rollback plan incl. database/config (174, 173) → security-
-  events view over the existing audit log (62) → consolidated security
-  + privacy acceptance runbooks (147, 148)
-  → WebAuthn/passkeys (4) → re-run the
-  Phase 180 final gate. *(Batch A closed 69, 70, 106, 107; Batch A.1
-  closed 73, 78, 170.)*
+- **P0:** WebAuthn/passkeys (4) → production-readiness evidence
+  (173) → re-run the Phase 180 final gate. *(Batch A closed 69, 70,
+  106, 107; Batch A.1 closed 73, 78, 170; Batch C closed 79, 174,
+  62, 147, 148.)*
 - **P1:** stored finding lifecycle states (25) → per-cycle report
   files in-repo (149). *(Batch B closed 88, 49, 142.)*
-- **P2:** source change detection (32) → false-positive feedback (156) +
-  source disputes (157) → scan budget engine
+- **P2:** scan budget engine
   (158) → workflow-version capture on attempts (31) → staging
   environment (109) →
   fake-broker harness (111, 162) → dead-letter replay (119) → standalone
   policy engine (153) → data-quality stage (160) → metrics + engineering
-  alerts (76, 77) → per-broker source-health dashboard (125) → incident
-  response plan (80) → search-exposure view (40) → cost/quota tracking
+  alerts (76, 77) → per-broker verification-success dashboard (125 —
+  source reachability/change shipped in Batch C) → search-exposure
+  view (40) → cost/quota tracking
   (66, 124) → accessibility pass (96) → performance/load evidence
   (115, 116) → browser-probe allowlists (137, 166) → legacy-surface
-  cleanup decision (178). *(Batch B closed 159, 120.)*
+  cleanup decision (178). *(Batch B closed 159, 120; Batch C closed
+  32, 156, 157, 80.)*
 - **P3:** organizations or a documented permanent no (57–59) → formal
   privacy policy + terms documents (82, 83) → report documents (85) →
   admin health depth (123) → support workflow

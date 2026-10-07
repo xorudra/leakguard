@@ -58,6 +58,37 @@ def is_admin(user_id):
     return auth_service.normalize_email(email) in configured
 
 
+# The security-events view (spec Phase 62): audit actions that are
+# about authentication and account security, matched by prefix so
+# the family stays complete as actions are added ('auth.login'
+# covers 'auth.login' and 'auth.login_failed'). Only meta is ever
+# exposed — action, actor kind, time; the audit detail (PII-free as
+# it is) stays in the full audit view.
+_SECURITY_ACTION_PATTERNS = (
+    "auth.login%",
+    "auth.password_reset%",
+    "auth.totp%",
+    "account.deleted%",
+    "api_token.%",
+    "privacy_export",
+)
+_SECURITY_EVENTS_LIMIT = 20
+
+
+def _security_events(conn):
+    rows = conn.execute(
+        "SELECT action, actor_kind, created_at FROM audit_log"
+        " WHERE action LIKE ANY(%s)"
+        " ORDER BY created_at DESC, id DESC LIMIT %s",
+        (list(_SECURITY_ACTION_PATTERNS), _SECURITY_EVENTS_LIMIT),
+    ).fetchall()
+    return [{
+        "action": row["action"],
+        "actor_kind": row["actor_kind"],
+        "created_at": _iso(row["created_at"]),
+    } for row in rows]
+
+
 def _counts_by(conn, table, column, where=""):
     rows = conn.execute(
         "SELECT " + column + " AS k, COUNT(*) AS n FROM " + table
@@ -88,6 +119,9 @@ def overview(admin_user_id):
         brokers = conn.execute(
             "SELECT COUNT(*) AS n FROM brokers WHERE active = true",
         ).fetchone()["n"]
+        security_events = _security_events(conn)
+    from remediation import source_checks
+
     result = {
         "users": {
             "total": int(users_total),
@@ -104,6 +138,13 @@ def overview(admin_user_id):
         # spec Phases 120/122): booleans only, so the owner can see
         # at a glance which capabilities a flag has switched off.
         "flags": flags.snapshot(),
+        # Per-broker source health (Phases 32/125-lite): the daily
+        # sweep's latest state per broker opt-out page — counts +
+        # flagged slugs only, from remediation/source_checks.py.
+        "source_health": source_checks.source_health(),
+        # The security-events view (Phase 62): the latest auth /
+        # account-security audit rows, meta only.
+        "security_events": security_events,
     }
     audit.record(admin_user_id, "admin", "admin.overview_viewed")
     return result

@@ -1386,6 +1386,26 @@ async function loadAdmin() {
       ["Providers", (d.providers.providers || [])
         .map((p) => p.name + ": " + p.status).join(", ") || "—"],
     ];
+    if (d.source_health) {
+      const sh = d.source_health;
+      let src = sh.ok + " ok, " + sh.changed + " changed, "
+        + sh.unreachable + " unreachable";
+      if (sh.changed_slugs && sh.changed_slugs.length) {
+        src += " — changed: " + sh.changed_slugs.join(", ");
+      }
+      if (sh.last_checked_at) {
+        src += " · last checked "
+          + new Date(sh.last_checked_at).toLocaleString();
+      }
+      lines.push(["Broker opt-out pages", src]);
+    }
+    if (d.security_events) {
+      const ev = d.security_events;
+      lines.push(["Security events",
+        ev.length ? ev.length + " recent — latest: " + ev[0].action
+          + " (" + new Date(ev[0].created_at).toLocaleString() + ")"
+          : "none yet"]);
+    }
     ov.innerHTML = "";
     lines.forEach(([label, value]) => {
       const row = document.createElement("div");
@@ -1943,6 +1963,93 @@ function pollFullScan(jobId, tries) {
   }, 3000);
 }
 
+/* False-positive feedback (Phase 156): the verdict buttons under a
+   finding. 'not_me' dims the row and — server-side, via the one
+   shared helper — also removes the exposure from Action Center
+   counts and monitoring alerts. Undo posts verdict 'none'. */
+async function postFindingFeedback(findingId, verdict, jobId, btn) {
+  if (btn) btn.disabled = true;
+  const d = await apiJson("/api/findings/feedback", {
+    method: "POST",
+    headers: { "X-Requested-With": "fetch",
+               "Content-Type": "application/json" },
+    body: JSON.stringify({ finding_id: findingId, verdict: verdict }),
+  });
+  if (d.ok) {
+    const r = await apiJson("/api/scans/" + jobId);
+    if (r.ok && r.data) renderFullScan(r.data);
+    loadActionCenter();
+  } else if (btn) {
+    btn.disabled = false;
+  }
+}
+
+function findingFeedbackRow(f, jobId) {
+  const meta = document.createElement("div");
+  meta.className = "findingMeta";
+  const mkBtn = (label, verdict) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btnGhost miniBtn";
+    b.textContent = label;
+    b.addEventListener("click", () =>
+      postFindingFeedback(f.id, verdict, jobId, b));
+    return b;
+  };
+  if (f.feedback === "not_me") {
+    const note = document.createElement("span");
+    note.className = "findingNote";
+    note.textContent = "You marked this: not me — it no longer counts or alerts.";
+    meta.appendChild(note);
+    meta.appendChild(mkBtn("Undo", "none"));
+  } else if (f.feedback === "confirmed") {
+    const note = document.createElement("span");
+    note.className = "findingNote";
+    note.textContent = "You confirmed this is you.";
+    meta.appendChild(note);
+    meta.appendChild(mkBtn("Undo", "none"));
+  } else {
+    const note = document.createElement("span");
+    note.className = "findingNote";
+    note.textContent = "Is this about you?";
+    meta.appendChild(note);
+    meta.appendChild(mkBtn("Not me", "not_me"));
+    meta.appendChild(mkBtn("This is me", "confirmed"));
+  }
+  return meta;
+}
+
+/* Dispute guidance (Phase 157): the server's per-source steps,
+   shown on demand under the finding. Returns {toggle, box}: the
+   toggle joins the finding's meta row, the box opens under it. */
+function findingDisputeBox(f) {
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "btnGhost miniBtn";
+  toggle.textContent = f.dispute.heading || "Dispute or correct this";
+  const box = document.createElement("div");
+  box.className = "disputeBox";
+  box.hidden = true;
+  const ol = document.createElement("ol");
+  (f.dispute.steps || []).forEach((step) => {
+    const li = document.createElement("li");
+    li.textContent = step;
+    ol.appendChild(li);
+  });
+  box.appendChild(ol);
+  if (f.dispute.url) {
+    const a = document.createElement("a");
+    a.className = "btnLink";
+    a.href = f.dispute.url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = (f.dispute.url_label || "Open") + " →";
+    box.appendChild(a);
+  }
+  toggle.addEventListener("click", () => { box.hidden = !box.hidden; });
+  return { toggle: toggle, box: box };
+}
+
 function renderFullScan(data) {
   const job = data.job;
   const findings = data.findings || [];
@@ -2007,8 +2114,10 @@ function renderFullScan(data) {
       h.textContent = group.label;
       wrap.appendChild(h);
       group.items.forEach((f) => {
+        const block = document.createElement("div");
         const row = document.createElement("div");
         row.className = "idRow";
+        if (f.feedback === "not_me") row.classList.add("dimmed");
         const left = document.createElement("span");
         const name = document.createElement("b");
         name.textContent = f.source_name;
@@ -2028,7 +2137,15 @@ function renderFullScan(data) {
           tags.appendChild(chip);
         });
         row.appendChild(tags);
-        wrap.appendChild(row);
+        block.appendChild(row);
+        const meta = findingFeedbackRow(f, job.id);
+        block.appendChild(meta);
+        if (f.dispute) {
+          const parts = findingDisputeBox(f);
+          meta.appendChild(parts.toggle);
+          block.appendChild(parts.box);
+        }
+        wrap.appendChild(block);
       });
     });
   }

@@ -41,7 +41,9 @@ never from the anonymous quick scan.
 from accounts import consents as consents_service
 from accounts.auth import _iso
 from db import pool
+from monitoring import diff as diff_mod
 from monitoring import service as monitoring_service
+from scanning import feedback as feedback_service
 
 _CASE_STATUSES = ("queued", "running", "submitted", "needs_human",
                   "blocked", "verified_removed", "reappeared")
@@ -182,11 +184,18 @@ def action_center(user_id):
     findings_total = 0
     if latest is not None:
         with pool.connection() as conn:
-            findings_total = conn.execute(
-                "SELECT COUNT(*) AS n FROM findings"
-                " WHERE user_id = %s AND job_id = %s",
+            latest_findings = conn.execute(
+                "SELECT identifier_id, provider, source_name"
+                " FROM findings WHERE user_id = %s AND job_id = %s",
                 (user_id, latest["id"]),
-            ).fetchone()["n"]
+            ).fetchall()
+        # Findings the user has disowned ('not_me', Phase 156) do
+        # not count here — the same shared helper the alerts and
+        # the scan view consult, so the surfaces cannot drift.
+        disowned = feedback_service.not_me_identities(user_id)
+        findings_total = sum(
+            1 for f in latest_findings
+            if diff_mod.identity_of(f) not in disowned)
 
     cases = {status: 0 for status in _CASE_STATUSES}
     closed = 0

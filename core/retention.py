@@ -22,6 +22,13 @@ Rules (mirrored in README's Operations section):
   audit_log is deliberately NOT touched: its actor_user_id carries
   no foreign key (0007) precisely so the PII-free trail of counts
   and actions survives the account it describes.
+* Broker source sweep (Phases 32/125): the daily LOOP also hosts
+  remediation/source_checks.maybe_run(), as a separate step after
+  the purge — run_once() itself stays a pure purge, so its many
+  library/test callers never touch the network. The sweep is armed
+  only when this worker was actually started (start_retention),
+  self-gates to one run per 24h via the checks table, and is
+  failure-isolated so it can never sink the purge it rides with.
 
 Failure isolation: every category runs in its own transaction and
 its own try/except, and every account purge is its own transaction
@@ -103,6 +110,7 @@ _USER_CHILDREN = (
     "DELETE FROM remediation_attempts WHERE case_id IN"
     " (SELECT id FROM remediation_cases WHERE user_id = %s)",
     "DELETE FROM remediation_cases WHERE user_id = %s",
+    "DELETE FROM finding_feedback WHERE user_id = %s",
     "DELETE FROM findings WHERE user_id = %s",
     "DELETE FROM scan_jobs WHERE user_id = %s",
     "DELETE FROM consents WHERE user_id = %s",
@@ -188,6 +196,28 @@ def run_once(now=None):
     return counts
 
 
+def _run_source_sweep():
+    """One broker source sweep as part of the daily tick (Phases
+    32/125). Returns {"source_checks": n} — brokers checked, 0 when
+    the sweep skipped (not armed / ran within 24h), -1 on failure.
+    Deliberately NOT part of run_once(): the purge's contract (and
+    its many direct callers) stays network-free; the sweep lives
+    only on the started worker's loop."""
+    try:
+        from remediation import source_checks
+
+        sweep = source_checks.maybe_run()
+        checked = (0 if sweep.get("skipped")
+                   else int(sweep.get("checked", 0)))
+    except Exception as exc:
+        checked = -1
+        logging_setup.log_error(
+            None, "retention source sweep failed: "
+            + type(exc).__name__)
+    _log("retention_source_sweep checked=%s" % checked)
+    return {"source_checks": checked}
+
+
 def _loop():
     while not _stop.is_set():
         try:
@@ -195,6 +225,7 @@ def _loop():
         except Exception as exc:
             logging_setup.log_error(
                 None, "retention run failed: " + type(exc).__name__)
+        _run_source_sweep()
         _stop.wait(TICK_SECONDS)
 
 
@@ -204,6 +235,16 @@ def start_retention():
     with _thread_lock:
         if _thread is not None and _thread.is_alive():
             return True
+        # The broker source sweep (remediation/source_checks.py)
+        # arms here — and only here: the sweep exists because this
+        # worker runs in production, so it must not fire from
+        # library/test calls of run_once().
+        try:
+            from remediation import source_checks
+
+            source_checks.arm()
+        except Exception:
+            pass  # a missing sweep must never stop retention
         _stop.clear()
         _thread = threading.Thread(
             target=_loop, name="leakguard-retention", daemon=True)

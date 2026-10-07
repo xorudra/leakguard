@@ -23,7 +23,7 @@ from accounts import consents as consents_service
 from accounts import identifiers as identifiers_service
 from core import errors
 from db import pool
-from scanning import risk
+from scanning import disputes, feedback, risk
 
 _JOB_LIST_COLUMNS = "id, status, score, created_at, finished_at"
 _JOB_FULL_COLUMNS = (
@@ -159,5 +159,15 @@ def get_job(user_id, job_id):
             " ORDER BY f.discovered_at, f.id",
             (job_id, user_id),
         ).fetchall()
-    return {"job": _public_full(row),
-            "findings": [_public_finding(f) for f in findings]}
+    verdicts = feedback.feedback_map(
+        user_id, [f["id"] for f in findings])
+    public = []
+    for f in findings:
+        entry = _public_finding(f)
+        # The caller's false-positive verdict (Phase 156) and the
+        # dispute/correction steps for this source (Phase 157) ride
+        # along with the row they describe.
+        entry["feedback"] = verdicts.get(str(f["id"]))
+        entry["dispute"] = disputes.guidance_for(f)
+        public.append(entry)
+    return {"job": _public_full(row), "findings": public}

@@ -20,6 +20,13 @@ Rules:
   the evidence as a verification check) and earns a 'reappeared'
   notification. Matching is conservative and documented in
   _broker_matches_finding.
+* False-positive feedback (Phase 156): a finding whose identity
+  the user has marked 'not_me' (scanning/feedback.py — the one
+  shared helper) is excluded from the new-exposure side of this
+  hook entirely: no per-finding notification, no summary count,
+  and it cannot flip a verified_removed case back to reappeared.
+  The diff itself is untouched — 'resolved' notices for findings
+  the user still owns behave exactly as before.
 * The hook is idempotent per job: the summary's dedupe key is
   'summary:<job id>', and a job that already has one is skipped.
 * Delivery honours the 'notifications' consent inside
@@ -32,6 +39,7 @@ import urllib.parse
 
 from db import pool
 from monitoring import diff, notify
+from scanning import feedback as feedback_service
 
 NEW_FINDING_CAP = 5
 
@@ -220,11 +228,17 @@ def handle_scan_completed(job_id):
     delta = diff.diff_findings(previous_findings, current)
     new_findings = delta["new"]
     resolved_findings = delta["resolved"]
+    # 'not_me' identities are excluded from everything this hook
+    # would say about NEW exposures (see the module docstring).
+    disowned = feedback_service.not_me_identities(user_id)
+    notifiable_new = [
+        f for f in new_findings
+        if diff.identity_of(f) not in disowned]
 
     created = []
     emitted_new = 0
     if not baseline:
-        for finding in new_findings[:NEW_FINDING_CAP]:
+        for finding in notifiable_new[:NEW_FINDING_CAP]:
             try:
                 created.append(notify.create_notification(
                     user_id, "new_finding", _finding_payload(finding),
@@ -244,14 +258,14 @@ def handle_scan_completed(job_id):
     reappeared = 0
     if not baseline:
         reappeared = _handle_reappearance(
-            user_id, new_findings, job_id, created)
+            user_id, notifiable_new, job_id, created)
 
     extra_new = 0 if baseline else max(
-        0, len(new_findings) - emitted_new)
+        0, len(notifiable_new) - emitted_new)
     summary_payload = {
         "job_id": str(job_id),
         "baseline": baseline,
-        "new_count": len(new_findings),
+        "new_count": len(notifiable_new),
         "resolved_count": len(resolved_findings),
         "continuing_count": delta["continuing"],
         "extra_new_count": extra_new,

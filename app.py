@@ -63,6 +63,7 @@ from providers import registry as providers_registry
 from remediation import registry_seed as broker_registry
 from remediation import service as remediation_service
 from remediation import verify as remediation_verify
+from scanning import feedback as feedback_service
 from scanning import jobs as scan_jobs_service
 from scanning import risk as risk_engine
 
@@ -607,7 +608,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/consents", "/api/identifiers", "/api/scans",
                 "/api/domains", "/api/remediation/run",
                 "/api/household/members", "/api/tokens",
-                "/api/privacy/export") \
+                "/api/privacy/export", "/api/findings/feedback") \
                 or route.startswith("/api/domains/") \
                 or route.startswith("/api/remediation/cases/"):
             return self._accounts_post(route)
@@ -889,6 +890,17 @@ class Handler(BaseHTTPRequestHandler):
             record = self._call(domains_service.verify_domain,
                                 user["id"], domain_id)
             return self._json(200, {"domain": record})
+        if route == "/api/findings/feedback":
+            # False-positive feedback (Phase 156): the verdict is
+            # owner-scoped inside the service (a foreign finding id
+            # answers 404); 'none' clears the verdict again.
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            verdict = self._call(
+                feedback_service.set_verdict, user["id"],
+                payload.get("finding_id"), payload.get("verdict"))
+            return self._json(200, {"feedback": verdict})
         if route == "/api/scans":
             # Emergency control: account full scans only — the
             # anonymous Quick Scan (/api/scan) is never flag-gated.

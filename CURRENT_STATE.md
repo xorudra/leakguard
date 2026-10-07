@@ -6,6 +6,19 @@ The pre-upgrade Phase 0 audit (v2.5) is preserved in git history at
 commit `76565e0`; the Sentinel-era state file this replaces is in history
 at `e31e016`.*
 
+***Owner-ordered audit issue — 2026-10-07 (night).** The owner directed
+a standalone audit pass and an explicit gate: the three deliverables
+(this file, `MIGRATION_PLAN.md`, `PHASE_STATUS.md`) are produced from
+the production inspection and reconciliation below, and **no phase
+implementation proceeds until the owner approves these audit results**.
+`PHASE_STATUS.md` is re-issued in the owner's audit taxonomy
+(DONE / PARTIAL / MISSING / INSECURE / UNVERIFIED / NOT APPLICABLE)
+with per-phase evidence, source files, gap, dependencies, required
+next action, and required tests. No functionality was rewritten or
+deleted during the audit; the deterministic zero-AI Agent Mode, broker
+playbooks, browser probing, and Quick Scan are preserved as-is, and no
+AI dependency was introduced.*
+
 ***v2.1 reconciliation refresh — 2026-10-07 (evening).** Spec v2.1 added
 a non-negotiable live/repository reconciliation to Phase 0. It was run
 the same day: the exact production commit was read from the Render
@@ -140,36 +153,47 @@ reconciled state; nothing in this file rests on UI copy alone.*
 
 ## G. Phase Status
 
-Full per-phase table: **`PHASE_STATUS.md`** (all 181 phases with tier, status,
-evidence, and gap). Summary counts:
+Full per-phase table: **`PHASE_STATUS.md`** (all 181 phases with tier,
+status, evidence, source files, gap, dependencies, required next
+action, and required tests). Summary counts, in the owner's audit
+taxonomy (owner-ordered audit issue, 2026-10-07):
 
 | Status | Count |
 |---|---|
-| DONE | 135 |
+| DONE | 124 |
 | PARTIAL | 31 |
-| NOT_DONE | 1 |
-| CUT (owner rule: AI phases + business model) | 11 |
-| NA (surface does not exist: file uploads, webhooks, containers) | 3 |
+| MISSING | 1 |
+| INSECURE | 1 |
+| UNVERIFIED | 10 |
+| NOT APPLICABLE | 14 |
 | **Total** | **181** |
 
-*(v2.1 reconciliation, 2026-10-07: Phases 173 and 180 moved PARTIAL →
-DONE — every blocker their gap text named (CI 106, restore tests 170,
-staging 109) had closed, and the reconciliation supplied the remaining
-gate evidence: dashboard-pinned production commit, full-suite pass at
-HEAD, and a fresh live verification pass.)*
+*(How this differs from the pre-audit vocabulary: the 11 owner-CUT
+phases and 3 surface-NA phases are grouped as NOT APPLICABLE (14);
+Phase 98 is MISSING; Phase 70 (SSRF) is INSECURE on its own documented
+DNS-rebinding residual; and 10 phases whose record contains no test
+and no live check — documentation, review-record, and rehearsal gaps,
+listed in `PHASE_STATUS.md` — are UNVERIFIED rather than DONE. The
+v2.1 reconciliation earlier the same day moved Phases 173 and 180
+PARTIAL → DONE on the gate evidence: dashboard-pinned production
+commit, full-suite pass at HEAD, and a fresh live verification pass.)*
 
 ## H. Critical Risks
 
 **No P0 production blocker is open.** Nothing in the open list exposes user
 data, weakens authentication, or breaks deletion/retention today. The
+one INSECURE finding (Phase 70, item 4 below) is a narrow, documented
+residual in a defense-in-depth control, not an open hole. The remaining
 P0-tier open items are depth and verification gaps, listed first per the
 spec:
 
-1. **Disaster recovery rests on one platform mechanism** (Phases 79/174
-   DONE — `docs/DISASTER_RECOVERY.md`, `docs/ROLLBACK.md`) — restores are
-   **tested** (drill 2026-10-07, Phases 78/170 DONE) and the procedure is
-   written, but the only backup is Neon free-plan PITR: its console-
-   visible history window bounds the RPO, and there is no second copy.
+1. **Disaster recovery rests on one platform mechanism** (Phase 79 DONE —
+   `docs/DISASTER_RECOVERY.md`; `docs/ROLLBACK.md` exists but Phase 174
+   is UNVERIFIED: no *application* rollback rehearsal is on record) —
+   restores are **tested** (drill 2026-10-07, Phases 78/170 DONE) and
+   the procedure is written, but the only backup is Neon free-plan PITR:
+   its console-visible history window bounds the RPO, and there is no
+   second copy.
 2. **One production service on a free tier.** Production readiness and
    the final gate are closed (Phases 173, 180 DONE — staging exists,
    Phase 109, and the v2.1 reconciliation verified the gate criteria
@@ -180,7 +204,16 @@ spec:
    scanning** — the security-events *view* exists (Phase 62 DONE) and
    acceptance evidence is consolidated (`docs/ACCEPTANCE.md`, Phases
    147/148 DONE), but nothing watches the view, and the Phase 107 lock
-   file is pinned, not scanned.
+   file is pinned, not scanned (Phase 107 UNVERIFIED in the audit
+   taxonomy — no scan run is on record).
+4. **SSRF guard has a documented DNS-rebinding residual (Phase 70 —
+   the audit's one INSECURE finding).** `core/ssrf.py` resolves and
+   validates a host, then the fetch re-resolves — a hostile DNS answer
+   swapped between the two lookups could reach a non-public address.
+   The exposed fetch paths are constrained to broker-registry hosts,
+   which bounds the practical risk, but the window is real: the fix
+   (fetch via the validated address) and a rebinding regression test
+   are recorded as the phase's required next action and required test.
 
 Platform risks (not code defects): most people-search brokers wall
 datacenter IPs — in the production acceptance run 27 of 40 cases

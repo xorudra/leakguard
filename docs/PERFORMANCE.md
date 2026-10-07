@@ -201,6 +201,12 @@ link the local bench above cannot reproduce:
   per-finding notices are in-app only, written by
   notify.create_notifications_batch in one transaction, and
   email is the once-per-cycle scan_summary digest.
-* **Post-fix live timing:** _to be filled in after the staging
-  re-deploy of the batch change — deliberately left blank
-  rather than estimated._
+* **Post-fix live timing (staging, 2026-10-08, commit
+  1387fc4):** flip convergence 10.49 s after job completion
+  (server timestamps); **all 214 finding_resolved ledger rows
+  existed 17.83 s after completion, sharing a single created_at
+  — the one batch insert** — versus the ~12-minute trickle
+  before the fix. The remaining ~10–18 s is the same
+  connection-churn residual above (hook reads over the WAN
+  link), not per-row work: both the lifecycle writer and the
+  notification writer are now constant-statement.

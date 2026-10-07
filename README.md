@@ -2,28 +2,34 @@
 
 **Your data got leaked. Find it. Remove it.**
 
-A free, GUI-based tool (web UI, no CLI) that:
+🔗 **Live:** https://leakguard-hh8e.onrender.com
 
-1. **Scans** your email against real breach databases — [XposedOrNot](https://xposedornot.com) (free, no key) — and checks a password against [Have I Been Pwned Pwned Passwords](https://haveibeenpwned.com/Passwords) using k-anonymity, so the password itself is never sent or stored.
-2. **Scores** your exposure 0–100 and lists exactly which breaches contain your email and what types of data were exposed.
-3. **Agent Mode (zero-token)** — the agent does the boring work with plain scripts, no AI: it builds a personal removal plan from per-broker **playbooks** (16 hand-mapped, 40 covered), then **probes each broker's live opt-out page** — reading its real form fields, building the pre-filled payload, and honestly reporting blockers (CAPTCHA, login, bot protection, JavaScript walls) instead of pretending. Submission only happens behind your explicit per-broker confirmation, and only to the broker's own host (SSRF-guarded). If a form can't be understood, an optional fallback may ask **your own free gateway** (FreeLLMAPI — `LEAKGUARD_FREE_LANE_URL/KEY/MODEL`) to classify the fields. That fallback is off by default, costs no Claude/Muse tokens ever, and silently stays off if your gateway is down or rate-limited.
-4. **Removes (manual path)** — a Removal Centre with the same 40 brokers: opt-out links, a tracking board (saved in your browser), and a one-click **erasure-request letter generator** citing India's DPDP Act §12, GDPR Art. 17, or CCPA.
-5. **Google** — builds the searches a stranger would run on you and links Google's own *Results about you* removal tool.
+A free web tool (GUI, no CLI) that scans for your leaked personal data and walks you through removing it — built for India's DPDP Act, GDPR and CCPA erasure rights. No accounts, no database, nothing to install.
 
-> **Field reality (measured, Oct 2026, updated for v2.1):** ThatsThem's opt-out moved to `/optout` (fixed) and Acxiom's official form is the `isapps.acxiom.com` page (fixed, HTTP 200). With the **browser probe** (Playwright + real Chromium, `browser_probe.py`), Spokeo's opt-out form renders fully — fields `url` + `email` — and its CAPTCHA-at-submit is detected and reported. BeenVerified / Whitepages still refuse **this dev server's datacenter network** in both HTTP and browser modes (403 / connection failures): that's IP reputation, not a code bug — Agent Mode is designed to also run on the user's own machine/IP (like a local app), where those walls are far lower. Nuwber's whole domain was unreachable from this network during testing. CAPTCHA, email-confirmation and phone-verification steps will always need the user — by design.
->
-> **Browser layer setup (optional):** `pip install -r requirements-optional.txt` and have any Chromium/Chrome installed. If your network's proxy can't be used by Chromium directly, run `python3 proxy_relay.py` (a local no-auth CONNECT relay to your env proxy) and set `LEAKGUARD_BROWSER_PROXY=http://127.0.0.1:8899`. Set `LEAKGUARD_NO_BROWSER=1` to disable the layer.
->
-> **v2.2 — three more layers, all measured live:**
-> - **Relay-reader probe:** if a broker 403s this server, the deep probe retries through a public relay reader on a different network (with backoff — the free relay is intermittent). This **fixed Whitepages**: real page + listing-search forms + pre-filled payload, where direct access is 403.
-> - **Local Runner (`local_agent.py`):** for sites that block *every* datacenter route (BeenVerified's Cloudflare challenges scripts, relays and headless browsers alike; Nuwber refused this network entirely) — run the same zero-token engine **on your own device**, under your home IP, and finish the human steps in your own browser. `python3 local_agent.py` — no dependencies, nothing is submitted automatically.
-> - **Free-lane fallback verified end-to-end:** with the user's FreeLLMAPI gateway configured (`LEAKGUARD_FREE_LANE_MODEL=openai/gpt-oss-20b` recommended — a Groq-served model), unknown form fields are classified correctly (measured: `eaddr→email`, `subscriber_nm→full_name`, junk→ignore). Two gotchas found by testing: reasoning models need a ≥900-token budget or they truncate before answering (the engine handles this and extracts the JSON from reasoning text), and Gemini models currently can't serve as the lane if the gateway's Google key is disabled — use a Groq/OpenRouter-served model instead.
+## What it does
 
-### The honest limits
+1. **Scan** — enter your email; LeakGuard checks real breach databases ([XposedOrNot](https://xposedornot.com), free, no API key) and tells you which breaches contain you and what data types leaked. You can also check a password against [Have I Been Pwned](https://haveibeenpwned.com/Passwords) — via k-anonymity, so the password itself never leaves your device.
+2. **Score** — an exposure score from 0–100 with a clear risk label.
+3. **Remove** — a Removal Centre covering 40 data brokers and people-search sites: opt-out links, step-by-step flows, a progress tracker (saved only in your browser), and a one-click erasure-request letter generator citing DPDP Act §12, GDPR Art. 17, or CCPA.
+4. **Google** — builds the searches a stranger would run on you, and links Google's own *Results about you* removal tool.
+
+## Agent Mode (zero-token)
+
+The agent does the boring work with plain deterministic scripts — **no AI tokens are burned, ever**.
+
+- **Personal plan** — per-broker playbooks (16 hand-mapped, all 40 covered) turned into a removal plan for your details.
+- **Live probe** — for each broker, the agent fetches the real opt-out page and inspects it in layers: direct HTTP → relay reader (a different network, for sites that block servers) → a real headless browser (for JavaScript walls). It reads the actual form fields, pre-fills the payload with your details, and honestly reports blockers — CAPTCHA, login walls, bot protection — instead of pretending they aren't there.
+- **Email channels** — some sites (e.g. BeenVerified, Nuwber) wall off their web forms from datacenter networks entirely. For those, LeakGuard surfaces their official opt-out email addresses, which work from anywhere.
+- **Guarded submit** — submission happens only behind your explicit per-broker confirmation, and only to the broker's own host.
+- **Optional free-lane fallback** — if a form's fields are too cryptic for the matcher, LeakGuard can ask *your own* FreeLLMAPI gateway to classify them (`LEAKGUARD_FREE_LANE_URL` / `LEAKGUARD_FREE_LANE_KEY` / `LEAKGUARD_FREE_LANE_MODEL`, e.g. `openai/gpt-oss-20b` or `gemini-3.5-flash-lite`). Off by default; uses only your gateway's free tiers.
+
+## The honest limits
+
 - **Can be removed:** data brokers, people-search sites, Google search results — they must answer a legal erasure request.
-- **Cannot be removed:** a breach dump already copied to Telegram, dark-web forums or torrents. No tool can delete every copy — anyone promising that is lying. The defence there is changing compromised passwords and using 2FA.
+- **Cannot be removed:** a breach dump already copied to Telegram, dark-web forums or torrents. No tool can delete every copy — anyone promising that is lying. The defence there is changing compromised passwords and turning on 2FA.
+- CAPTCHA, email-confirmation and phone-verification steps always need you. That's by design — they're proof you're a human removing *your own* data.
 
-## Run it
+## Run it yourself
 
 Zero dependencies — Python 3 standard library only.
 
@@ -34,23 +40,24 @@ python3 app.py
 
 Environment: `PORT` (default 8000), `HOST` (default 0.0.0.0).
 
-## Deploy (Render free tier)
+**On your own device (recommended for walled sites):** `python3 local_agent.py` runs the same engine under your home IP, where broker sites behave normally. It probes, prints the plan, and can open opt-out pages in your browser — it never submits anything automatically.
 
-`render.yaml` is included: create a Web Service from this repo, or use Render Blueprint. Start command is `python3 app.py` — no build step, no requirements to install.
+**Optional browser probe layer:** `pip install -r requirements-optional.txt` plus any Chromium/Chrome. On proxy-locked networks, run `python3 proxy_relay.py` and set `LEAKGUARD_BROWSER_PROXY=http://127.0.0.1:8899`. Disable with `LEAKGUARD_NO_BROWSER=1`.
+
+## Deploy
+
+`render.yaml` is included — create a Web Service from this repo on Render's free tier (or use Blueprint). Start command: `python3 app.py`. No build step.
 
 ## Privacy
 
-- No accounts, no database, no server-side storage of scans.
-- Broker removal progress is stored only in the visitor's browser (`localStorage`).
-- Passwords are checked via k-anonymity (only the first 5 chars of the SHA-1 hash leave the server) and are never logged.
+- No accounts, no database, **no server-side storage of scans**.
+- Removal progress lives only in the visitor's browser (`localStorage`).
+- Password checks use k-anonymity — only the first 5 characters of the SHA-1 hash ever leave, and passwords are never logged.
 
 ## Roadmap
 
-- **v1:** breach + password scan, exposure score, Removal Centre (40 brokers), letter generator, Google tools.
-- **v2 (this):** Agent Mode in the same GUI — playbooks, personal removal plan, live form probe with blocker detection, guarded submission, optional free-lane field classification. One LeakGuard, one repo.
-- **v2.1 (this):** headless-browser (Playwright) probe layer for JavaScript/bot-walled opt-out pages, fixed ThatsThem + Acxiom opt-out URLs, local proxy relay for locked-down networks.
-- **v2.2:** browser form *filling* (not just probing) for rendered forms; email-confirmation tracking.
-- **v3:** 150+ brokers; recurring monitoring — re-scan monthly, alert when an email appears in a *new* breach or a broker re-lists you.
+- **v3:** 150+ brokers; recurring monitoring — monthly re-scans with alerts when your email appears in a *new* breach or a broker re-lists you.
+- Browser form *filling* for rendered opt-out forms; email-confirmation tracking.
 
 ## License
 

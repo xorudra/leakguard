@@ -29,6 +29,15 @@ Rules (thresholds are the module constants below):
                       overlap the trailing hour, restricted to
                       rows actually seen inside it — a close,
                       stated approximation, not a per-event log.
+* provider_budget   — any provider's calls today reached its
+                      daily call budget (Phases 66/124: the
+                      usage ledger provider_usage_daily vs the
+                      operator-set budgets in providers/usage.py).
+                      Observed = how many providers are
+                      exhausted; the audit detail also names the
+                      first exhausted provider and the full list.
+                      One alert per day for the rule as a whole —
+                      never one email per provider.
 
 On a trigger, for each fired rule:
 * an audit row (actor_kind 'system', action 'engineering_alert',
@@ -120,6 +129,33 @@ def _provider_outage(conn):
     return None
 
 
+def _provider_budget(conn):
+    from providers import usage
+
+    # The evaluator reads the ledger table, so flush this
+    # process's in-memory counts first (best-effort, never raises)
+    # — otherwise the rule would lag the batch by up to a flush.
+    usage.flush()
+    rows = conn.execute(
+        "SELECT provider, calls FROM provider_usage_daily"
+        " WHERE day = (now() AT TIME ZONE 'UTC')::date",
+    ).fetchall()
+    exhausted = sorted(
+        row["provider"] for row in rows
+        if usage.budget_for(row["provider"]) is not None
+        and int(row["calls"]) >= usage.budget_for(row["provider"]))
+    if not exhausted:
+        return None
+    return {"rule": "provider_budget",
+            "metric": "provider_daily_budget",
+            "observed": len(exhausted),
+            "threshold": 1,
+            # Flat scalars only: the audit writer drops non-scalar
+            # detail values by design (flat facts, not payloads).
+            "extra": {"provider": exhausted[0],
+                      "exhausted_providers": ", ".join(exhausted)}}
+
+
 def _error_spike(conn):
     total = conn.execute(
         "SELECT COALESCE(SUM(occurrence_count), 0) AS n"
@@ -137,7 +173,7 @@ def _error_spike(conn):
 
 
 _RULES = (_queue_buildup, _worker_failures, _provider_outage,
-          _error_spike)
+          _error_spike, _provider_budget)
 
 
 def _deliver(fired):
@@ -145,21 +181,22 @@ def _deliver(fired):
     notification dedupe key makes repeats inside a day land
     'suppressed', so this is safe to run every tick."""
     day = datetime.now(timezone.utc).date().isoformat()
+    detail = {
+        "rule": fired["rule"],
+        "metric": fired["metric"],
+        "observed": fired["observed"],
+        "threshold": fired["threshold"],
+    }
+    # A rule may attach rule-specific facts (provider_budget names
+    # the exhausted provider(s)); they ride both the audit detail
+    # and the notification payload, keys never colliding with the
+    # four base fields.
+    detail.update(fired.get("extra") or {})
     audit.record(None, "system", "engineering_alert", "alert_rule",
-                 fired["rule"], {
-                     "rule": fired["rule"],
-                     "metric": fired["metric"],
-                     "observed": fired["observed"],
-                     "threshold": fired["threshold"],
-                 })
+                 fired["rule"], detail)
     for admin_id in admin_service.admin_user_ids():
         notify.create_notification(
-            admin_id, "engineering_alert", {
-                "rule": fired["rule"],
-                "metric": fired["metric"],
-                "observed": fired["observed"],
-                "threshold": fired["threshold"],
-            },
+            admin_id, "engineering_alert", detail,
             dedupe_key="eng:%s:%s" % (fired["rule"], day),
             mode="always")
 

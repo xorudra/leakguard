@@ -24,6 +24,7 @@ from accounts.auth import _iso
 from core import flags
 from db import pool as db_pool
 from providers import registry as providers_registry
+from providers import usage as provider_usage
 
 
 def _admin_emails():
@@ -119,6 +120,47 @@ def _counts_by(conn, table, column, where=""):
 
 _DAY = "interval '24 hours'"
 
+# Start of the current UTC day as a timestamptz expression (the
+# usage ledger buckets by UTC date — providers/usage.py).
+_UTC_DAY_START = ("(date_trunc('day', now() AT TIME ZONE 'UTC')"
+                  " AT TIME ZONE 'UTC')")
+
+
+def _provider_usage_block(conn):
+    """Today's provider usage vs daily budgets (Phases 66, 124).
+
+    One entry per provider that has a budget or any usage today:
+    calls / successes / failures from provider_usage_daily
+    (migration 0014), the budget from providers/usage.py BUDGETS
+    (an operator-set safety budget, None when the provider has
+    none), the percentage of the budget used, and whether the
+    budget is spent. Sorted by provider name. Callers flush the
+    in-memory tracker first (metrics()/overview() do), so the
+    table is current for this process."""
+    rows = conn.execute(
+        "SELECT provider, calls, successes, failures"
+        " FROM provider_usage_daily"
+        " WHERE day = (now() AT TIME ZONE 'UTC')::date",
+    ).fetchall()
+    by_provider = {row["provider"]: row for row in rows}
+    names = sorted(set(by_provider) | set(provider_usage.BUDGETS))
+    block = []
+    for name in names:
+        row = by_provider.get(name)
+        calls = int(row["calls"]) if row else 0
+        budget = provider_usage.budget_for(name)
+        block.append({
+            "provider": name,
+            "calls": calls,
+            "successes": int(row["successes"]) if row else 0,
+            "failures": int(row["failures"]) if row else 0,
+            "budget": budget,
+            "pct_used": (round(100.0 * calls / budget, 1)
+                         if budget else None),
+            "exhausted": bool(budget) and calls >= budget,
+        })
+    return block
+
 
 def _metrics_block(conn):
     """Operational metrics (spec Phase 76): live queue state plus
@@ -133,8 +175,19 @@ def _metrics_block(conn):
     counted by created_at. Error-event figures aggregate the
     ledger's hour-bucket rollups (error_events.bucket_start inside
     the window), so occurrence totals carry at most one partial
-    bucket of edge at the window boundary."""
+    bucket of edge at the window boundary. The providers section
+    and the scan_jobs 'today' figures use the current UTC day —
+    the usage ledger's bucket (providers/usage.py)."""
     scan_by_status = _counts_by(conn, "scan_jobs", "status")
+    jobs_today = conn.execute(
+        "SELECT COUNT(*) AS jobs, COUNT(DISTINCT user_id) AS users,"
+        " COALESCE((SELECT MAX(c) FROM"
+        "   (SELECT COUNT(*) AS c FROM scan_jobs"
+        "    WHERE created_at >= "
+        + _UTC_DAY_START +
+        "    GROUP BY user_id) AS per_user), 0) AS max_per_user"
+        " FROM scan_jobs WHERE created_at >= " + _UTC_DAY_START,
+    ).fetchone()
     terminal = conn.execute(
         "SELECT"
         " COUNT(*) FILTER (WHERE status = 'done') AS completed,"
@@ -198,9 +251,20 @@ def _metrics_block(conn):
         + " GROUP BY context, error_class"
         " ORDER BY n DESC, context, error_class LIMIT 5",
     ).fetchall()
+    providers_block = _provider_usage_block(conn)
     return {
         "scan_jobs": {
             "by_status": scan_by_status,
+            # Per-user volume for the current UTC day, aggregate
+            # only (Phase 66): signed-in work is attributed via
+            # scan_jobs.user_id; anonymous traffic has no user
+            # identity by design and is governed by the per-IP
+            # rate limits instead (providers/usage.py docstring).
+            "today": {
+                "jobs": int(jobs_today["jobs"]),
+                "distinct_users": int(jobs_today["users"]),
+                "max_jobs_per_user": int(jobs_today["max_per_user"]),
+            },
             "last_24h": {
                 "completed": int(terminal["completed"]),
                 "failed": int(failed_24h),
@@ -234,12 +298,16 @@ def _metrics_block(conn):
                 "occurrences": int(row["n"]),
             } for row in top_rows],
         },
+        # Provider cost monitoring (Phase 124): today's calls
+        # against each provider's daily budget (Phase 66).
+        "providers": providers_block,
     }
 
 
 def metrics(admin_user_id):
     """The metrics block on its own (GET /api/admin/metrics) —
     the same object overview() embeds under "metrics"."""
+    provider_usage.flush()
     with db_pool.connection() as conn:
         block = _metrics_block(conn)
     audit.record(admin_user_id, "admin", "admin.metrics_viewed")
@@ -249,6 +317,7 @@ def metrics(admin_user_id):
 def overview(admin_user_id):
     """Platform aggregates for the owner. Counts only — see the
     module docstring's privacy contract."""
+    provider_usage.flush()
     with db_pool.connection() as conn:
         users_total = conn.execute(
             "SELECT COUNT(*) AS n FROM users WHERE deleted_at IS NULL",

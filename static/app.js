@@ -1555,6 +1555,22 @@ async function loadAdmin() {
       lines.push(["Errors (24h)", errText]);
       lines.push(["Security events (24h)",
         fmtCounts(m.security_events_by_kind_last_24h)]);
+      const pv = m.providers || [];
+      if (pv.length) {
+        const used = pv.filter((p) => p.calls > 0 || p.exhausted);
+        const text = used.length ? used.map((p) =>
+          p.provider + " " + p.calls
+          + (p.budget ? "/" + p.budget + " calls" : "")
+          + (p.exhausted ? " — BUDGET SPENT" : ""))
+          .join(" · ") : "no provider calls yet today";
+        lines.push(["Providers (today)", text]);
+        const jt = (m.scan_jobs && m.scan_jobs.today) || {};
+        if (jt.jobs != null) {
+          lines.push(["Scan jobs (today)",
+            jt.jobs + " jobs by " + jt.distinct_users
+            + " user(s), max " + jt.max_jobs_per_user + " per user"]);
+        }
+      }
     }
     ov.innerHTML = "";
     lines.forEach(([label, value]) => {

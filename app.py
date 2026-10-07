@@ -51,6 +51,7 @@ from accounts import domains as domains_service
 from accounts import households as households_service
 from accounts import identifiers as identifiers_service
 from accounts import privacy as privacy_service
+from accounts import provider_usage as provider_usage_service
 from accounts import ratelimit
 from accounts import sessions as sessions_mod
 from accounts import webauthn as webauthn_service
@@ -72,6 +73,15 @@ from scanning import risk as risk_engine
 BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
 BROKERS_FILE = BASE / "brokers.json"
+
+# Provider usage ledger (Phases 66/124): inject the database
+# persister/loader into providers/usage.py's tracker, so provider
+# calls are counted against the daily budgets and persisted to
+# provider_usage_daily. Every provider call in this process —
+# HTTP handlers and the in-process workers/scheduler alike —
+# flows through HttpClient, so installing once here covers all
+# of them.
+provider_usage_service.install()
 
 EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$")
 MAX_BODY = 256 * 1024

@@ -12,7 +12,13 @@ Contract (spec Phase 8):
                        never on 4xx), and a per-provider circuit breaker
                        (opens after 3 consecutive failed calls, half-open
                        probe after a 60s cooldown, closes on success).
-                       Every completed call is reported to the HealthTracker.
+                       Every completed call is reported to the HealthTracker
+                       and to the usage ledger (providers/usage.py), which
+                       also enforces the provider's daily call budget:
+                       an exhausted provider is refused before any network
+                       work with status "error", error_kind
+                       "budget_exhausted" — the same honest typed shape a
+                       failed call takes, distinct from "circuit_open".
 
 The transport is injectable (a callable url/headers/timeout ->
 (status_code, text)) so adapter behaviour is fully testable offline.
@@ -167,13 +173,36 @@ class HttpClient:
         if wait > 0:
             self._sleep(wait)
 
-    def _report(self, ok, latency_ms, error_kind):
+    def _report(self, ok, latency_ms, error_kind, counted=True):
         if self.health is not None:
             self.health.record(self.provider_name, ok, latency_ms, error_kind)
+        if counted:
+            # The usage ledger (Phases 66/124): one logical call.
+            # Refusals that never reached the provider (circuit
+            # open, budget exhausted) pass counted=False — they are
+            # health events, not usage. The ledger never raises.
+            from . import usage
+
+            usage.record_call(self.provider_name, ok)
+
+    def _budget_exhausted(self):
+        from . import usage
+
+        return usage.is_exhausted(self.provider_name)
 
     def _request(self, url, headers, parse):
+        if self._budget_exhausted():
+            # Daily call budget spent (Phase 66): refuse before any
+            # pacing or network work, until the next UTC day. The
+            # refusal surfaces exactly like a provider failure —
+            # callers degrade honestly (partial coverage is
+            # reported, never silently swallowed).
+            self._report(False, 0.0, "budget_exhausted", counted=False)
+            return ProviderResult(status="error",
+                                  error_kind="budget_exhausted",
+                                  latency_ms=0.0)
         if self.circuit_state() == "open":
-            self._report(False, 0.0, "circuit_open")
+            self._report(False, 0.0, "circuit_open", counted=False)
             return ProviderResult(status="circuit_open",
                                   error_kind="circuit_open", latency_ms=0.0)
         self._pace()

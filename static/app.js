@@ -61,7 +61,7 @@ function renderScan(d) {
     const s = d.exposure_score;
     const C = 351.8;
     ring.style.strokeDashoffset = s === null ? C : String(C * (1 - s / 100));
-    ring.style.stroke = s === null ? "#4f46e5" : s === 0 ? "#15803d" : s < 35 ? "#b45309" : s < 70 ? "#c2410c" : "#b91c1c";
+    ring.style.stroke = s === null ? "#1ed760" : s === 0 ? "#1ed760" : s < 35 ? "#ffa42b" : s < 70 ? "#ff7a45" : "#ff4d6d";
     const num = $("scoreNum");
     num.className = s === null ? "" : s === 0 ? "sev-low" : s < 35 ? "sev-med" : s < 70 ? "sev-high" : "sev-crit";
   }

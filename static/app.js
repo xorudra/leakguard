@@ -731,6 +731,7 @@ function renderAccount() {
     loadConsents();
     loadRemoval();
     loadMonitoring();
+    loadGraph();
     loadApiTokens();
     if (renderAccount._fsUser !== meUser.id) {
       // Fresh sign-in (or a different account): clear the last
@@ -1039,6 +1040,169 @@ $("acActionBtn").addEventListener("click", () => {
     focusConsentToggle("monitoring");
   }
 });
+
+/* ----- exposure map (Stage S14) -----
+   GET /api/graph: the caller's own details → where the latest
+   scan found them → the removal case per broker, rendered as a
+   dependency-free inline SVG in three columns. Deterministic
+   layout (the server sorts; rows are evenly spaced), masked
+   labels only. A column longer than 15 rows collapses its tail
+   into one "+N more …" node so the map never becomes spaghetti —
+   collapsed nodes draw no edges (their lines would be the mess
+   we're avoiding); the full lists live in the sections above. */
+const GRAPH_MAX_ROWS = 15;
+const GRAPH_BROKER_DOT = {
+  queued: "#a7a7a7", running: "#ffa42b", submitted: "#ff7a45",
+  needs_human: "#ffa42b", blocked: "#ff4d6d",
+  verified_removed: "#1ed760", reappeared: "#ff4d6d",
+  failed: "#ff4d6d",
+};
+
+async function loadGraph() {
+  if (!meUser) return;
+  const wrap = $("graphWrap");
+  try {
+    const r = await apiJson("/api/graph");
+    if (!r.ok || !r.data) {
+      wrap.innerHTML = "<p class='hint'>The exposure map is unavailable right now.</p>";
+      return;
+    }
+    renderGraph(r.data);
+  } catch (e) {
+    wrap.innerHTML = "<p class='hint'>The exposure map is unavailable right now.</p>";
+  }
+}
+
+function _graphTruncate(text) {
+  const s = String(text || "");
+  return s.length > 26 ? s.slice(0, 25) + "…" : s;
+}
+
+function renderGraph(d) {
+  const wrap = $("graphWrap");
+  wrap.innerHTML = "";
+  const nodes = d.nodes || [];
+  const edges = d.edges || [];
+  const byType = { identifier: [], source: [], broker: [] };
+  nodes.forEach((n) => { if (byType[n.type]) byType[n.type].push(n); });
+  if (!nodes.length) {
+    wrap.innerHTML = "<p class='hint'>Nothing to map yet — once a scan finds your " +
+      "details somewhere, the map appears here.</p>";
+    return;
+  }
+
+  const NS = "http://www.w3.org/2000/svg";
+  const COLS = [
+    { key: "identifier", title: "Your details", x: 10, w: 200, more: "details" },
+    { key: "source", title: "Where they appeared", x: 355, w: 190, more: "sources" },
+    { key: "broker", title: "Removal", x: 700, w: 190, more: "removals" },
+  ];
+  // Collapse each column to at most GRAPH_MAX_ROWS visible rows;
+  // the tail becomes one aggregate node (drawn, but edgeless).
+  const visible = {};
+  const collapsedCount = {};
+  COLS.forEach((col) => {
+    const all = byType[col.key];
+    if (all.length > GRAPH_MAX_ROWS) {
+      visible[col.key] = all.slice(0, GRAPH_MAX_ROWS - 1);
+      collapsedCount[col.key] = all.length - (GRAPH_MAX_ROWS - 1);
+    } else {
+      visible[col.key] = all;
+      collapsedCount[col.key] = 0;
+    }
+  });
+  const rowCount = Math.max(1, ...COLS.map((c) =>
+    visible[c.key].length + (collapsedCount[c.key] ? 1 : 0)));
+  const ROW_H = 40, TOP = 34, NODE_H = 30;
+  const height = TOP + rowCount * ROW_H + 8;
+
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 900 " + height);
+  svg.setAttribute("class", "graphSvg");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Exposure map: your details, where they appeared, and removal progress");
+
+  const centers = {};  // node id -> {x1, x2, y} for edge drawing
+  COLS.forEach((col) => {
+    const head = document.createElementNS(NS, "text");
+    head.setAttribute("x", col.x + col.w / 2);
+    head.setAttribute("y", 20);
+    head.setAttribute("class", "graphHead");
+    head.setAttribute("text-anchor", "middle");
+    head.textContent = col.title;
+    svg.appendChild(head);
+
+    const rows = visible[col.key].slice();
+    if (collapsedCount[col.key]) {
+      rows.push({ id: "__more_" + col.key, type: col.key,
+        label: "+" + collapsedCount[col.key] + " more " + col.more,
+        aggregate: true });
+    }
+    if (!rows.length) {
+      const none = document.createElementNS(NS, "text");
+      none.setAttribute("x", col.x + col.w / 2);
+      none.setAttribute("y", TOP + ROW_H / 2 + 4);
+      none.setAttribute("class", "graphNone");
+      none.setAttribute("text-anchor", "middle");
+      none.textContent = "— none —";
+      svg.appendChild(none);
+    }
+    rows.forEach((node, i) => {
+      const cy = TOP + i * ROW_H + ROW_H / 2;
+      const g = document.createElementNS(NS, "g");
+      const rect = document.createElementNS(NS, "rect");
+      rect.setAttribute("x", col.x);
+      rect.setAttribute("y", cy - NODE_H / 2);
+      rect.setAttribute("width", col.w);
+      rect.setAttribute("height", NODE_H);
+      rect.setAttribute("rx", 9);
+      rect.setAttribute("class", node.aggregate ? "graphNode graphMore" : "graphNode");
+      g.appendChild(rect);
+      let tx = col.x + 12;
+      if (node.type === "broker" && !node.aggregate) {
+        const dot = document.createElementNS(NS, "circle");
+        dot.setAttribute("cx", col.x + 14);
+        dot.setAttribute("cy", cy);
+        dot.setAttribute("r", 5);
+        dot.setAttribute("fill", GRAPH_BROKER_DOT[node.status] || "#a7a7a7");
+        g.appendChild(dot);
+        tx = col.x + 26;
+      }
+      const text = document.createElementNS(NS, "text");
+      text.setAttribute("x", tx);
+      text.setAttribute("y", cy + 4);
+      text.setAttribute("class", "graphLabel");
+      text.textContent = _graphTruncate(node.label);
+      g.appendChild(text);
+      svg.appendChild(g);
+      if (!node.aggregate) {
+        centers[node.id] = { x1: col.x, x2: col.x + col.w, y: cy };
+      }
+    });
+  });
+
+  // Edges are drawn UNDER the nodes (inserted as the first child).
+  // Only edges whose BOTH endpoints are visible get a line.
+  const edgeGroup = document.createElementNS(NS, "g");
+  edges.forEach((e) => {
+    const a = centers[e.from], b = centers[e.to];
+    if (!a || !b) return;
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", a.x2); line.setAttribute("y1", a.y);
+    line.setAttribute("x2", b.x1); line.setAttribute("y2", b.y);
+    line.setAttribute("class", "graphEdge");
+    edgeGroup.appendChild(line);
+  });
+  svg.insertBefore(edgeGroup, svg.firstChild);
+
+  wrap.appendChild(svg);
+  const legend = document.createElement("p");
+  legend.className = "hint";
+  legend.textContent = "Broker dots: green = removed (verified gone) · " +
+    "amber = waiting / needs you · orange = request sent · grey = queued · " +
+    "red = blocked or reappeared.";
+  wrap.appendChild(legend);
+}
 
 /* ----- my household (family profiles) -----
    A member is a grouping label only ("whose detail is this") — no
@@ -2217,6 +2381,20 @@ loadMe();
   const section = $("trust");
   section.hidden = false;
   section.scrollIntoView();
+})();
+
+/* ---------------- Service worker (Stage S14, PWA shell) ----------------
+   Registers static/sw.js (served at /sw.js so its scope covers the
+   app). The worker caches ONLY the static shell and never touches
+   /api/* traffic. Registration is best-effort: any failure (old
+   browser, non-secure context) leaves the app exactly as it was. */
+(function () {
+  try {
+    if (!("serviceWorker" in navigator)) return;
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    });
+  } catch (e) { /* the app must never depend on the worker */ }
 })();
 
 /* ---------------- Reveal on scroll ---------------- */

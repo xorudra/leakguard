@@ -55,6 +55,7 @@ from accounts import ratelimit
 from accounts import sessions as sessions_mod
 from core import context, errors, logging_setup, security
 from core import ratelimit as core_ratelimit
+from dashboard import graph as graph_service
 from dashboard import service as action_center_service
 from db import pool as db_pool
 from monitoring import service as monitoring_service
@@ -389,6 +390,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_file(STATIC / "style.css", "text/css; charset=utf-8")
         if route == "/static/app.js":
             return self._serve_file(STATIC / "app.js", "text/javascript; charset=utf-8")
+        if route == "/static/manifest.webmanifest":
+            # PWA manifest (Stage S14). application/manifest+json is
+            # the registered media type for web app manifests.
+            return self._serve_file(STATIC / "manifest.webmanifest",
+                                    "application/manifest+json; charset=utf-8")
+        if route in ("/sw.js", "/static/sw.js"):
+            # The service worker FILE lives in static/, but it is
+            # also served at /sw.js: a worker's scope is capped at
+            # its own path, so only the root-level URL lets it cover
+            # the app shell at "/". Same bytes either way.
+            return self._serve_file(STATIC / "sw.js",
+                                    "text/javascript; charset=utf-8")
+        if route == "/static/icons/icon-192.png":
+            return self._serve_file(STATIC / "icons" / "icon-192.png",
+                                    "image/png")
+        if route == "/static/icons/icon-512.png":
+            return self._serve_file(STATIC / "icons" / "icon-512.png",
+                                    "image/png")
         if route == "/api/brokers":
             # Registry-backed when a database is configured and
             # seeded (Stage S7); brokers.json otherwise. The shape is
@@ -506,6 +525,16 @@ class Handler(BaseHTTPRequestHandler):
                 "notifications": self._call(
                     monitoring_service.list_notifications, user["id"]),
             })
+        if route == "/api/graph":
+            # The exposure map (Stage S14): the caller's own
+            # details → where they appeared → removal state, built
+            # only from real findings and cases (dashboard/graph.py).
+            # Read-only, so session OR Bearer token (the browser
+            # extension's token can read it too).
+            self._require_accounts()
+            user = self._require_reader()
+            return self._json(200, self._call(
+                graph_service.exposure_graph, user["id"]))
         if route == "/api/remediation/cases":
             self._require_accounts()
             user = self._require_reader()

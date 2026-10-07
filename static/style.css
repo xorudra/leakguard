@@ -186,6 +186,16 @@ footer a{color:var(--muted)}
 #acActionBtn{font-size:15.5px;padding:13px 28px}
 #acActionBtn:disabled{cursor:default}
 
+/* ---------- exposure map (Stage S14) ---------- */
+#graphWrap{overflow-x:auto;margin-top:6px}
+.graphSvg{min-width:640px;width:100%;height:auto;display:block}
+.graphHead{fill:var(--muted);font-size:13px;font-weight:700;letter-spacing:.4px}
+.graphNone{fill:var(--faint);font-size:12.5px}
+.graphNode{fill:var(--surface2);stroke:var(--line)}
+.graphMore{stroke-dasharray:4 3}
+.graphLabel{fill:#fff;font-size:12.5px;font-weight:600}
+.graphEdge{stroke:#4d4d4d;stroke-width:1.5;opacity:.75}
+
 /* reveal on scroll (JS-added class only) */
 .reveal{opacity:0;transform:translateY(12px)}
 .reveal.in{opacity:1;transform:none;transition:opacity .55s ease,transform .55s cubic-bezier(.22,.8,.3,1)}

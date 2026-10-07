@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LeakGuard — Find &amp; remove your leaked data</title>
 <link rel="stylesheet" href="/static/style.css">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<meta name="theme-color" content="#000000">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 </head>
 <body>
 <header class="topbar">
@@ -207,6 +211,14 @@
       <p class="hint">Everything LeakGuard has flagged for you. If email delivery is not set up or a
       message could not be sent, the entry says so honestly instead of pretending it reached you.</p>
       <div id="notifList"></div>
+
+      <h3>Exposure map</h3>
+      <p class="hint">Your saved details, where your latest scan actually found them, and the
+      removal case working on each place — drawn only from real scan findings and real cases,
+      never guessed. A line from a place to a broker exists only when that place <em>is</em> the
+      broker (or sits on the broker's own site). Details are shown masked, exactly as everywhere
+      else here.</p>
+      <div id="graphWrap"></div>
 
       <h3>API access</h3>
       <p class="hint">For your own scripts: an API token lets a program read your LeakGuard data

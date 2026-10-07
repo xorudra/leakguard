@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LeakGuard — extension options</title>
+<link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <h1>LeakGuard extension</h1>
+    <p>This extension reads your LeakGuard data with an <strong>API token</strong> —
+    a read-only key you create yourself. It never asks for, sees or stores your
+    account sign-in credentials, and the token can never change, submit or
+    delete anything.</p>
+
+    <h2>1. Create a token</h2>
+    <p>Open <a href="https://leakguard-hh8e.onrender.com/" target="_blank" rel="noopener">LeakGuard</a>,
+    sign in, and in the <strong>Privacy Center → API access</strong> section create a token
+    (name it something like “browser extension”). Copy it — it is shown exactly once.</p>
+
+    <h2>2. Paste it here</h2>
+    <label>API token
+      <input type="text" id="tokenInput" placeholder="lg_…" autocomplete="off"
+             autocapitalize="off" spellcheck="false">
+    </label>
+    <div class="row">
+      <button type="button" id="saveBtn" class="primary">Save token</button>
+      <button type="button" id="testBtn">Test connection</button>
+      <button type="button" id="clearBtn" class="ghost">Remove token</button>
+    </div>
+    <p id="status" class="muted"></p>
+    <p class="muted">The token is kept in this browser's extension storage
+    (<code>chrome.storage.local</code>) and is only ever sent to
+    leakguard-hh8e.onrender.com as a Bearer header. Revoke it any time in the
+    Privacy Center and this extension stops working instantly.</p>
+  </main>
+  <script src="shared.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

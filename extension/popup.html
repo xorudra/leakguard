@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LeakGuard</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <span class="brand">LeakGuard</span>
+    <span class="dot" title="Live"></span>
+  </header>
+
+  <div id="stateLoading" class="state">
+    <p class="muted">Checking your exposure…</p>
+  </div>
+
+  <div id="stateSetup" class="state" hidden>
+    <p><strong>Not connected yet.</strong></p>
+    <p class="muted">Add your LeakGuard API token and this popup shows your
+    exposure score, what was found, and the one thing to do next.</p>
+    <button type="button" id="setupBtn" class="primary">Add your API token</button>
+  </div>
+
+  <div id="stateMain" class="state" hidden>
+    <div class="scoreRow">
+      <span id="scoreNum" class="scoreNum">–</span>
+      <div>
+        <div id="scoreBand" class="band">Exposure score</div>
+        <div id="countsLine" class="muted"></div>
+      </div>
+    </div>
+    <p id="nextAction" class="nextAction"></p>
+    <button type="button" id="openBtn" class="primary">Open LeakGuard</button>
+  </div>
+
+  <div id="stateBadToken" class="state" hidden>
+    <p><strong>That token doesn't work.</strong></p>
+    <p class="muted">It may have been revoked in your Privacy Center. Paste a
+    fresh one in the options and this popup will connect again.</p>
+    <button type="button" id="fixBtn" class="primary">Fix the token</button>
+  </div>
+
+  <div id="stateError" class="state" hidden>
+    <p><strong>Couldn't reach LeakGuard.</strong></p>
+    <p class="muted">The free server may be waking up — give it a few seconds
+    and reopen this popup. Nothing was changed.</p>
+    <button type="button" id="openBtn2" class="primary">Open LeakGuard</button>
+  </div>
+
+  <script src="shared.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

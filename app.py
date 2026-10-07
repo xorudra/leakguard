@@ -234,12 +234,16 @@ class Handler(BaseHTTPRequestHandler):
             raise errors.unavailable()
 
     def _client_ip(self):
-        # Render (and most hosts) sit behind a proxy that sets
-        # X-Forwarded-For; its first entry is the client. Fall back to
-        # the direct peer (local dev, tests).
+        # X-Forwarded-For: entries BEFORE the last hop are supplied by
+        # the client and are spoofable — proven live 2026-10-07: a
+        # request with a fresh fake first entry dodged an exhausted
+        # per-IP bucket (200 instead of 429), while the exhausted IP in
+        # first position tripped it. The LAST entry is the address the
+        # platform edge (Render) actually observed connecting, so key
+        # on that. Fall back to the direct peer (local dev, tests).
         xff = self.headers.get("X-Forwarded-For") or ""
         if xff.strip():
-            return xff.split(",")[0].strip()
+            return xff.split(",")[-1].strip()
         return self.client_address[0] if self.client_address else "-"
 
     def _session_token(self):

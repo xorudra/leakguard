@@ -395,6 +395,35 @@ class TestRouteLimitsDb(PgMixin, ServerMixin, unittest.TestCase):
             self.assertEqual(body["error"]["code"], "rate_limited")
             self.assertIsNotNone(headers.get("Retry-After"))
 
+    def test_client_ip_keys_on_last_forwarded_hop(self):
+        # Regression (proven live 2026-10-07): the limiter keyed on the
+        # FIRST X-Forwarded-For entry, which a client can spoof. The
+        # bucket must follow the LAST hop — the address the platform
+        # edge observed. A different fake first entry must NOT dodge
+        # an exhausted last-hop bucket; a different last hop must NOT
+        # be limited by it.
+        with LimitGuard({"forgot_password": (2, 3600)}):
+            h1 = dict(CSRF, **{"X-Forwarded-For": "9.9.9.9, 203.0.113.5"})
+            for _ in range(2):
+                status, _h, _p = self.request(
+                    "POST", "/api/auth/forgot-password",
+                    body={"email": "ghost-%s@example.com" % self.uniq()},
+                    headers=h1)
+                self.assertEqual(status, 200)
+            h2 = dict(CSRF, **{"X-Forwarded-For": "8.8.8.8, 203.0.113.5"})
+            status, _h, body = self.request_json(
+                "POST", "/api/auth/forgot-password",
+                body={"email": "ghost-%s@example.com" % self.uniq()},
+                headers=h2)
+            self.assertEqual(status, 429)
+            self.assertEqual(body["error"]["code"], "rate_limited")
+            h3 = dict(CSRF, **{"X-Forwarded-For": "8.8.8.8, 203.0.113.6"})
+            status, _h, _p = self.request(
+                "POST", "/api/auth/forgot-password",
+                body={"email": "ghost-%s@example.com" % self.uniq()},
+                headers=h3)
+            self.assertEqual(status, 200)
+
     def _register_user(self):
         status, headers, body = self.register()
         self.assertEqual(status, 201, body)

@@ -160,8 +160,8 @@ taxonomy (owner-ordered audit issue, 2026-10-07):
 
 | Status | Count |
 |---|---|
-| DONE | 132 |
-| PARTIAL | 30 |
+| DONE | 133 |
+| PARTIAL | 29 |
 | MISSING | 1 |
 | INSECURE | 0 |
 | UNVERIFIED | 4 |

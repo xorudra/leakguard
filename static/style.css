@@ -30,10 +30,6 @@ a{color:#9db9ff}
   border-bottom:1px solid var(--line-soft);
 }
 .brand{font-weight:800;font-size:20px;letter-spacing:.2px;display:flex;align-items:center;gap:9px}
-.brand .shield{
-  display:inline-grid;place-items:center;width:34px;height:34px;border-radius:10px;font-size:18px;
-  background:linear-gradient(135deg,var(--brand),var(--brand2));box-shadow:0 6px 18px rgba(91,140,255,.45);
-}
 .topbar nav{display:flex;gap:4px;flex-wrap:wrap}
 .topbar nav a{
   color:var(--muted);text-decoration:none;font-size:13.5px;font-weight:600;

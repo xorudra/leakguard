@@ -160,11 +160,11 @@ taxonomy (owner-ordered audit issue, 2026-10-07):
 
 | Status | Count |
 |---|---|
-| DONE | 128 |
+| DONE | 129 |
 | PARTIAL | 31 |
 | MISSING | 1 |
 | INSECURE | 0 |
-| UNVERIFIED | 7 |
+| UNVERIFIED | 6 |
 | NOT APPLICABLE | 14 |
 | **Total** | **181** |
 
@@ -190,7 +190,8 @@ spec:
 
 1. **Disaster recovery rests on one platform mechanism** (Phase 79 DONE —
    `docs/DISASTER_RECOVERY.md`; `docs/ROLLBACK.md` exists but Phase 174
-   is UNVERIFIED: no *application* rollback rehearsal is on record) —
+   was UNVERIFIED at audit time; the application rollback rehearsal
+   has since been performed on staging, 2026-10-07 — Phase 174 DONE) —
    restores are **tested** (drill 2026-10-07, Phases 78/170 DONE) and
    the procedure is written, but the only backup is Neon free-plan PITR:
    its console-visible history window bounds the RPO, and there is no

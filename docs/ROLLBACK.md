@@ -71,3 +71,27 @@ The escape hatch is the point-in-time restore in
 DISASTER_RECOVERY.md: branch from before the damage, verify,
 repoint, redeploy. Its cost is the RPO stated there; its virtue
 is that every step is checkable before it becomes true.
+
+---
+
+## Rehearsal record — 2026-10-07 (Phase 174)
+
+The application rollback procedure above was rehearsed end to end on
+the staging service (`leakguard-staging`), the same mechanism
+production uses:
+
+1. **Roll back:** Manual Deploy → "Deploy a specific commit" →
+   `83b9acc` (the Phase 70 commit). Deploy `dep-db36d91srm7s73c0v8j0`
+   — **Live / Deploy succeeded**; the service header confirmed
+   "Last successfully deployed commit 83b9acc".
+2. **Verify:** staging health returned `{"ok": true, "db": "ok"}`
+   on the rolled-back commit.
+3. **Roll forward:** Manual Deploy → "Deploy latest commit" →
+   `bc39b2f`. Deploy `dep-db36dqm7bikc73bqooeg` — **Live / Deploy
+   succeeded**; staging ends the rehearsal on the same commit it
+   started on, health `db: "ok"`.
+
+Note: deploying a specific commit makes Render display "Auto-Deploy
+has been disabled" on that service. Both LeakGuard services are
+deployed manually by policy, so this changes nothing operationally —
+but expect to see it after any future specific-commit deploy.

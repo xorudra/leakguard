@@ -92,6 +92,23 @@
       <div id="consentList"></div>
       <p id="consentStatus" class="hint"></p>
 
+      <h3>Full scan</h3>
+      <p class="hint">One tap scans <strong>every detail you have saved</strong> against the breach
+      databases and scores your whole profile — no re-typing, nothing else to fill in. It needs the
+      <strong>Scanning</strong> permission above to be on. Details nobody can check yet are reported
+      honestly as “no checks available yet”, never as “safe”.</p>
+      <div class="rowBtns">
+        <button type="button" id="fullScanBtn">Scan all my saved details</button>
+        <span id="fullScanStatus" class="hint"></span>
+      </div>
+      <div id="fullScanResults" hidden>
+        <p id="fsScore"></p>
+        <ul id="fsExplain"></ul>
+        <div id="fsOutcomes"></div>
+        <div id="fsFindings"></div>
+        <div id="fsCorrelations"></div>
+      </div>
+
       <h3>Two-factor authentication</h3>
       <p class="hint">Status: <b id="totpStatus">–</b>. Use any authenticator app (Google Authenticator,
       Authy, your password manager). Codes are single-use — a code that worked once never works again.</p>

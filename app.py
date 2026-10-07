@@ -52,6 +52,8 @@ from accounts import sessions as sessions_mod
 from core import context, errors, logging_setup, security
 from db import pool as db_pool
 from providers import registry as providers_registry
+from scanning import jobs as scan_jobs_service
+from scanning import risk as risk_engine
 
 BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
@@ -111,16 +113,12 @@ def check_password_pwned(password):
 
 
 def exposure_score(breaches, analytics, pwned_count):
-    """0 = no exposure found, 100 = worst. Deterministic, labelled in UI."""
-    if analytics and isinstance(analytics.get("risk_score"), (int, float)):
-        score = int(analytics["risk_score"])
-    elif breaches is not None:
-        score = min(100, len(breaches) * 8)
-    else:
-        score = 0
-    if pwned_count:
-        score = max(score, 85 if pwned_count > 1000 else 70)
-    return max(0, min(100, score))
+    """0 = no exposure found, 100 = worst. Deterministic, labelled in UI.
+
+    The arithmetic lives in scanning.risk (Stage S5) — this wrapper
+    keeps the legacy entry point so the anonymous scan's output is
+    byte-identical while both products share one scoring engine."""
+    return risk_engine.score_email_profile(breaches, analytics, pwned_count)[0]
 
 
 def load_brokers():
@@ -328,6 +326,22 @@ class Handler(BaseHTTPRequestHandler):
                 "identifiers": self._call(
                     identifiers_service.list_identifiers, user["id"]),
             })
+        if route == "/api/scans":
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._json(200, {
+                "jobs": self._call(scan_jobs_service.list_jobs, user["id"]),
+            })
+        if route.startswith("/api/scans/"):
+            self._require_accounts()
+            user, _token = self._require_user()
+            job_id = route[len("/api/scans/"):]
+            try:
+                uuid.UUID(job_id)
+            except (ValueError, AttributeError, TypeError):
+                return self._fail(errors.not_found("Scan not found"))
+            return self._json(200, self._call(
+                scan_jobs_service.get_job, user["id"], job_id))
         if route == "/api/privacy/export":
             self._require_accounts()
             user, _token = self._require_user()
@@ -358,7 +372,7 @@ class Handler(BaseHTTPRequestHandler):
     def _do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path.startswith("/api/auth/") or parsed.path in (
-                "/api/consents", "/api/identifiers"):
+                "/api/consents", "/api/identifiers", "/api/scans"):
             return self._accounts_post(parsed.path)
         if parsed.path == "/api/agent/plan":
             payload = self._read_json_body()
@@ -544,6 +558,14 @@ class Handler(BaseHTTPRequestHandler):
                                 user["id"], payload.get("kind"),
                                 payload.get("value"))
             return self._json(201, {"identifier": record})
+        if route == "/api/scans":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            job, created = self._call(
+                scan_jobs_service.create_job, user["id"],
+                payload.get("idempotency_key"))
+            return self._json(201 if created else 200, {"job": job})
         return self._fail(errors.not_found())
 
     def do_DELETE(self):
@@ -583,9 +605,24 @@ def _startup_migrations():
                                 + type(exc).__name__)
 
 
+def _startup_worker():
+    """Start the in-process scan worker (Stage S5) when a database
+    is configured. Guarded exactly like migrations: a worker failure
+    must never take the site down."""
+    try:
+        from scanning import worker
+
+        if worker.start_worker_if_configured():
+            print("LeakGuard: scan worker started")
+    except Exception as exc:
+        logging_setup.log_error(None, "scan worker failed to start: "
+                                + type(exc).__name__)
+
+
 def main():
     logging_setup.setup_logging()
     _startup_migrations()
+    _startup_worker()
     port = int(os.environ.get("PORT", "8000"))
     host = os.environ.get("HOST", "0.0.0.0")
     server = ThreadingHTTPServer((host, port), Handler)

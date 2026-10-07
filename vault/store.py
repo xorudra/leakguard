@@ -6,9 +6,9 @@ Write/read API over the `identifiers` table (see db/migrations/
 * Plaintext values are normalized for lookup, masked for display and
   envelope-encrypted for storage. Plaintext is never written to the
   database and never logged.
-* The ONLY function that returns plaintext is reveal(), which exists
-  for future authorized flows (Stage S3+ account owners acting on
-  their own identifiers). Everything else returns the masked form.
+* Plaintext leaves the vault only through reveal() (by value) and
+  reveal_by_id() (by row id, for the Stage S5 scan worker acting for
+  the account owner). Everything else returns the masked form.
 * Lookups are by HMAC only: get_by_lookup(kind, value) recomputes the
   lookup HMAC and finds the row without the database ever seeing the
   value.
@@ -232,6 +232,35 @@ def reveal(kind, value):
             " WHERE kind = %s AND hmac_lookup = %s AND deleted_at IS NULL",
             (kind, digest),
         ).fetchone()
+    if row is None:
+        return None
+    return crypto.decrypt_value(master_key, bytes(row["ciphertext"]))
+
+
+def reveal_by_id(identifier_id, user_id=None):
+    """Return the plaintext for a stored identifier ROW, or None.
+
+    The second plaintext exit from the vault, added for the scan
+    worker (Stage S5): the worker runs server-side on behalf of the
+    account owner (who consented to scanning), so it resolves rows by
+    id instead of by value. When user_id is given the row must belong
+    to that user — a mismatched owner reads as "not found". Callers
+    must enforce authorization before calling; never log the result.
+    """
+    master_key, _lookup_key = _require_configured()
+    with pool.connection() as conn:
+        if user_id is None:
+            row = conn.execute(
+                "SELECT ciphertext FROM identifiers"
+                " WHERE id = %s AND deleted_at IS NULL",
+                (identifier_id,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT ciphertext FROM identifiers"
+                " WHERE id = %s AND user_id = %s AND deleted_at IS NULL",
+                (identifier_id, user_id),
+            ).fetchone()
     if row is None:
         return None
     return crypto.decrypt_value(master_key, bytes(row["ciphertext"]))

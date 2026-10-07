@@ -711,6 +711,17 @@ function renderAccount() {
     renderTotp();
     loadIdentifiers();
     loadConsents();
+    if (renderAccount._fsUser !== meUser.id) {
+      // Fresh sign-in (or a different account): clear the last
+      // full-scan view so nobody sees a previous session's results.
+      renderAccount._fsUser = meUser.id;
+      stopFullScanPolling();
+      $("fullScanResults").hidden = true;
+      $("fullScanStatus").textContent = "";
+      $("fullScanBtn").disabled = false;
+    }
+  } else {
+    renderAccount._fsUser = null;
   }
   refreshSaveScanBox();
 }
@@ -786,6 +797,7 @@ $("acRegisterBtn").addEventListener("click", async () => {
 });
 
 $("pcLogoutBtn").addEventListener("click", async () => {
+  stopFullScanPolling();
   try {
     await apiJson("/api/auth/logout", { method: "POST", headers: AH, body: "{}" });
   } catch (e) { /* cookie is cleared either way on next load */ }
@@ -900,6 +912,7 @@ function renderConsents(state) {
     const toggle = document.createElement("input");
     toggle.type = "checkbox";
     toggle.checked = !!current.granted;
+    toggle.dataset.purpose = purpose;
     toggle.setAttribute("aria-label", title);
     toggle.addEventListener("change", async () => {
       toggle.disabled = true;
@@ -926,6 +939,186 @@ async function loadConsents() {
   const r = await apiJson("/api/consents");
   if (r.ok) renderConsents(r.data.consents);
   else $("consentList").innerHTML = "<p class='hint'>" + errMsg(r.data, "Could not load permissions") + "</p>";
+}
+
+/* ----- full scan (Stage S5): one tap for the whole saved profile ----- */
+let fullScanTimer = null;
+
+function stopFullScanPolling() {
+  if (fullScanTimer) { clearTimeout(fullScanTimer); fullScanTimer = null; }
+}
+
+function newIdempotencyKey() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return "scan-" + Date.now() + "-" + Math.random().toString(36).slice(2, 12);
+}
+
+$("fullScanBtn").addEventListener("click", async () => {
+  if (!meUser) return;
+  const btn = $("fullScanBtn");
+  const status = $("fullScanStatus");
+  btn.disabled = true;
+  status.textContent = "Checking your permission…";
+  try {
+    // The scan never runs without the Scanning permission — and we
+    // never switch it on for the user. Explain, point at the toggle.
+    const c = await apiJson("/api/consents");
+    const scanning = c.ok && (c.data.consents || [])
+      .find((x) => x.purpose === "scanning");
+    if (!scanning || !scanning.granted) {
+      status.textContent = "The Scanning permission is off — turn it on above and press the button again. LeakGuard never scans your saved details without it.";
+      const toggle = document.querySelector(
+        "#consentList input[data-purpose='scanning']");
+      if (toggle) {
+        toggle.scrollIntoView({ behavior: "smooth", block: "center" });
+        toggle.focus();
+      }
+      btn.disabled = false;
+      return;
+    }
+    status.textContent = "Starting your scan…";
+    const r = await apiJson("/api/scans", {
+      method: "POST", headers: AH,
+      body: JSON.stringify({ idempotency_key: newIdempotencyKey() }),
+    });
+    if (!r.ok) throw new Error(errMsg(r.data, "Could not start the scan"));
+    status.textContent = "Scan queued — checking every saved detail…";
+    pollFullScan(r.data.job.id, 0);
+  } catch (err) {
+    status.textContent = err.message;
+    btn.disabled = false;
+  }
+});
+
+function pollFullScan(jobId, tries) {
+  stopFullScanPolling();
+  fullScanTimer = setTimeout(async () => {
+    fullScanTimer = null;
+    if (!meUser) return;  // signed out meanwhile — stop quietly
+    try {
+      const r = await apiJson("/api/scans/" + jobId);
+      if (!r.ok) throw new Error(errMsg(r.data, "Could not read the scan"));
+      const job = r.data.job;
+      if (job.status === "done") {
+        $("fullScanStatus").textContent = "Scan complete.";
+        $("fullScanBtn").disabled = false;
+        renderFullScan(r.data);
+        return;
+      }
+      if (job.status === "dead") {
+        $("fullScanStatus").textContent = "The scan could not be completed — the sources stayed unreachable. Nothing was guessed or made up; please try again later.";
+        $("fullScanBtn").disabled = false;
+        return;
+      }
+      $("fullScanStatus").textContent = job.status === "failed"
+        ? "A source hiccuped — retrying automatically…"
+        : "Scanning… (" + job.status + ")";
+      if (tries < 200) { pollFullScan(jobId, tries + 1); return; }
+      $("fullScanStatus").textContent = "Still running — it will finish in the background. Press the button again later to see the result.";
+      $("fullScanBtn").disabled = false;
+    } catch (err) {
+      $("fullScanStatus").textContent = err.message;
+      $("fullScanBtn").disabled = false;
+    }
+  }, 3000);
+}
+
+function renderFullScan(data) {
+  const job = data.job;
+  const findings = data.findings || [];
+  const summary = job.summary || {};
+  $("fullScanResults").hidden = false;
+  $("fsScore").innerHTML = job.score === null || job.score === undefined
+    ? "" : "Exposure score for your saved profile: <b>" + job.score + " / 100</b>";
+  const explain = $("fsExplain");
+  explain.innerHTML = "";
+  (job.score_explanation || []).forEach((line) => {
+    const li = document.createElement("li");
+    li.textContent = line;
+    explain.appendChild(li);
+  });
+
+  const outcomes = $("fsOutcomes");
+  outcomes.innerHTML = "";
+  (summary.identifiers || []).forEach((o) => {
+    const p = document.createElement("p");
+    p.className = "hint";
+    let text = o.masked + " (" + o.kind + ") — ";
+    if (o.outcome === "scanned") {
+      text += o.findings === 1 ? "1 finding" : o.findings + " findings";
+    } else if (o.outcome === "no_provider_yet") {
+      text += "no checks available for this kind of detail yet";
+    } else {
+      text += "could not be checked this time (source unreachable)";
+    }
+    p.textContent = text;
+    outcomes.appendChild(p);
+  });
+  if (summary.degraded) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "Some sources could not be reached, so these results may be incomplete — nothing was guessed to fill the gaps.";
+    outcomes.appendChild(p);
+  }
+
+  const wrap = $("fsFindings");
+  wrap.innerHTML = "";
+  if (!findings.length) {
+    const p = document.createElement("p");
+    p.textContent = "No exposures found for your saved details in the sources we check.";
+    wrap.appendChild(p);
+  } else {
+    const groups = {};
+    findings.forEach((f) => {
+      const key = f.identifier_id || "other";
+      if (!groups[key]) {
+        groups[key] = {
+          label: (f.identifier_masked || "Saved detail") +
+            " (" + f.identifier_kind + ")",
+          items: [],
+        };
+      }
+      groups[key].items.push(f);
+    });
+    Object.values(groups).forEach((group) => {
+      const h = document.createElement("h4");
+      h.textContent = group.label;
+      wrap.appendChild(h);
+      group.items.forEach((f) => {
+        const row = document.createElement("div");
+        row.className = "idRow";
+        const left = document.createElement("span");
+        const name = document.createElement("b");
+        name.textContent = f.source_name;
+        left.appendChild(name);
+        const conf = document.createElement("span");
+        conf.className = "hint";
+        conf.textContent = " · " + f.confidence + " match · found " +
+          new Date(f.discovered_at).toLocaleDateString();
+        left.appendChild(conf);
+        row.appendChild(left);
+        const tags = document.createElement("span");
+        tags.className = "tags";
+        (f.exposed_fields || []).forEach((field) => {
+          const chip = document.createElement("span");
+          chip.className = "tag";
+          chip.textContent = field;
+          tags.appendChild(chip);
+        });
+        row.appendChild(tags);
+        wrap.appendChild(row);
+      });
+    });
+  }
+
+  const corr = $("fsCorrelations");
+  corr.innerHTML = "";
+  (summary.correlations || []).forEach((note) => {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "🔗 " + note.reason;
+    corr.appendChild(p);
+  });
 }
 
 /* ----- two-factor ----- */

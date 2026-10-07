@@ -7,6 +7,9 @@ so fixture results can never silently pretend to be real.
 
 Fixtures:
   * breached@example.com -> two breaches + High/72 analytics
+  * shared-a@example.com / shared-b@example.com -> the SAME single
+    breach ("SharedFixtureBreach"), no analytics — the Stage S5
+    correlation fixture: one source exposing two identifiers at once
   * any other email      -> clean (no breaches, no analytics)
   * the password "mockpwned" -> pwned 123,456 times (served through
     the same range-text contract as the real HIBP adapter: the text
@@ -27,6 +30,8 @@ BREACHED_ANALYTICS = {
 }
 PWNED_PASSWORD = "mockpwned"
 PWNED_COUNT = 123456
+SHARED_EMAILS = ("shared-a@example.com", "shared-b@example.com")
+SHARED_BREACHES = ["SharedFixtureBreach"]
 
 
 def _range_text():
@@ -58,8 +63,11 @@ class MockProvider(Provider):
         return ProviderResult(status="ok", data=data, latency_ms=0.0)
 
     def check_email(self, email):
-        if (email or "").strip().lower() == BREACHED_EMAIL:
+        email = (email or "").strip().lower()
+        if email == BREACHED_EMAIL:
             return self._ok(list(BREACHED_BREACHES))
+        if email in SHARED_EMAILS:
+            return self._ok(list(SHARED_BREACHES))
         return self._ok([])
 
     def breach_analytics(self, email):

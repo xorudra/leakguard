@@ -56,6 +56,8 @@ def main():
     for item in plan:
         print(f"\n=== {item['broker']} ({item['automation']}) ===")
         print("Opt-out:", item["optout_url"])
+        if item.get("contact_email"):
+            print("Email channel (works even if the site blocks you):", item["contact_email"])
         print("Steps:", " -> ".join(item["flow"]))
         if item["needs"]:
             print("Needs from you:", ", ".join(item["needs"]))

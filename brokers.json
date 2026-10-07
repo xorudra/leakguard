@@ -11,7 +11,10 @@
     "name": "BeenVerified",
     "optout_url": "https://www.beenverified.com/app/optout/search",
     "region": "US",
-    "type": "People search"
+    "type": "People search",
+    "alt_optout_url": "https://www.beenverified.com/svc/optout/search/optouts",
+    "contact_email": "optout@beenverified.com",
+    "contact_email_alt": "privacy@beenverified.com"
   },
   {
     "method": "Suppression request — find listing, verify by phone call",
@@ -81,7 +84,8 @@
     "name": "Nuwber",
     "optout_url": "https://nuwber.com/removal/link",
     "region": "US / Global",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "support@nuwber.com"
   },
   {
     "method": "Privacy page / email privacy@mylife.com — may require phone verification",
@@ -102,7 +106,8 @@
     "name": "PeopleLooker",
     "optout_url": "https://www.peoplelooker.com/privacy",
     "region": "US",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "optout@beenverified.com"
   },
   {
     "method": "Web form — enter phone number, confirm removal",

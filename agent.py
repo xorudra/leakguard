@@ -92,6 +92,8 @@ def build_plan(profile):
             "type": broker["type"],
             "region": broker["region"],
             "optout_url": broker["optout_url"],
+            "alt_optout_url": broker.get("alt_optout_url"),
+            "contact_email": broker.get("contact_email"),
             "automation": pb["automation"],
             "needs": pb["needs"],
             "flow": pb["flow"],
@@ -296,6 +298,24 @@ def probe_with_browser_fallback(broker_name, profile=None):
     if result.get("error"):
         return result
     result["via"] = "http"
+    # Surface the email channel whenever one exists — for Cloudflare-walled
+    # brokers it is the route that actually works from any network.
+    brokers = {b["name"]: b for b in load_brokers()}
+    known = brokers.get(broker_name) or {}
+    if known.get("contact_email"):
+        result["contact_email"] = known["contact_email"]
+    # If the main opt-out URL is blocked and an alternate official URL
+    # exists, probe that through the relay before the browser layer.
+    if not result.get("reachable") and known.get("alt_optout_url"):
+        alt = relay_probe(known["alt_optout_url"], profile)
+        result["alt_probe"] = {"url": known["alt_optout_url"], "reachable": alt["reachable"],
+                               "challenge": alt["challenge"], "forms": len(alt["forms"])}
+        if alt["reachable"] and alt["forms"]:
+            result["forms"] = alt["forms"]
+            result["reachable"] = True
+            if alt["payload_preview"]:
+                result["payload_preview"] = alt["payload_preview"]
+            result["blockers"] = alt["blockers"]
     # --- layer 2: relay reader (different network) ---
     if not result.get("fillable"):
         relay = relay_probe(result["url"], profile)

@@ -226,7 +226,7 @@ async function loadBrokers() {
       head.appendChild(title); head.appendChild(sel);
       const method = document.createElement("p");
       method.className = "hint";
-      method.textContent = b.method;
+      method.textContent = b.method + (b.contact_email ? " · ✉ Or email your request: " + b.contact_email : "");
       const btns = document.createElement("div");
       btns.className = "bbtns";
       const a = document.createElement("a");
@@ -289,7 +289,7 @@ $("planBtn").addEventListener("click", async () => {
       head.appendChild(nm); head.appendChild(meta);
       const flow = document.createElement("p");
       flow.className = "hint";
-      flow.textContent = item.flow.join(" → ");
+      flow.textContent = item.flow.join(" → ") + (item.contact_email ? " · ✉ Email channel: " + item.contact_email : "");
       const btns = document.createElement("div");
       btns.className = "bbtns";
       const probe = document.createElement("button");
@@ -348,6 +348,12 @@ async function probeBroker(broker, btn) {
       lines.push(d.fillable ? "✅ This form is script-fillable." : "Form found, but a blocker stops auto-fill.");
     }
     (d.blockers || []).forEach((b) => lines.push("🚧 " + b));
+    if (d.alt_probe) {
+      lines.push("🔀 Alternate official URL: " + (d.alt_probe.reachable ? "reachable via relay, " + d.alt_probe.forms + " form(s)" : d.alt_probe.challenge ? "Cloudflare challenge there too" : "not reachable either"));
+    }
+    if (d.contact_email) {
+      lines.push("✉ Email channel (works from any network): " + d.contact_email + " — generate the letter in the Removal Centre and send it with your listing URL.");
+    }
     if (d.relay) {
       lines.push("📡 Relay reader: " + (d.relay.reachable ? "fetched the real page (" + (d.relay.title || "untitled") + ")" : d.relay.challenge ? "Cloudflare challenge even via relay" : "could not fetch it either"));
     }

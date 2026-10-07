@@ -15,17 +15,18 @@
     "notes": "Form verified live (HTTP 200) Oct 2026. CAPTCHA + email confirmation are mandatory, so the agent prepares and a human finishes those two steps. India contact per Acxiom: Datenschutz@acxiom.com."
   },
   "BeenVerified": {
-    "automation": "http_form",
-    "flow": [
-      "Open the opt-out search page and find your record (name + state)",
-      "Select the record and enter your email",
-      "Click the confirmation link BeenVerified emails you",
-      "Removal completes after email confirmation"
-    ],
+    "automation": "email_request",
     "needs": [
-      "email_confirm"
+      "email_confirm",
+      "listing_url"
     ],
-    "notes": "Runs PeopleLooker's suppression too (same company)."
+    "flow": [
+      "Web form first: find your record on the opt-out search and confirm via their email",
+      "If the site blocks you (Cloudflare wall): email optout@beenverified.com with your listing URL and the LeakGuard erasure letter",
+      "For a paper trail under a privacy law, write to privacy@beenverified.com with listing URL + your details",
+      "Removal is processed in ~24-72h after confirmation; covers PeopleLooker/NeighborWho too (same company)"
+    ],
+    "notes": "BeenVerified's web form sits behind Cloudflare and blocks datacenter networks on every route (measured). The email channels are official and bypass the wall entirely."
   },
   "Epsilon": {
     "automation": "http_form",
@@ -112,9 +113,10 @@
       "Find your Nuwber profile and copy its URL",
       "Open the removal form (nuwber.com/removal/link) and paste the URL",
       "Enter your email and click Remove / Opt Out",
-      "Click the confirmation link in Nuwber's email — removal completes in ~24-48h"
+      "Click the confirmation link in Nuwber's email — removal completes in ~24-48h",
+      "If the site won't load: email support@nuwber.com with your listing URL and the LeakGuard erasure letter (processed within ~30 days)"
     ],
-    "notes": "Removal URL corrected Oct 2026 to /removal/link. Nuwber's domain refused all connections from the dev server network during testing — probe from a home connection (local runner) if the server reports it unreachable."
+    "notes": "Removal URL corrected Oct 2026 to /removal/link. Nuwber's domain refused all connections from the dev server network during testing — probe from a home connection (local runner) if the server reports it unreachable. Email channel: support@nuwber.com."
   },
   "PeopleFinders": {
     "automation": "http_form",

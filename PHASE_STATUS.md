@@ -1,9 +1,15 @@
 # LeakGuard — Phase Status (Phases 0–180)
 
-*Audit: 2026-10-07 · Repo HEAD `8271c17` · Evidence basis: direct code inspection
-(grep/read) + full test suite run by the auditor (302 tests, OK, 2 skipped) +
+*Audit: 2026-10-07 · Repo HEAD `520a692` (production code `b0a7a8f`,
+dashboard-verified — see Phase 0) · Evidence basis: direct code inspection
+(grep/read) + full test suite run at HEAD (410 passed, 19 skipped) +
 production end-to-end checks run by the parent agent on 2026-10-07 for every
-shipped stage (cited as "production (parent-verified 2026-10-07)").*
+shipped stage (cited as "production (parent-verified 2026-10-07)").
+**v2.1 reconciliation refresh 2026-10-07 (evening):** spec v2.1 added a
+live/repository reconciliation to Phase 0 — production commit pinned from
+the Render dashboard, live surface + throwaway-account E2E re-verified,
+discrepancies recorded in `CURRENT_STATE.md` §B (all resolved); Phases 173
+and 180 re-scored on that evidence.*
 
 *Tier derivation: spec §1 topic lists — P0 = production blockers / security /
 data integrity; P1 = core platform; P2 = remediation / intelligence /
@@ -15,7 +21,7 @@ NA = the surface the phase governs does not exist in this deployment.*
 
 | Phase | Tier | Status | Evidence | Gap |
 |---|---|---|---|---|
-| 0 — Repository & production audit | P0 | DONE | CURRENT_STATE.md + MIGRATION_PLAN.md (S0, commit `76565e0`); this refresh | |
+| 0 — Repository & production audit | P0 | DONE | CURRENT_STATE.md + MIGRATION_PLAN.md (S0, commit `76565e0`); this refresh. **v2.1 reconciliation 2026-10-07:** production commit pinned from the Render dashboard — production deploy `dep-db34ec9srm7s73e32480` live 18:50 IST on `b0a7a8f713004335b22fe47dc35f65f3708e858f`, staging deploy `dep-db34n9d9fdbs739vetc0` live 19:09 IST on the same commit; repo HEAD `520a692` differs from production only in documentation files; live sweep (health/v1 parity/providers/headers/pages/brokers/passkey options) + throwaway-account E2E (register→login→export→delete) all passed; full suite at HEAD 410 passed, 19 skipped; discrepancies (audit-doc drift, un-ignored staging key files) recorded in CURRENT_STATE.md §B and resolved | |
 | 1 — Repository restructure | P0 | DONE | Packages `core/`, `accounts/`, `providers/`, `scanning/`, `remediation/`, `monitoring/`, `dashboard/`, `db/`, `vault/`; legacy `agent.py` wrapped, not rewritten | |
 | 2 — PostgreSQL persistence | P1 | DONE | `db/migrate.py`, `db/migrations/0001`–`0008`; Neon Postgres; health `db:"ok"` in production (parent-verified) | |
 | 3 — Secure identifier vault | P0 | DONE | `vault/crypto.py` (AES-256-GCM envelope, per-record DEK), `vault/store.py` (HMAC lookup, separate key, masking); `tests/test_vault.py` | |
@@ -188,14 +194,14 @@ NA = the surface the phase governs does not exist in this deployment.*
 | 170 — Restore tests | P0 | DONE | **Restore drill 2026-10-07**: a branch created from Neon's point-in-time restore showed 19 public tables, 40 brokers, 8 migrations, 15 users; the drill branch was deleted after verification | |
 | 171 — Security regression suite | P0 | DONE | Security tests are part of the full suite, run before every deploy (302 tests; per-stage runs by parent and auditor) | |
 | 172 — Privacy regression suite | P0 | DONE | Privacy tests likewise (`tests/test_vault.py`, `tests/test_accounts.py`, `tests/test_hardening.py` PII-absence assertions) | |
-| 173 — Production readiness | P0 | PARTIAL | Per-deploy readiness checks ran: health, db status, provider health, baseline scans | Restore tests (170) and staging (109) keep full readiness open |
+| 173 — Production readiness | P0 | DONE | Per-deploy readiness checks ran for every batch: health, db status, provider health, baseline scans. **Closed by the v2.1 reconciliation 2026-10-07**, which verified each criterion live: migrations auto-applied cleanly through `0011` (incl. the A.1 credential split), backups = Neon PITR with a passed restore drill (170), rollback documented (174), monitoring = UptimeRobot + in-app scheduler, alerts = UptimeRobot email + security-events view, secrets in env/mode-600 files only, rate limits live-proven (429 + spoof-fix), provider health endpoint live, worker health exercised by every E2E, database health `db:"ok"` on production and staging | Free-tier platform limits (sleep-on-idle, 300 emails/day, shared instance hours) remain — documented in the limitations register; they are platform constraints, not readiness failures |
 | 174 — Rollback plan | P0 | DONE | `docs/ROLLBACK.md` (Batch C, 2026-10-07): code rollback (Render redeploy of a prior commit; `git revert` path — never a force-pushed rewrite), a configuration table of every env var (what it does + where its value's source of truth lives — **no values**), and the database policy: migrations are additive, rollback is forward-fix, and data damage escapes via the PITR procedure in `docs/DISASTER_RECOVERY.md` | |
 | 175 — Post-launch monitoring | P2 | PARTIAL | UptimeRobot uptime monitoring + per-deploy live verification + admin overview | No error/latency alerting; post-launch monitoring is uptime + manual checks |
 | 176 — Limitations register | P3 | DONE | `CURRENT_STATE.md` §Known gaps + `MIGRATION_PLAN.md` gaps register + honest-limits copy on `/trust` and the home page | |
 | 177 — Capability-claim review | P3 | DONE | Claims audited in Stages S13/S15: `/trust` statements traceable to code; README honest limits; no certification claims | |
 | 178 — Codebase cleanup | P2 | PARTIAL | The free-lane AI hook was fully removed in Stage S1 (repo grepped clean); legacy agent retained deliberately as the remediation core | `local_agent.py` / `proxy_relay.py` / `browser_probe.py` remain as documented local-only surface |
 | 179 — Final architecture review | P2 | DONE | Stage S15 architecture review + this Phase 0 re-audit (`CURRENT_STATE.md`, this file) | |
-| 180 — Final command | P0 | PARTIAL | Most final criteria verified live on 2026-10-07: production matches repo (commit `8271c17`), tests pass, security/privacy checks pass, monitoring/remediation/verification/reappearance work | Restore tests (170), staging (109), and CI (106) still open — the final gate is not fully met |
+| 180 — Final command | P0 | DONE | **Final gate run under spec v2.1, 2026-10-07:** every criterion in the phase text is evidenced — production matches the repository (dashboard-pinned commit `b0a7a8f`; repo HEAD beyond it is docs-only), tests pass (410 passed, 19 skipped at HEAD; CI run #1 passed, 106), security/privacy acceptance passes (147/148), migrations are safe (idempotent runner, credential split, PITR restore drill 170), monitoring/remediation/verification/reappearance work live (stage E2Es + Spokeo `verified_removed` + v2.1 sweep and throwaway-account E2E), backups/recovery work (drill + `docs/DISASTER_RECOVERY.md`), documentation is accurate (reconciled this refresh), and capability claims are true (177) | 31 phases remain PARTIAL as depth items and Phase 98 (localization) NOT_DONE — none is a Phase 180 gate criterion; they stay tracked individually in this table |
 
 ## Counts
 

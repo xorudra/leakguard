@@ -352,3 +352,27 @@ health (`db: "ok"`) → providers health → anonymous baseline parity
 self-deleted) → admin counts sanity → UptimeRobot confirmation. A
 deploy that fails any step is rolled back per §7 before any report
 goes out.
+
+---
+
+## v2.1 reconciliation addendum (2026-10-07, evening)
+
+Spec v2.1 ("current live-production baseline") changed no phase and no
+priority; it added one non-negotiable to Phase 0: a live/repository
+reconciliation with the exact production commit identified from the
+deployment platform. Executed the same day:
+
+- Production commit pinned from the Render dashboard: `b0a7a8f`
+  (deploy `dep-db34ec9srm7s73e32480`, live 18:50 IST); staging runs the
+  same commit (deploy `dep-db34n9d9fdbs739vetc0`, 19:09 IST). Repository
+  HEAD beyond production is documentation-only — production code and
+  repository code are identical.
+- Live feature sweep + throwaway-account E2E re-verified against
+  production; full suite at HEAD: 410 passed, 19 skipped.
+- Discrepancies found and resolved: audit-document drift (this file's
+  companions `CURRENT_STATE.md` / `PHASE_STATUS.md` refreshed) and
+  staging vault key files missing from `.gitignore` (fixed; never
+  committed). No functional live↔repository discrepancy exists.
+- Phases 173 (production readiness) and 180 (final command) closed on
+  this evidence. Scoreboard: **135 DONE / 31 PARTIAL / 1 NOT_DONE /
+  11 CUT / 3 NA**.

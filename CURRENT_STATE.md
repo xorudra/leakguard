@@ -6,13 +6,22 @@ The pre-upgrade Phase 0 audit (v2.5) is preserved in git history at
 commit `76565e0`; the Sentinel-era state file this replaces is in history
 at `e31e016`.*
 
+***v2.1 reconciliation refresh — 2026-10-07 (evening).** Spec v2.1 added
+a non-negotiable live/repository reconciliation to Phase 0. It was run
+the same day: the exact production commit was read from the Render
+dashboard, the live public surface and a throwaway-account end-to-end
+journey were re-verified against production, the full suite was re-run
+at repository HEAD, and every discrepancy found is recorded in §B and
+resolved there. Sections A, B, F, G, H, I, J below reflect the
+reconciled state; nothing in this file rests on UI copy alone.*
+
 ## A. Audit Metadata
 
-- **Audit date:** 2026-10-07
+- **Audit date:** 2026-10-07 (v2.1 reconciliation refresh, evening)
 - **Auditor:** Muse (Phase 0 auditor, Final Remaining Implementation program)
-- **Repository commit:** `8271c17` (main, github.com/xorudra/leakguard)
+- **Repository commit:** `520a692` (main, github.com/xorudra/leakguard) — docs-only on top of the production code commit
 - **Production deployment:** https://leakguard-hh8e.onrender.com — Render free web service `srv-db2rm6142hec73flnl90` (Oregon), manual deploy
-- **Production commit/version:** `8271c17` — matches repository HEAD
+- **Production commit/version:** `b0a7a8f713004335b22fe47dc35f65f3708e858f` — read from the Render dashboard on 2026-10-07 (deploy `dep-db34ec9srm7s73e32480`, "Deploy succeeded | Live", deployed 18:50 IST; full SHA verified via the dashboard's GitHub commit link). The only repository commits beyond it (`520a692`) change documentation files only (`git diff b0a7a8f..520a692` touches `CURRENT_STATE.md` + `PHASE_STATUS.md`, no executable code), so production code and repository code are identical. Staging (`leakguard-staging`, `srv-db34g7vlk1mc739dgp9g`) runs the same commit `b0a7a8f` (deploy `dep-db34n9d9fdbs739vetc0`, live 19:09 IST) on its own Neon branch
 - **Runtime:** Python 3.12, stdlib `http.server`; only three pip dependencies (`psycopg[binary]`, `cryptography`, `argon2-cffi`)
 - **Deployment platform:** Render (free) + UptimeRobot free monitor (5-min, HEAD-safe)
 - **Database:** Neon free PostgreSQL (project "leakguard", AWS ap-southeast-1 Singapore), pooled connection via `DATABASE_URL`
@@ -20,20 +29,45 @@ at `e31e016`.*
 - **Frontend:** Vanilla JS single-page app + PWA (`static/`), Manifest V3 browser extension (`extension/`, sideload)
 - **Backend:** Modular monolith — `core/`, `accounts/`, `providers/`, `scanning/`, `remediation/`, `monitoring/`, `dashboard/`, `db/`, `vault/`
 - **AI provider configured:** NO — none exists in the product (owner rule: AI only if free *and* unlimited; no such tier exists)
-- **Audit confidence:** High — every status in `PHASE_STATUS.md` was checked against the code (grep/read), the full suite was re-run by the auditor (302 tests, OK, 2 environment skips), and production behavior was end-to-end verified by the parent agent on 2026-10-07 for every shipped stage
+- **Audit confidence:** High — every status in `PHASE_STATUS.md` was checked against the code (grep/read), the full suite was re-run at repository HEAD (410 passed, 19 skipped, 2026-10-07), production behavior was end-to-end verified by the parent agent on 2026-10-07 for every shipped stage, and the v2.1 reconciliation pinned the production commit from the deployment platform itself (spec §0 rule 6 satisfied with platform evidence, not inference)
 
 ## B. Production vs Repository
 
 | Area | Repository | Production | Match? | Evidence | Action |
 |---|---|---|---|---|---|
-| Authentication | Argon2id, sessions, TOTP, reset (`accounts/`) | Live; register/login/TOTP/reset E2Es passed | YES | Stage S3/S8 production checks (parent-verified 2026-10-07) | None |
-| Database | Migrations `0001`–`0010`, Neon Postgres (`db/`) | Live; health reports `db: "ok"` | YES | Production health + every account-stage E2E | None |
+| Authentication | Argon2id, sessions, TOTP, reset, passkeys (`accounts/`) | Live; register/login/TOTP/reset E2Es passed; passkey sign-in options live (challenge, rpId `leakguard-hh8e.onrender.com`, UV required, empty allowCredentials); v2.1 reconciliation E2E (register → login → me → delete) passed 2026-10-07 | YES | Stage S3/S8 production checks + Batch D1 live check + v2.1 reconciliation sweep (parent-verified 2026-10-07) | None |
+| Database | Migrations `0001`–`0011`, Neon Postgres (`db/`) | Live; health reports `db: "ok"` on production and staging; app connects as least-privilege role `leakguard_app`, migrations via `MIGRATION_DATABASE_URL` | YES | Production health + every account-stage E2E + Batch A.1 deploy logs | None |
 | Monitoring | Scheduler + diff + timeline (`monitoring/`) | Live; cadence settings + timeline verified | YES | Stage S8 production check | None |
 | Notifications | Ledger + Brevo lane (`monitoring/notify.py`) | Live; real reset email delivered via Brevo and completed end-to-end | YES | Stage S8 email-lane proof (parent-verified) | None |
 | Admin | Counts-only overview + audit (`accounts/admin.py`) | Live; non-admins get 404, admin sees counts only, no email strings in output | YES | Stage S11 production check (15/15) | None |
 | Remediation | Engine + worker + verification (`remediation/`) | Live; 40-case runs settle; verification produces real `verified_removed` | YES | Stage S7/S7.1/S7.2 + verification drill (parent-verified) | None |
-| API | Read-only Bearer tokens on six read endpoints (`accounts/api_tokens.py`) | Live; token read/mutation-wall/revoke drill passed | YES | Stage S13 production check (10/10) | None |
-| Security | Rate limits, retention, headers, audit (`core/`, `accounts/audit.py`) | Live; 429 + Retry-After observed; X-Forwarded-For spoof bypass caught live and fixed (`56fb831`) | YES | Stage S12/S12.1 production checks | None |
+| API | `/api/v1/*` canonical + unversioned v1 alias; read-only Bearer tokens on six read endpoints (`accounts/api_tokens.py`) | Live; v1/unversioned parity verified for health + providers; token read/mutation-wall/revoke drill passed | YES | Stage S13 production check (10/10) + Batch B and v2.1 reconciliation live parity checks | None |
+| Security | Rate limits, retention, headers, audit (`core/`, `accounts/audit.py`) | Live; 429 + Retry-After observed; X-Forwarded-For spoof bypass caught live and fixed (`56fb831`); HSTS `max-age=31536000; includeSubDomains`, CSP, X-Frame-Options DENY, X-Request-Id on responses (v2.1 sweep) | YES | Stage S12/S12.1 production checks + v2.1 reconciliation header sweep | None |
+| Pages | `/privacy`, `/terms`, `/support`, `/trust`, `/reset`, `/.well-known/security.txt` (`static/`) | Live; all return 200 (v2.1 sweep) | YES | Batch D2 live check + v2.1 reconciliation sweep | None |
+| Environments | Production + staging services, staging on its own Neon branch with its own vault keys, no email lane on staging | Live; both services on commit `b0a7a8f` (dashboard-verified); staging health `db: "ok"` | YES | Phase 109 build + v2.1 reconciliation (dashboard + health, 2026-10-07) | None |
+
+**Discrepancies found by the v2.1 reconciliation (all resolved):**
+
+1. **Audit-document drift (documentation only, no code impact).** This
+   file and `PHASE_STATUS.md` still cited the superseded audit commit
+   `8271c17`, migrations `0001`–`0010`, a two-item NOT_DONE count, and
+   pre-staging risk text, and Phases 173/180 still listed CI (106),
+   restore tests (170), and staging (109) as open after all three had
+   closed. Corrected in this refresh; Phases 173 and 180 re-scored on
+   the evidence in `PHASE_STATUS.md`.
+2. **Staging vault keys were not git-ignored.** `.staging-vault-master-key`
+   / `.staging-vault-lookup-key` sat untracked but un-ignored in the
+   working tree — one `git add -A` away from a public commit. They were
+   never committed (verified: not in git history); `.gitignore` now
+   covers `.staging-vault-*`.
+3. **No functional live↔repository discrepancy was found.** Every live
+   behavior probed in the reconciliation (health, v1 parity, provider
+   health, baselines, passkey options, export re-auth, account E2E,
+   headers, page availability, 40-broker registry) traces to source at
+   production commit `b0a7a8f` and to the test suite at HEAD (410
+   passed, 19 skipped). No feature exists in production that is absent
+   from the repository, and no repository feature is missing from
+   production.
 
 ## C. Architecture Inventory
 
@@ -47,7 +81,7 @@ at `e31e016`.*
 - **Frontend pages:** one SPA — Quick Scan, Action Center (signed-in home), Privacy Center (identifiers, consents, household, monitoring, timeline, notifications, API tokens, exposure map, export, deletion), human queue, `/trust`, `/reset`
 - **Browser automation:** Playwright probe locally only (`browser_probe.py`, subprocess-isolated); the server never runs a browser — walled brokers classify from HTTP evidence and the attempt trail records `browser: skipped on_server`
 - **External dependencies:** Render, Neon, Brevo (email), XposedOrNot, Have I Been Pwned, DuckDuckGo, Cloudflare DoH, crt.sh, UptimeRobot
-- **Deployment configuration:** `render.yaml` (build `pip install -r requirements.txt`, start `python3 app.py`); env vars on Render: `DATABASE_URL`, `VAULT_MASTER_KEY`, `VAULT_LOOKUP_KEY`, `BREVO_API_KEY`, `NOTIFY_FROM_EMAIL`, `NOTIFY_FROM_NAME`, `ADMIN_EMAILS`, `PYTHON_VERSION`. Deploys are manual (Render auto-deploy does not fire for this service)
+- **Deployment configuration:** `render.yaml` (build `pip install -r requirements.txt`, start `python3 app.py`); env vars on Render: `DATABASE_URL`, `MIGRATION_DATABASE_URL`, `VAULT_MASTER_KEY`, `VAULT_LOOKUP_KEY`, `BREVO_API_KEY`, `NOTIFY_FROM_EMAIL`, `NOTIFY_FROM_NAME`, `ADMIN_EMAILS`, `PYTHON_VERSION`. Deploys are manual (Render auto-deploy does not fire for this service). A second service, `leakguard-staging`, mirrors the configuration against the Neon `staging` branch with its own vault keys and deliberately no Brevo/email variables
 
 ## D. Security Inventory
 
@@ -85,7 +119,7 @@ at `e31e016`.*
 |---|---|---|---|---|---|---|
 | Anonymous Quick Scan (breaches + password k-anonymity + score) | Yes | Yes — baselines identical to pre-upgrade (214 breaches / score 100 / pwned 52,372,427) | Yes | Yes — nothing stored | README, /trust | `app.py`, `providers/`; S15 acceptance |
 | Accounts (register/login/TOTP/reset/delete) | Yes | Yes | Yes | Yes | README | `accounts/`; Stage S3/S8 E2Es |
-| Passkeys (WebAuthn sign-in + management) | Yes | Not yet — ships with Batch D1 deploy | Yes — software-authenticator ceremonies incl. every failure mode | Yes — public keys only, attestation `none` only, UV required, one generic sign-in failure | README Operations, Privacy Center copy | `accounts/webauthn.py`, `accounts/cbor.py`, migration `0011`; `tests/test_webauthn.py` |
+| Passkeys (WebAuthn sign-in + management) | Yes | Yes — live since Batch D1; sign-in options re-verified in the v2.1 sweep (challenge issued, rpId correct, UV required, empty allowCredentials, unauthenticated passkey list 401) | Yes — software-authenticator ceremonies incl. every failure mode | Yes — public keys only, attestation `none` only, UV required, one generic sign-in failure | README Operations, Privacy Center copy | `accounts/webauthn.py`, `accounts/cbor.py`, migration `0011`; `tests/test_webauthn.py` |
 | Encrypted identifier vault + consents | Yes | Yes | Yes | Yes | /trust, README Privacy | `vault/`, migration `0001`/`0002` |
 | Account scanning (all identifier kinds) | Yes | Yes | Yes | Yes | README | `scanning/`; Stage S5/S6 E2Es |
 | One-command remediation + human queue + letters | Yes | Yes — 40-case runs settle (2 submitted / 11 needs_human / 27 blocked in the acceptance run) | Yes | Yes — consent re-checked at execution | README | `remediation/`; Stage S7 E2Es |
@@ -96,8 +130,8 @@ at `e31e016`.*
 | Owner admin (counts only) + audit log | Yes | Yes | Yes | Yes — no PII in output, test-asserted | README Operations | `accounts/admin.py`, `accounts/audit.py` |
 | Read-only API tokens | Yes | Yes | Yes | Yes — structural read-only wall | README API | `accounts/api_tokens.py`; Stage S13 E2E |
 | Trust center + security.txt | Yes | Yes | Yes | Yes | `/trust` itself | `static/index.html`, `/.well-known/security.txt` |
-| Privacy policy analyzer (keyword checklist) | Yes | Not yet — ships with Batch D2 deploy | Yes — fixture/control/SSRF tests | Yes — session-gated, SSRF-guarded fetch, nothing stored | Privacy Center copy + disclaimer | `dashboard/policy_analyzer.py`; `tests/test_batch_d2.py` |
-| Privacy / Terms / Support pages + propagation list | Yes | Not yet — ships with Batch D2 deploy | Yes | Yes — masked labels only, matcher-only associations | `/privacy`, `/terms`, `/support`, `/trust` additions | `static/index.html`, `dashboard/graph.py` (`propagation`) |
+| Privacy policy analyzer (keyword checklist) | Yes | Yes — live since Batch D2; unauthenticated call rejected (403) in the D2 live check | Yes — fixture/control/SSRF tests | Yes — session-gated, SSRF-guarded fetch, nothing stored | Privacy Center copy + disclaimer | `dashboard/policy_analyzer.py`; `tests/test_batch_d2.py` |
+| Privacy / Terms / Support pages + propagation list | Yes | Yes — live since Batch D2; all pages return 200 in the v2.1 sweep | Yes | Yes — masked labels only, matcher-only associations | `/privacy`, `/terms`, `/support`, `/trust` additions | `static/index.html`, `dashboard/graph.py` (`propagation`) |
 | Exposure map (graph) | Yes | Yes | Yes | Yes — masked labels only | Privacy Center copy | `dashboard/graph.py`; Stage S14 checks |
 | Browser extension (sideload) | Yes | Packaged + statically verified; not store-published | Yes | Yes — token-only, single host permission | `extension/README.md` | `extension/`, `tools/build_extension_zip.py` |
 | PWA (installable) | Yes | Yes — manifest/SW/icons serve 200 with correct types | Yes | Yes — SW caches shell only, never `/api/` | README | `static/manifest.webmanifest`, `static/sw.js` |
@@ -111,12 +145,18 @@ evidence, and gap). Summary counts:
 
 | Status | Count |
 |---|---|
-| DONE | 133 |
-| PARTIAL | 33 |
-| NOT_DONE | 2 |
+| DONE | 135 |
+| PARTIAL | 31 |
+| NOT_DONE | 1 |
 | CUT (owner rule: AI phases + business model) | 11 |
 | NA (surface does not exist: file uploads, webhooks, containers) | 3 |
 | **Total** | **181** |
+
+*(v2.1 reconciliation, 2026-10-07: Phases 173 and 180 moved PARTIAL →
+DONE — every blocker their gap text named (CI 106, restore tests 170,
+staging 109) had closed, and the reconciliation supplied the remaining
+gate evidence: dashboard-pinned production commit, full-suite pass at
+HEAD, and a fresh live verification pass.)*
 
 ## H. Critical Risks
 
@@ -130,10 +170,12 @@ spec:
    **tested** (drill 2026-10-07, Phases 78/170 DONE) and the procedure is
    written, but the only backup is Neon free-plan PITR: its console-
    visible history window bounds the RPO, and there is no second copy.
-2. **Production readiness / the final gate stay open on staging**
-   (Phases 173, 180 PARTIAL) — everything runs against the one live
-   service; there is no staging environment to rehearse against
-   (Phase 109).
+2. **One production service on a free tier.** Production readiness and
+   the final gate are closed (Phases 173, 180 DONE — staging exists,
+   Phase 109, and the v2.1 reconciliation verified the gate criteria
+   live), but production remains a single free Render instance that
+   sleeps when idle and shares the account's free instance hours with
+   staging; there is no redundancy if Render or Neon has an outage.
 3. **No anomaly alerting and no automated dependency vulnerability
    scanning** — the security-events *view* exists (Phase 62 DONE) and
    acceptance evidence is consolidated (`docs/ACCEPTANCE.md`, Phases
@@ -153,15 +195,14 @@ means "no longer indexed as of the check".
 Only genuinely open items, P0 → P3 (full detail in `PHASE_STATUS.md` and in
 `MIGRATION_PLAN.md` → "Final Remaining Implementation — order of work"):
 
-- **P0:** production-readiness evidence
-  (173) → re-run the Phase 180 final gate. *(Batch A closed 69, 70,
+- **P0:** — none open. *(Batch A closed 69, 70,
   106, 107; Batch A.1 closed 73, 78, 170; Batch C closed 79, 174,
-  62, 147, 148; Batch D1 closed 4.)*
+  62, 147, 148; Batch D1 closed 4; the v2.1 reconciliation closed
+  173 and 180.)*
 - **P1:** stored finding lifecycle states (25) → per-cycle report
   files in-repo (149). *(Batch B closed 88, 49, 142.)*
 - **P2:** scan budget engine
-  (158) → workflow-version capture on attempts (31) → staging
-  environment (109) →
+  (158) → workflow-version capture on attempts (31) →
   fake-broker harness (111, 162) → dead-letter replay (119) → standalone
   policy engine (153) → data-quality stage (160) → metrics + engineering
   alerts (76, 77) → per-broker verification-success dashboard (125 —
@@ -216,8 +257,9 @@ Only genuinely open items, P0 → P3 (full detail in `PHASE_STATUS.md` and in
   based and username presence covers 13 platforms; findings are
   labelled exact/probable/weak and weak correlation is never upgraded
   to fact.
-- Serve organizations/multi-tenant workspaces, produce generated
-  report documents, or run a staging environment — see
-  `PHASE_STATUS.md` for the full open list.
+- Serve organizations/multi-tenant workspaces or produce generated
+  report documents — see `PHASE_STATUS.md` for the full open list.
+  (A staging environment *does* exist — `leakguard-staging` on its own
+  Neon branch — but it serves rehearsals, not users.)
 - Send more than 300 emails/day (Brevo free) or stay awake while idle
   (Render free sleeps; ~50s wake).

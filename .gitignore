@@ -8,3 +8,4 @@ __pycache__/
 .brevo-password
 .brevo-api-key
 .neon-app-*
+.staging-vault-*

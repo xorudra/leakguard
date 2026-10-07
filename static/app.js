@@ -480,7 +480,7 @@ async function probeMode(broker, profile, deep) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ broker, profile, deep: !!deep }),
-  }, deep ? 60000 : 25000);
+  }, deep ? 120000 : 25000);
   const d = await resp.json();
   if (!resp.ok) throw new Error(d.error || "Probe failed");
   return d;
@@ -563,7 +563,7 @@ $("autoBtn").addEventListener("click", async () => {
     }
     await Promise.all([fastWorker(), fastWorker(), fastWorker()]);
     if (deepQueue.length) {
-      feed("🔎", "Deep pass — retrying " + deepQueue.length + " stubborn brokers with the relay and alternate routes…");
+      feed("🔎", "Deep pass — retrying " + deepQueue.length + " stubborn brokers with the relay and alternate routes (this pass is slow on purpose: walled brokers answer slowly, a few minutes is normal)…");
       const dq = deepQueue.slice();
       async function deepWorker() {
         while (dq.length) {
@@ -590,7 +590,7 @@ $("autoBtn").addEventListener("click", async () => {
           record(item.broker, outcome[0], outcome[1]);
         }
       }
-      await Promise.all([deepWorker(), deepWorker()]);
+      await Promise.all([deepWorker(), deepWorker(), deepWorker()]);
     }
     const sub = autoResults.filter((r) => r.outcome === "submitted").length;
     const dr = autoResults.filter((r) => r.outcome === "draft").length;

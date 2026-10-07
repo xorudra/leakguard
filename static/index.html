@@ -208,6 +208,28 @@
       message could not be sent, the entry says so honestly instead of pretending it reached you.</p>
       <div id="notifList"></div>
 
+      <h3>API access</h3>
+      <p class="hint">For your own scripts: an API token lets a program read your LeakGuard data
+      (action center, scans, removal cases, notifications, timeline) without signing in here.
+      Tokens are <strong>read-only</strong> — they can never change, submit or delete anything —
+      and you can revoke one at any time. We store only a hash of each token, so the raw value is
+      shown <strong>exactly once</strong>, when you create it. Send it as
+      <code>Authorization: Bearer lg_…</code>. Treat it like a password.</p>
+      <div id="apiTokenList"></div>
+      <div id="apiTokenOnce" class="letterBox" hidden>
+        <p><strong>Your new token — copy it now.</strong> You won't see this again;
+        if you lose it, revoke it below and create a fresh one.</p>
+        <textarea id="apiTokenRaw" rows="2" readonly></textarea>
+        <div class="rowBtns">
+          <button type="button" id="apiTokenCopyBtn" class="btnGhost">Copy token</button>
+        </div>
+      </div>
+      <label>Token name <input type="text" id="apiTokenName" placeholder="What will use it? e.g. my script" maxlength="60" autocomplete="off"></label>
+      <div class="rowBtns">
+        <button type="button" id="apiTokenCreateBtn" class="btnGhost">Create token</button>
+        <span id="apiTokenStatus" class="hint"></span>
+      </div>
+
       <h3>Full scan</h3>
       <p class="hint">One tap scans <strong>every detail you have saved</strong> against the breach
       databases and scores your whole profile — no re-typing, nothing else to fill in. It needs the
@@ -470,8 +492,96 @@
     </ul>
   </section>
 
+  <section id="trust" class="card" hidden>
+    <h2>Trust &amp; security</h2>
+    <p>Exactly what LeakGuard stores, what it never stores, who else touches your data,
+    and how long anything is kept. Every claim on this page describes the code that is
+    actually running — nothing here is aspirational.</p>
+
+    <h3>What we store — and how</h3>
+    <ul>
+      <li><strong>Your saved details</strong> (emails, phones, names, addresses, usernames, domains)
+      are encrypted with <strong>AES-256-GCM envelope encryption</strong>: every record gets its own
+      fresh random encryption key, and that key is itself encrypted under a master key that lives
+      only in the server's environment — never in the database, never in the code.</li>
+      <li><strong>Your account email</strong> is looked up by a keyed one-way fingerprint (HMAC),
+      stored encrypted the same way as your saved details, and only ever displayed masked
+      (like <em>r•••@example.com</em>). It is never stored in plain text.</li>
+      <li><strong>Scan results and removal cases</strong> are stored against your account so
+      monitoring and the timeline work. The anonymous Quick Scan stores nothing at all —
+      its results are computed per request and forgotten.</li>
+    </ul>
+
+    <h3>What we never store</h3>
+    <ul>
+      <li><strong>Passwords.</strong> Account passwords exist only as <strong>Argon2id</strong>
+      password hashes — we could not read yours back if we wanted to.</li>
+      <li><strong>Sign-in sessions and API tokens.</strong> Only their SHA-256 hashes are stored,
+      so a database copy alone contains nothing anyone could sign in with.</li>
+      <li><strong>Passwords you check for breaches.</strong> The check uses k-anonymity: only the
+      first 5 characters of the password's SHA-1 hash are sent to Have I Been Pwned, the match is
+      made locally, and the password itself is never sent, stored or logged.</li>
+      <li><strong>Payment details.</strong> LeakGuard is free and has no payments — we hold no
+      card or bank information about anyone.</li>
+    </ul>
+
+    <h3>Who else processes data</h3>
+    <ul>
+      <li><strong>Render</strong> — hosts the app. <strong>Neon</strong> — hosts the database
+      (which holds only the encrypted forms described above).</li>
+      <li><strong>Brevo</strong> — sends account email (password resets, and monitoring alerts
+      if you switch notifications on). It sees the recipient address and the message.</li>
+      <li><strong>XposedOrNot</strong> and <strong>Have I Been Pwned</strong> — the breach
+      databases your email is checked against; checking means they receive the address being
+      checked, the same as if you used their own sites.</li>
+      <li><strong>DuckDuckGo</strong> — public-web discovery searches. Domain checks read public
+      DNS via <strong>Cloudflare</strong> and public certificate records via <strong>crt.sh</strong>.
+      Username checks read the public profile pages of the platforms themselves.</li>
+    </ul>
+    <p>There is no advertising, no analytics tracking, and no selling or sharing of data
+    with anyone beyond the processors above.</p>
+
+    <h3>How long things are kept</h3>
+    <ul>
+      <li>Sessions: deleted 7 days after they expire or are revoked.</li>
+      <li>Password-reset tokens: deleted 7 days after they are used or expire.</li>
+      <li>Notifications: 90 days.</li>
+      <li>A deleted account: everything it owns is hard-deleted 30 days after deletion —
+      saved details, scans, findings, removal cases, settings, household and tokens.
+      A count-only audit trail (actions and numbers, never values or personal data) is kept.</li>
+    </ul>
+
+    <h3>The honest limits of removal</h3>
+    <ul>
+      <li><strong>Can be removed:</strong> data brokers, people-search sites, and Google search
+      results — they must answer a legal erasure request, and a removal only ever counts as done
+      here after LeakGuard has gone back and verified the listing is gone.</li>
+      <li><strong>Cannot be removed:</strong> a breach dump already copied to Telegram, dark-web
+      forums or torrents. No tool can delete every copy — anyone promising that is lying.</li>
+    </ul>
+
+    <h3>Your rights, in practice</h3>
+    <ul>
+      <li><strong>See everything:</strong> Privacy Center → “Download my data” exports all of it
+      as one JSON file.</li>
+      <li><strong>Withdraw permission:</strong> every consent switch in the Privacy Center takes
+      effect instantly and is recorded.</li>
+      <li><strong>Delete everything:</strong> Privacy Center → “Delete account”. You are signed
+      out immediately and your data becomes inaccessible; the 30-day window above exists so an
+      accidental or malicious deletion can still be undone by support, then the hard delete runs.</li>
+      <li><strong>Extra protection:</strong> optional two-factor authentication (authenticator
+      app) is available in the Privacy Center.</li>
+    </ul>
+
+    <h3>Security contact</h3>
+    <p>Found a security problem? Email the project security contact:
+    <strong>forapikeyonly2008@gmail.com</strong>. Our machine-readable contact file is at
+    <a href="/.well-known/security.txt">/.well-known/security.txt</a>.</p>
+  </section>
+
   <footer>
     <p>LeakGuard · Free to use · Scans use XposedOrNot and Have I Been Pwned · No scan data is stored on this server.</p>
+    <p><a href="/trust">Trust &amp; security</a></p>
     <p><a href="https://leakguard-hh8e.onrender.com">Website</a> · <a href="https://github.com/xorudra/leakguard" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/xorudra/siteguard" target="_blank" rel="noopener">SiteGuard (sister project)</a></p>
   </footer>
 </main>

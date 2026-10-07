@@ -94,6 +94,26 @@ JSON request bodies over **256 KB** are rejected with `413 body_too_large`. Read
 
 **Backups:** the database lives on Neon's free plan. Point-in-time restore is a Neon platform feature and restores are run by the owner from the Neon console; the free plan's restore history is limited, and LeakGuard keeps no second backup copy — the encrypted vault means a database copy alone exposes no identifier values (the master key lives only in the server environment).
 
+## 🔌 API
+
+Accounts can mint a personal **API token** (Privacy Center → **API access**) for scripting reads of their own data. The raw token (`lg_…`) is shown **exactly once**, at creation — the server stores only its SHA-256 hash plus a short display prefix, so it cannot be recovered later; revoke it and mint a fresh one instead.
+
+Tokens are **read-only by construction**: they authenticate `GET` requests only, and never authorize any change — every create/update/delete route requires a browser session, token or not.
+
+```bash
+TOKEN="lg_REPLACE_WITH_YOUR_TOKEN"
+BASE="https://leakguard-hh8e.onrender.com"
+
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/action-center
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/scans
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/scans/<job-id>
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/remediation/cases
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/notifications
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/monitoring/timeline
+```
+
+Token management itself is session-only (`GET`/`POST /api/tokens`, `DELETE /api/tokens/<id>` from the Privacy Center). A revoked or unknown token answers the same `401` as being signed out. `GET /api/providers/health` stays public. What the platform stores, who processes data, and how long anything is kept: **[Trust & security](https://leakguard-hh8e.onrender.com/trust)**.
+
 ## 🗂️ Project layout
 
 | File | Role |

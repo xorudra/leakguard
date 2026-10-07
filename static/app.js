@@ -731,6 +731,7 @@ function renderAccount() {
     loadConsents();
     loadRemoval();
     loadMonitoring();
+    loadApiTokens();
     if (renderAccount._fsUser !== meUser.id) {
       // Fresh sign-in (or a different account): clear the last
       // full-scan view so nobody sees a previous session's results.
@@ -1106,6 +1107,86 @@ $("memberAddBtn").addEventListener("click", async () => {
   } else {
     $("memberStatus").textContent = errMsg(r.data, "Could not add that person");
   }
+});
+
+/* ----- API access (personal tokens, Stage S13) -----
+   Read-only Bearer tokens for the owner's own scripts. The raw
+   value exists in this page exactly once — in the create response,
+   in the box below — because the server stores only its hash. */
+async function loadApiTokens() {
+  if (!meUser) return;
+  const wrap = $("apiTokenList");
+  try {
+    const r = await apiJson("/api/tokens");
+    if (!r.ok) {
+      wrap.innerHTML = "<p class='hint'>" + errMsg(r.data, "Could not load your API tokens") + "</p>";
+      return;
+    }
+    const tokens = r.data.tokens || [];
+    wrap.innerHTML = "";
+    if (!tokens.length) {
+      wrap.innerHTML = "<p class='hint'>No tokens yet — create one below.</p>";
+      return;
+    }
+    tokens.forEach((t) => {
+      const row = document.createElement("div");
+      row.className = "idRow";
+      const label = document.createElement("span");
+      label.className = "idVal";
+      let text = t.name + " · " + t.prefix + "…";
+      if (t.revoked_at) text += " · revoked " + new Date(t.revoked_at).toLocaleDateString();
+      else if (t.last_used_at) text += " · last used " + new Date(t.last_used_at).toLocaleString();
+      else text += " · never used";
+      label.textContent = text;
+      row.appendChild(label);
+      if (!t.revoked_at) {
+        const rm = document.createElement("button");
+        rm.type = "button";
+        rm.className = "btnGhost miniBtn";
+        rm.textContent = "Revoke";
+        rm.addEventListener("click", async () => {
+          rm.disabled = true;
+          const d = await apiJson("/api/tokens/" + t.id, {
+            method: "DELETE", headers: { "X-Requested-With": "fetch" },
+          });
+          if (d.ok) {
+            $("apiTokenStatus").textContent = "Revoked — that token no longer works anywhere.";
+            loadApiTokens();
+          } else {
+            $("apiTokenStatus").textContent = errMsg(d.data, "Revoke failed");
+            rm.disabled = false;
+          }
+        });
+        row.appendChild(rm);
+      }
+      wrap.appendChild(row);
+    });
+  } catch (e) {
+    wrap.innerHTML = "<p class='hint'>Could not load your API tokens.</p>";
+  }
+}
+
+$("apiTokenCreateBtn").addEventListener("click", async () => {
+  const name = $("apiTokenName").value.trim();
+  if (!name) { $("apiTokenStatus").textContent = "Give the token a name first."; return; }
+  const r = await apiJson("/api/tokens", {
+    method: "POST", headers: AH, body: JSON.stringify({ name }),
+  });
+  if (r.ok) {
+    $("apiTokenName").value = "";
+    $("apiTokenStatus").textContent = "Token created — copy it from the box above, it is shown only once.";
+    $("apiTokenRaw").value = r.data.token;
+    $("apiTokenOnce").hidden = false;
+    loadApiTokens();
+  } else {
+    $("apiTokenStatus").textContent = errMsg(r.data, "Could not create the token");
+  }
+});
+
+$("apiTokenCopyBtn").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("apiTokenRaw").value); $("apiTokenCopyBtn").textContent = "Copied ✓"; }
+  catch (e) { $("apiTokenRaw").select(); }
+  setTimeout(() => { $("apiTokenCopyBtn").textContent = "Copy token"; }, 1600);
 });
 
 /* ----- admin (owner only) -----
@@ -2125,6 +2206,17 @@ loadMe();
     $("rsBtn").disabled = true;
   }
   panel.scrollIntoView();
+})();
+
+/* ---------------- Trust page (/trust) ----------------
+   The Trust section lives in the same page (hidden); the /trust
+   URL simply unhides and jumps to it. Everything else on the page
+   keeps working — the section is reading material, not a mode. */
+(function () {
+  if (location.pathname !== "/trust") return;
+  const section = $("trust");
+  section.hidden = false;
+  section.scrollIntoView();
 })();
 
 /* ---------------- Reveal on scroll ---------------- */

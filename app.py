@@ -44,6 +44,7 @@ from pathlib import Path
 import agent as agent_engine
 from accounts import accounts_available
 from accounts import admin as admin_service
+from accounts import api_tokens as api_tokens_service
 from accounts import auth as auth_service
 from accounts import consents as consents_service
 from accounts import domains as domains_service
@@ -70,6 +71,14 @@ BROKERS_FILE = BASE / "brokers.json"
 
 EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$")
 MAX_BODY = 256 * 1024
+
+# RFC 9116 — served at /.well-known/security.txt (Stage S13).
+SECURITY_TXT = (
+    "Contact: mailto:forapikeyonly2008@gmail.com\n"
+    "Expires: 2027-10-07T00:00:00.000Z\n"
+    "Canonical: https://leakguard-hh8e.onrender.com/.well-known/security.txt\n"
+    "Preferred-Languages: en\n"
+)
 
 
 def _provider(capability):
@@ -275,6 +284,44 @@ class Handler(BaseHTTPRequestHandler):
             raise errors.unauthorized()
         return user, self._session_token()
 
+    def _bearer_token(self):
+        """The raw API token from an Authorization: Bearer header,
+        or None. Only the lg_ marker is accepted — anything else is
+        not an API token at all."""
+        raw = self.headers.get("Authorization") or ""
+        if raw.startswith("Bearer "):
+            candidate = raw[len("Bearer "):].strip()
+            if candidate.startswith(api_tokens_service.TOKEN_MARKER):
+                return candidate
+        return None
+
+    def _bearer_user(self):
+        """The API token's owner (public dict) or None. Cached per
+        request, like the session resolution."""
+        cached = getattr(self, "_bearer_cache", None)
+        if cached is not None or getattr(self, "_bearer_loaded", False):
+            return cached
+        self._bearer_loaded = True
+        raw = self._bearer_token()
+        self._bearer_cache = (
+            self._call(api_tokens_service.authenticate_token, raw)
+            if raw else None
+        )
+        return self._bearer_cache
+
+    def _require_reader(self):
+        """The user for a READ route: the session cookie OR a
+        Bearer API token (Stage S13). Tokens are read-only by
+        construction — mutation routes never call this; they use
+        _require_user (session only), so a Bearer token alone can
+        never change anything."""
+        user = self._current_user()
+        if user is None:
+            user = self._bearer_user()
+        if user is None:
+            raise errors.unauthorized()
+        return user
+
     def _require_admin(self):
         """The session's user, if they are the product owner
         (Stage S11). Everyone else — signed out, or signed in as a
@@ -328,6 +375,16 @@ class Handler(BaseHTTPRequestHandler):
             # Password-reset landing (Stage S8): the same SPA, which
             # reads ?token= itself and shows the reset form.
             return self._serve_file(STATIC / "index.html", "text/html; charset=utf-8")
+        if route == "/trust":
+            # Trust & security page (Stage S13): the same SPA, which
+            # unhides its Trust section for this path. Static content
+            # — serves with or without a database, like the home page.
+            return self._serve_file(STATIC / "index.html", "text/html; charset=utf-8")
+        if route == "/.well-known/security.txt":
+            # RFC 9116 security contact (Stage S13). Static text —
+            # served by the app itself, database or not.
+            return self._send(200, SECURITY_TXT,
+                              "text/plain; charset=utf-8")
         if route == "/static/style.css":
             return self._serve_file(STATIC / "style.css", "text/css; charset=utf-8")
         if route == "/static/app.js":
@@ -407,9 +464,18 @@ class Handler(BaseHTTPRequestHandler):
                 "audit": self._call(
                     admin_service.list_audit, admin["id"], limit),
             })
-        if route == "/api/scans":
+        if route == "/api/tokens":
+            # Token management is session-only: a token must never
+            # be able to mint or list other tokens.
             self._require_accounts()
             user, _token = self._require_user()
+            return self._json(200, {
+                "tokens": self._call(api_tokens_service.list_tokens,
+                                     user["id"]),
+            })
+        if route == "/api/scans":
+            self._require_accounts()
+            user = self._require_reader()
             return self._json(200, {
                 "jobs": self._call(scan_jobs_service.list_jobs, user["id"]),
             })
@@ -420,7 +486,7 @@ class Handler(BaseHTTPRequestHandler):
                 monitoring_service.get_settings, user["id"]))
         if route == "/api/monitoring/timeline":
             self._require_accounts()
-            user, _token = self._require_user()
+            user = self._require_reader()
             return self._json(200, {
                 "events": self._call(monitoring_service.timeline,
                                      user["id"]),
@@ -430,19 +496,19 @@ class Handler(BaseHTTPRequestHandler):
             # model — exposure, counts, recent activity and the
             # single server-computed next action.
             self._require_accounts()
-            user, _token = self._require_user()
+            user = self._require_reader()
             return self._json(200, self._call(
                 action_center_service.action_center, user["id"]))
         if route == "/api/notifications":
             self._require_accounts()
-            user, _token = self._require_user()
+            user = self._require_reader()
             return self._json(200, {
                 "notifications": self._call(
                     monitoring_service.list_notifications, user["id"]),
             })
         if route == "/api/remediation/cases":
             self._require_accounts()
-            user, _token = self._require_user()
+            user = self._require_reader()
             return self._json(200, {
                 "cases": self._call(remediation_service.list_cases,
                                     user["id"]),
@@ -456,7 +522,7 @@ class Handler(BaseHTTPRequestHandler):
             })
         if route.startswith("/api/scans/"):
             self._require_accounts()
-            user, _token = self._require_user()
+            user = self._require_reader()
             job_id = route[len("/api/scans/"):]
             try:
                 uuid.UUID(job_id)
@@ -502,7 +568,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/auth/") or parsed.path in (
                 "/api/consents", "/api/identifiers", "/api/scans",
                 "/api/domains", "/api/remediation/run",
-                "/api/household/members") \
+                "/api/household/members", "/api/tokens") \
                 or parsed.path.startswith("/api/domains/") \
                 or parsed.path.startswith("/api/remediation/cases/"):
             return self._accounts_post(parsed.path)
@@ -735,6 +801,16 @@ class Handler(BaseHTTPRequestHandler):
             member = self._call(households_service.add_member,
                                 user["id"], payload.get("label"))
             return self._json(201, {"member": member})
+        if route == "/api/tokens":
+            # Creating a token is a mutation, hence session + CSRF
+            # only (this handler's guard already ran). The 201 body
+            # is the ONE time the raw token is ever shown.
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            created = self._call(api_tokens_service.create_token,
+                                 user["id"], payload.get("name"))
+            return self._json(201, created)
         if route == "/api/domains":
             payload = self._read_json_body()
             if payload is None:
@@ -833,6 +909,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_DELETE(self):
         parsed = urllib.parse.urlparse(self.path)
+        prefix = "/api/tokens/"
+        if parsed.path.startswith(prefix) and len(parsed.path) > len(prefix):
+            security.require_csrf(self)
+            self._require_accounts()
+            user, _token = self._require_user()
+            token_id = parsed.path[len(prefix):]
+            try:
+                uuid.UUID(token_id)
+            except (ValueError, AttributeError, TypeError):
+                return self._fail(errors.not_found("API token not found"))
+            result = self._call(api_tokens_service.revoke_token,
+                                user["id"], token_id)
+            return self._json(200, result)
         prefix = "/api/household/members/"
         if parsed.path.startswith(prefix) and len(parsed.path) > len(prefix):
             security.require_csrf(self)

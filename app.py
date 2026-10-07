@@ -35,6 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import agent as agent_engine
+from core import context, errors, logging_setup, security
 
 BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
@@ -155,21 +156,58 @@ def load_brokers():
 class Handler(BaseHTTPRequestHandler):
     server_version = "LeakGuard/1.0"
 
-    def log_message(self, fmt, *args):  # keep logs clean, never log bodies
-        pass
+    def log_message(self, fmt, *args):  # stdlib access log stays OFF;
+        pass                               # structured logging is in core
+
+    # ---------- request lifecycle ----------
+    def handle_one_request(self):
+        """Mint a request_id per request, bind it to the context, run the
+        request, then emit exactly one structured log line (no bodies,
+        no personal data — see core.logging_setup)."""
+        self.request_id = context.new_request_id()
+        token = context.set_request_id(self.request_id)
+        timer = logging_setup.Timer()
+        self._response_status = None
+        try:
+            super().handle_one_request()
+        finally:
+            try:
+                path = urllib.parse.urlparse(getattr(self, "path", "") or "").path
+            except Exception:
+                path = "-"
+            logging_setup.log_request(
+                self.request_id, getattr(self, "command", None), path,
+                self._response_status, timer.elapsed_ms())
+            context.reset_request_id(token)
+
+    def _safe_dispatch(self, fn):
+        """Run a route handler, converting failures into structured errors."""
+        try:
+            return fn()
+        except errors.ApiError as err:
+            return self._fail(err)
+        except Exception as exc:  # never leak internals or user data
+            logging_setup.log_error(self.request_id,
+                                    "unhandled " + type(exc).__name__)
+            try:
+                return self._fail(errors.internal_error())
+            except Exception:
+                return None
 
     # ---------- helpers ----------
+    def _request_id(self):
+        return getattr(self, "request_id", None) or context.get_request_id()
+
     def _send(self, code, body, ctype="application/json"):
         data = body if isinstance(body, bytes) else body.encode("utf-8")
+        self._response_status = code
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy",
-                         "default-src 'self'; style-src 'self'; script-src 'self'; "
-                         "img-src 'self' data:; base-uri 'none'; form-action 'self'")
+        rid = self._request_id()
+        if rid:
+            self.send_header("X-Request-Id", rid)
+        security.apply_security_headers(self)
         self.end_headers()
         if not getattr(self, "_head_only", False):
             self.wfile.write(data)
@@ -177,11 +215,17 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, code, obj):
         self._send(code, json.dumps(obj), "application/json")
 
+    def _fail(self, err):
+        """Send an ApiError as the structured error body."""
+        return self._send(err.status, errors.error_json(
+            err.status, err.code, err.message, self._request_id()),
+            "application/json")
+
     def _serve_file(self, path, ctype):
         try:
             data = path.read_bytes()
         except OSError:
-            return self._json(404, {"error": "Not found"})
+            return self._fail(errors.not_found())
         self._send(200, data, ctype)
 
     # ---------- routes ----------
@@ -193,6 +237,9 @@ class Handler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_GET(self):
+        return self._safe_dispatch(self._do_GET)
+
+    def _do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         route = parsed.path
         if route == "/" or route == "/index.html":
@@ -205,7 +252,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"brokers": load_brokers()})
         if route == "/api/health":
             return self._json(200, {"ok": True, "service": "leakguard"})
-        return self._json(404, {"error": "Not found"})
+        return self._fail(errors.not_found())
 
     def _read_json_body(self):
         try:
@@ -215,16 +262,20 @@ class Handler(BaseHTTPRequestHandler):
         if length <= 0 or length > MAX_BODY:
             return None
         try:
-            return json.loads(self.rfile.read(length).decode("utf-8"))
+            data = json.loads(self.rfile.read(length).decode("utf-8"))
         except Exception:
             return None
+        return data if isinstance(data, dict) else None
 
     def do_POST(self):
+        return self._safe_dispatch(self._do_POST)
+
+    def _do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/agent/plan":
             payload = self._read_json_body()
             if payload is None:
-                return self._json(400, {"error": "Invalid JSON"})
+                return self._fail(errors.invalid_json())
             profile = {
                 "full_name": str(payload.get("full_name", ""))[:120],
                 "email": str(payload.get("email", ""))[:200],
@@ -232,17 +283,17 @@ class Handler(BaseHTTPRequestHandler):
                 "city": str(payload.get("city", ""))[:120],
             }
             if not profile["full_name"] and not profile["email"]:
-                return self._json(400, {"error": "Enter at least a name or an email"})
+                return self._fail(errors.bad_request(
+                    "missing_profile", "Enter at least a name or an email"))
             return self._json(200, {
                 "profile": profile,
                 "plan": agent_engine.build_plan(profile),
-                "free_lane": agent_engine.free_lane_status(),
-                "engine": "zero-token scripts (playbooks + live form probe); free-lane fallback only if configured",
+                "engine": "zero-token deterministic scripts (playbooks + live form probe) — no AI involved",
             })
         if parsed.path == "/api/agent/probe":
             payload = self._read_json_body()
             if payload is None:
-                return self._json(400, {"error": "Invalid JSON"})
+                return self._fail(errors.invalid_json())
             broker = str(payload.get("broker", ""))[:80]
             profile = payload.get("profile") or {}
             if not isinstance(profile, dict):
@@ -253,23 +304,14 @@ class Handler(BaseHTTPRequestHandler):
                 result = agent_engine.probe_with_browser_fallback(broker, profile)
             else:
                 result = agent_engine.probe_broker(broker, profile)
-            # Free-lane fallback: only when script matching found a form it
-            # could not fill, and the user's own free gateway is configured.
-            if result.get("forms") and not result.get("fillable"):
-                status = agent_engine.free_lane_status()
-                if status.get("configured") and status.get("reachable"):
-                    fields = result["forms"][0].get("fields", [])
-                    mapping = agent_engine.free_lane_classify(fields, list(agent_engine.PROFILE_FIELDS.keys()))
-                    if mapping:
-                        result["free_lane_mapping"] = mapping
-                        result["free_lane_used"] = True
             return self._json(200, result)
         if parsed.path == "/api/agent/submit":
             payload = self._read_json_body()
             if payload is None:
-                return self._json(400, {"error": "Invalid JSON"})
+                return self._fail(errors.invalid_json())
             if payload.get("confirm") is not True:
-                return self._json(400, {"error": "Submission needs explicit confirmation"})
+                return self._fail(errors.bad_request(
+                    "confirmation_required", "Submission needs explicit confirmation"))
             broker = str(payload.get("broker", ""))[:80]
             action = str(payload.get("form_action", ""))[:1000]
             method = str(payload.get("method", "POST")).upper()
@@ -282,22 +324,26 @@ class Handler(BaseHTTPRequestHandler):
             for b in brokers.values():
                 allowed.add(urllib.parse.urlparse(b["optout_url"]).netloc.lower())
             if not known or host not in allowed:
-                return self._json(400, {"error": "Form action is not on a known broker host"})
+                return self._fail(errors.bad_request(
+                    "unknown_broker_host", "Form action is not on a known broker host"))
             if method not in ("GET", "POST") or not isinstance(data, dict) or len(data) > 30:
-                return self._json(400, {"error": "Bad submission"})
+                return self._fail(errors.bad_request(
+                    "bad_submission", "Bad submission"))
             clean = {str(k)[:80]: str(v)[:500] for k, v in data.items()}
             return self._json(200, agent_engine.submit_form(action, method, clean))
         if parsed.path != "/api/scan":
-            return self._json(404, {"error": "Not found"})
+            return self._fail(errors.not_found())
         payload = self._read_json_body()
         if payload is None:
-            return self._json(400, {"error": "Invalid JSON"})
+            return self._fail(errors.invalid_json())
         email = str(payload.get("email", "")).strip().lower()
         password = payload.get("password") or ""
         if not EMAIL_RE.match(email):
-            return self._json(400, {"error": "Enter a valid email address"})
+            return self._fail(errors.bad_request(
+                "invalid_email", "Enter a valid email address"))
         if not isinstance(password, str) or len(password) > 200:
-            return self._json(400, {"error": "Password too long"})
+            return self._fail(errors.bad_request(
+                "password_too_long", "Password too long"))
 
         breaches, err = check_email_breaches(email)
         analytics = breach_analytics(email) if breaches else None
@@ -316,6 +362,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    logging_setup.setup_logging()
     port = int(os.environ.get("PORT", "8000"))
     host = os.environ.get("HOST", "0.0.0.0")
     server = ThreadingHTTPServer((host, port), Handler)

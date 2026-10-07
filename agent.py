@@ -2,7 +2,10 @@
 """
 LeakGuard Agent Mode — ZERO-TOKEN removal engine.
 
-No LLM is used anywhere in the default path:
+No LLM / AI is used anywhere. The product is 100% deterministic scripts
+(owner rule, 2026-10-07: AI only if free AND unlimited — no such source
+exists, so AI is not involved; the former optional free-lane fallback was
+removed in Stage S1):
   * Search / plan   — deterministic templates from playbooks.json + brokers.json
   * Form discovery  — plain HTTP fetch + stdlib html.parser; extracts the real
                       form fields, action and blockers (CAPTCHA / login / JS)
@@ -11,14 +14,6 @@ No LLM is used anywhere in the default path:
                       can submit it (guarded: only with submit=True, i.e. the
                       user's explicit per-run action in the GUI)
   * Tracking        — statuses live in the browser (same tracker as v1)
-
-Optional free-lane fallback (OFF unless configured): if a probed page has a
-form whose fields cannot be matched to the profile, LeakGuard may ask the
-user's OWN free gateway (FreeLLMAPI, env LEAKGUARD_FREE_LANE_URL +
-LEAKGUARD_FREE_LANE_KEY + LEAKGUARD_FREE_LANE_MODEL) to classify the fields.
-That call goes to free-tier providers the user already runs — it never uses
-Claude / Muse tokens. If the gateway is unreachable, the fallback silently
-stays off and the script path continues.
 """
 
 import json
@@ -395,64 +390,3 @@ def submit_form(form_action, method, payload, timeout=15):
     except Exception:
         return {"ok": False, "status": None}
 
-
-# ---------- optional free-lane fallback (user's own gateway, never Claude) ----------
-def free_lane_status():
-    url = os.environ.get("LEAKGUARD_FREE_LANE_URL", "").rstrip("/")
-    if not url:
-        return {"configured": False, "reachable": False}
-    try:
-        req = urllib.request.Request(url.replace("/v1", "") + "/api/ping", headers=UA)
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            return {"configured": True, "reachable": resp.status == 200}
-    except Exception:
-        return {"configured": True, "reachable": False}
-
-
-def free_lane_classify(fields, profile_keys):
-    """Ask the user's free gateway which form field means what.
-    Returns {field_name: semantic} or None. Only used when script matching fails."""
-    base = os.environ.get("LEAKGUARD_FREE_LANE_URL", "").rstrip("/")
-    key = os.environ.get("LEAKGUARD_FREE_LANE_KEY", "")
-    model = os.environ.get("LEAKGUARD_FREE_LANE_MODEL", "")
-    if not base or not key or not model:
-        return None
-    prompt = ("Map each form field to one of: " + ", ".join(profile_keys) + ", ignore. "
-              "Answer with the JSON object only, no analysis. "
-              "JSON like {\"field\":\"semantic\"}. Fields: " + json.dumps(fields))
-    # Reasoning models on the free lanes spend part of the budget thinking;
-    # 200 tokens was measured to truncate before the JSON (finish=length).
-    body = json.dumps({"model": model, "messages": [{"role": "user", "content": prompt}],
-                       "max_tokens": 900}).encode("utf-8")
-    req = urllib.request.Request(base + "/chat/completions", data=body, method="POST",
-                                 headers={"Content-Type": "application/json",
-                                          "Authorization": "Bearer " + key})
-    try:
-        with urllib.request.urlopen(req, timeout=45) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
-        text = data["choices"][0]["message"]["content"] or ""
-        return _extract_mapping(text)
-    except Exception:
-        return None
-
-
-def _extract_mapping(text):
-    """Pull the field->semantic JSON object out of a model reply, even when a
-    reasoning model wrapped it in analysis. Tries the last '{' first."""
-    starts = [i for i, ch in enumerate(text) if ch == "{"]
-    for start in reversed(starts):
-        depth = 0
-        for end in range(start, len(text)):
-            if text[end] == "{":
-                depth += 1
-            elif text[end] == "}":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        obj = json.loads(text[start:end + 1])
-                    except Exception:
-                        break
-                    if isinstance(obj, dict) and obj:
-                        return obj
-                    break
-    return None

@@ -1,6 +1,14 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 
+/* API errors are structured: {error: {code, message, request_id}}.
+   Pull the human message out (falling back gracefully). */
+function errMsg(data, fallback) {
+  const e = data && data.error;
+  if (!e) return fallback;
+  return typeof e === "string" ? e : (e.message || fallback);
+}
+
 /* ---------------- Scan ---------------- */
 $("scanForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -22,7 +30,7 @@ $("scanForm").addEventListener("submit", async (e) => {
       body: JSON.stringify({ email, password }),
     });
     const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || "Scan failed");
+    if (!resp.ok) throw new Error(errMsg(data, "Scan failed"));
     renderScan(data);
     status.hidden = true;
   } catch (err) {
@@ -308,10 +316,8 @@ $("planBtn").addEventListener("click", async () => {
       body: JSON.stringify(profile),
     });
     const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || "Plan failed");
-    $("laneStatus").textContent = data.free_lane && data.free_lane.configured
-      ? (data.free_lane.reachable ? "Free lane: connected (your gateway)" : "Free lane: configured but not reachable — script mode continues")
-      : "Free lane: not configured — pure script mode (0 tokens)";
+    if (!resp.ok) throw new Error(errMsg(data, "Plan failed"));
+    $("planStatus").textContent = "Plan ready: " + data.plan.length + " brokers — press the green button below to run everything automatically.";
     const wrap = $("planList");
     wrap.innerHTML = "";
     window.__plan = data.plan;
@@ -352,7 +358,7 @@ $("planBtn").addEventListener("click", async () => {
     if (profile.email && !$("lgEmail").value) $("lgEmail").value = profile.email;
     if (profile.full_name && !$("lgName").value) $("lgName").value = profile.full_name;
   } catch (err) {
-    $("laneStatus").textContent = err.message;
+    $("planStatus").textContent = err.message;
   } finally {
     btn.disabled = false;
     btn.textContent = "Build my removal plan";
@@ -369,7 +375,7 @@ async function probeBroker(broker, btn) {
       body: JSON.stringify({ broker, profile: agentProfile(), deep: true }),
     });
     const d = await resp.json();
-    if (!resp.ok) throw new Error(d.error || "Probe failed");
+    if (!resp.ok) throw new Error(errMsg(d, "Probe failed"));
     $("probeBox").hidden = false;
     $("probeTitle").textContent = "Probe: " + d.broker;
     const out = $("probeOut");
@@ -402,7 +408,6 @@ async function probeBroker(broker, btn) {
     } else if (d.browser) {
       lines.push("🌐 Browser check: not available on this server (HTTP probe only)");
     }
-    if (d.free_lane_used) lines.push("Free lane (your gateway) classified the unknown fields — 0 Claude tokens used.");
     lines.forEach((t) => {
       const p = document.createElement("p");
       p.className = "hint";
@@ -482,7 +487,7 @@ async function probeMode(broker, profile, deep) {
     body: JSON.stringify({ broker, profile, deep: !!deep }),
   }, deep ? 120000 : 25000);
   const d = await resp.json();
-  if (!resp.ok) throw new Error(d.error || "Probe failed");
+  if (!resp.ok) throw new Error(errMsg(d, "Probe failed"));
   return d;
 }
 
@@ -494,7 +499,7 @@ async function autoSubmit(broker, probe) {
     body: JSON.stringify({ confirm: true, broker, form_action: form.action, method: form.method, payload: probe.payload_preview || {} }),
   }, 30000);
   const d = await resp.json();
-  if (!resp.ok) throw new Error(d.error || "Submit failed");
+  if (!resp.ok) throw new Error(errMsg(d, "Submit failed"));
   return d;
 }
 
@@ -535,7 +540,7 @@ $("autoBtn").addEventListener("click", async () => {
         body: JSON.stringify(profile),
       }, 30000);
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || "Plan failed");
+      if (!resp.ok) throw new Error(errMsg(data, "Plan failed"));
       window.__plan = data.plan;
     }
     autoPlan = window.__plan;

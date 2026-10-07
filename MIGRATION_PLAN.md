@@ -58,9 +58,18 @@ Upgrade Master Prompt", Phases 0–180 (owner-supplied PDF, 2026-10-07).*
 - Stages are independently valuable: stopping after any stage leaves a working,
   strictly better product.
 
-## Open decisions for the owner
+## Owner decisions (all made 2026-10-07)
 
-1. **Name:** keep LeakGuard, or rebrand to Sentinel per the spec?
-2. **Database host:** Neon free or Supabase free (account on the owner's
-   API-keys email, like the other freemium providers)?
-3. **Go pattern:** standing go for all stages (DSRclone pattern) or stage-by-stage approval?
+1. **Name: LeakGuard** — no rebrand; "Sentinel" survives only as the spec's
+   codename in these docs.
+2. **Database: Neon free** — account created by Muse on the owner's API email
+   (same pattern as the other freemium providers); connection string lives in a
+   600-permission file on the VM, never in git or chat.
+3. **Go pattern: standing go** — stages run back-to-back, DSRclone pattern.
+4. **Core UX law (owner, 2026-10-07):** the user enters their details ONCE →
+   LeakGuard fetches their leaked data → the user gives ONE command
+   ("remove all") → LeakGuard completes it. No stage may add manual chores
+   (extra forms, per-item management, dashboards-as-homework) on top of that
+   flow; accounts and monitoring exist to make that flow automatic
+   (saved details → automatic re-scans → same one-command remediation),
+   never to make the user operate the product.

@@ -36,9 +36,7 @@ import http.cookies
 import json
 import os
 import re
-import urllib.error
 import urllib.parse
-import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -53,94 +51,56 @@ from accounts import ratelimit
 from accounts import sessions as sessions_mod
 from core import context, errors, logging_setup, security
 from db import pool as db_pool
+from providers import registry as providers_registry
 
 BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
 BROKERS_FILE = BASE / "brokers.json"
 
-XON_EMAIL = "https://api.xposedornot.com/v1/check-email/{email}"
-XON_ANALYTICS = "https://api.xposedornot.com/v1/breach-analytics?email={email}"
-HIBP_RANGE = "https://api.pwnedpasswords.com/range/{prefix}"
-
 EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$")
 MAX_BODY = 32 * 1024
-UA = {"User-Agent": "LeakGuard/1.0 (+https://github.com/xorudra/leakguard)"}
 
 
-def _get_json(url, timeout=15):
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8", "replace"))
-
-
-def _get_text(url, timeout=15):
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8", "replace")
+def _provider(capability):
+    """First registered provider declaring `capability`, or None."""
+    found = providers_registry.get_registry().get_providers(capability)
+    return found[0] if found else None
 
 
 def check_email_breaches(email):
-    """Return (breach_names list, error or None)."""
-    url = XON_EMAIL.format(email=urllib.parse.quote(email, safe=""))
-    try:
-        data = _get_json(url)
-    except Exception:
-        return None, "Breach database unreachable right now. Try again in a minute."
-    if isinstance(data, dict) and data.get("Error"):
-        return [], None
-    breaches = []
-    raw = data.get("breaches") if isinstance(data, dict) else None
-    if isinstance(raw, list):
-        for item in raw:
-            if isinstance(item, list):
-                breaches.extend(str(x) for x in item)
-            elif isinstance(item, str):
-                breaches.append(item)
-    return breaches, None
+    """Return (breach_names list, error or None) via the email_breach
+    provider. Any provider failure (error, timeout, circuit open)
+    degrades to the same user-facing error as before Stage S4 —
+    results are never fabricated."""
+    provider = _provider("email_breach")
+    result = provider.check_email(email) if provider is not None else None
+    if result is not None and result.status == "ok":
+        return result.data, None
+    return None, "Breach database unreachable right now. Try again in a minute."
 
 
 def breach_analytics(email):
     """Return dict with risk + exposed data types, or None."""
-    url = XON_ANALYTICS.format(email=urllib.parse.quote(email, safe=""))
-    try:
-        data = _get_json(url)
-    except Exception:
+    provider = _provider("breach_analytics")
+    if provider is None:
         return None
-    metrics = data.get("BreachMetrics") if isinstance(data, dict) else None
-    if not isinstance(metrics, dict):
-        return None
-    out = {"risk_label": None, "risk_score": None, "exposed_data": [], "passwords_strength": None}
-    risk = metrics.get("risk")
-    if isinstance(risk, list) and risk and isinstance(risk[0], dict):
-        out["risk_label"] = risk[0].get("risk_label")
-        out["risk_score"] = risk[0].get("risk_score")
-    xposed = metrics.get("xposed_data")
-    if isinstance(xposed, list):
-        types = []
-        def walk(node):
-            if isinstance(node, dict):
-                name = str(node.get("name", ""))
-                if name.startswith("data_"):
-                    types.append(name[5:].replace("_", " "))
-                for child in node.get("children", []) or []:
-                    walk(child)
-        for node in xposed:
-            walk(node)
-        out["exposed_data"] = sorted(set(types))
-    if isinstance(metrics.get("passwords_strength"), list) and metrics["passwords_strength"]:
-        out["passwords_strength"] = metrics["passwords_strength"][0]
-    return out
+    result = provider.breach_analytics(email)
+    return result.data if result.status == "ok" else None
 
 
 def check_password_pwned(password):
-    """k-anonymity check. Returns count (int) or None on failure."""
+    """k-anonymity check. Returns count (int) or None on failure.
+    Only the 5-char SHA-1 prefix is sent to the password_range
+    provider; the suffix match runs locally on its range text."""
     sha1 = hashlib.sha1(password.encode("utf-8")).hexdigest().upper()
     prefix, suffix = sha1[:5], sha1[5:]
-    try:
-        text = _get_text(HIBP_RANGE.format(prefix=prefix))
-    except Exception:
+    provider = _provider("password_range")
+    if provider is None:
         return None
-    for line in text.splitlines():
+    result = provider.check_range(prefix)
+    if result.status != "ok" or not isinstance(result.data, str):
+        return None
+    for line in result.data.splitlines():
         parts = line.strip().split(":")
         if len(parts) == 2 and parts[0].strip().upper() == suffix:
             try:
@@ -343,6 +303,13 @@ class Handler(BaseHTTPRequestHandler):
                 "service": "leakguard",
                 "db": db_pool.db_status(),
             })
+        if route == "/api/providers/health":
+            # Public-safe provider summary (spec Phase 10): names,
+            # capabilities, outcome counts, error KINDS only — never
+            # exception text, endpoints or per-scan data. Health is
+            # in-memory; the mode line makes mock fixtures unmissable.
+            return self._json(
+                200, providers_registry.get_registry().summary())
         if route == "/api/auth/me":
             self._require_accounts()
             user, _token = self._require_user()

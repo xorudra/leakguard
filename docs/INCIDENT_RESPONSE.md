@@ -28,8 +28,12 @@ and get fixed in normal work.
 2. **Snapshot the evidence.** Note the time (IST), what was
    observed, and the request ids from the structured logs
    (`X-Request-Id` is on every response). Copy the relevant audit
-   rows (Admin → audit, or `audit_log`) before retention can age
-   anything out.
+   rows (Admin → audit, or `audit_log`) into the incident record.
+   The audit trail is exempt from the retention worker by design
+   (`core/retention.py` never touches `audit_log`), so this is
+   about fixing the evidence in one place, not beating a
+   retention clock — but logs on the platform are not forever,
+   so capture the request ids while they are at hand.
 3. **Check the blast radius in the admin overview** — user counts,
    case counts by status, and the security-events view (latest
    logins, login failures, password resets, token changes,
@@ -58,6 +62,21 @@ switch landed there after the redeploy. To restore: remove the
 variable (or set it to anything but `0/false/off/no`) and redeploy.
 Full procedure: README → Operations → Feature flags.
 
+**What the flags do NOT stop** (know this before you rely on
+them): the flags gate exactly the four entry points above.
+Removal cases already queued keep draining through the remediation
+worker until the queue empties — `LEAKGUARD_FLAG_REMOVAL_RUNS`
+stops *new* runs, not in-flight work. User-triggered verification
+checks run synchronously inside the request that asks for them,
+and the daily broker source sweep (hosted by the retention tick,
+fetching the fixed broker-registry hosts through the pinned,
+SSRF-guarded fetcher) has no flag at all. For those surfaces the
+containment controls are the ones built into the fetch path
+itself — host allowlists, `core/ssrf.py` connection pinning — plus,
+if a single broker is the problem, deactivating that broker
+(`brokers.active`) so no surface targets it. A full stop of every
+fetching surface at once requires a deploy, not a flag.
+
 ## Rotation — when to rotate what
 
 Rotate on suspicion, not just on proof: a key that *might* be out
@@ -65,7 +84,7 @@ is treated as out.
 
 | Secret | Where it lives | Rotate how | Notes |
 |---|---|---|---|
-| Vault master key (`VAULT_MASTER_KEY`) | Render env | **Planned maintenance only.** Every stored identifier/email is encrypted under it; changing the value without migrating the data makes the vault unreadable. Procedure outline: freeze writes (flags off) → decrypt all vault rows with the old key and re-encrypt under the new one with an owner-run script → swap the env var → redeploy → verify a sign-in + export. There is no automated rotation tooling today — treat this as a deliberate, rehearsed operation, never an improvisation mid-incident unless the key is confirmed leaked (then unreadable data beats leaked data: rotate first, recover from backup second — see DISASTER_RECOVERY.md) |
+| Vault master key (`VAULT_MASTER_KEY`) | Render env | **Planned maintenance only.** Every stored identifier/email is encrypted under it; changing the value without migrating the data makes the vault unreadable. Procedure outline: pause the four flag-gated capabilities (registration, account scans, removal runs, monitoring scheduler — note the flags do not freeze *all* writes; logins and Privacy Center changes still write, so schedule this in a quiet window) → decrypt all vault rows with the old key and re-encrypt under the new one with an owner-run script → swap the env var → redeploy → verify a sign-in + export. There is no automated rotation tooling today — treat this as a deliberate, rehearsed operation, never an improvisation mid-incident unless the key is confirmed leaked (then unreadable data beats leaked data: rotate first, recover from backup second — see DISASTER_RECOVERY.md) |
 | Vault lookup key (`VAULT_LOOKUP_KEY`) | Render env | Same maintenance shape as the master key: identifier/email *lookups* are HMACs under this key, so rows must be re-keyed in the same pass or accounts can no longer be found by email |
 | App DB role password (`leakguard_app`, in `DATABASE_URL`) | Neon console (Roles) + Render env | Set a new password for the role in the Neon SQL editor/console → update `DATABASE_URL` → redeploy → `/api/health` must report `db: "ok"` |
 | Owner DB connection (`MIGRATION_DATABASE_URL`) | Neon console + Render env | Same as above for the owner role; used only at boot for migrations, so a bad value shows up as a failed deploy/boot, not a runtime outage |

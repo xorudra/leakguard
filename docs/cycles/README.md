@@ -124,6 +124,7 @@ Copy this skeleton for a new report and fill every field:
 | 2026-10-07 | [P1-A verification batch — Privacy Center walk + mobile viewport check](2026-10-07-p1a-verification-48-97.md) | `fffc41a` | Phases 48/97 verified and closed; CI-red hygiene self-flag found and fixed |
 | 2026-10-07 | [Phase 149 — per-cycle development reporting system](2026-10-07-p149-cycle-reports.md) | (this closeout) | docs/cycles/ created: index, §6 template, 11 backfilled cycle reports, format guard test |
 | 2026-10-07 | [P1-B — Phase 25 stored finding lifecycle state](2026-10-07-p1b-phase-25-lifecycle.md) | `ab05ab0` | Migration 0012; single lifecycle writer; live two-cycle proof on staging (214 open → 214 resolved) |
+| 2026-10-07 | [P2-A — verification records (Phases 80, 131, 132)](2026-10-07-p2a-records-80-131-132.md) | (docs closeout) | IR tabletop drill + runbook fixes; README 8 inaccuracies fixed; MIGRATION_PLAN annotated to shipped truth |
 
 All cycles through the P1 closeout are linked above.
 

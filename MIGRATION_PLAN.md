@@ -27,6 +27,9 @@ Upgrade Master Prompt", Phases 0–180 (owner-supplied PDF, 2026-10-07).*
    working until their replacement is proven (spec Phases 133–137).
 4. **Name:** spec renames the platform "Sentinel" — *owner decision pending*;
    until decided, the product stays **LeakGuard** in UI, repo and URLs.
+   *(Review annotation, 2026-10-07: decided the same day — see Owner
+   decisions §1 below. The name is LeakGuard, permanently; "Sentinel"
+   remains only the spec's codename.)*
 
 ## Stage map (spec phases grouped into shippable stages)
 
@@ -48,6 +51,10 @@ Upgrade Master Prompt", Phases 0–180 (owner-supplied PDF, 2026-10-07).*
 | **S13 — Trust & API** ✅ `7237780`| 81–85, 126–132 | Legal/privacy architecture, policy/terms/trust center, reports, support, subprocessors, data residency, documentation |
 | **S14 — Extensions** ✅ `8c2ba6e`| 100–104 | Browser-extension foundation, mobile foundation, privacy-policy analyzer, exposure graph + propagation |
 | **S15 — Acceptance** ✅ this commit| 105, 112–114, 145–152, 161, 166, 168–180 | Business model, full test matrices (functional/security/privacy/performance), contract + broker-workflow tests, final acceptance, readiness, rollback plan, limitations register, capability-claim review, cleanup + architecture review |
+*(Review annotation, 2026-10-07: the S15 row's "Business model" deliverable
+never shipped — Phase 105 was owner-deferred before S15 ran and is CUT
+under the owner's rules (see the closing note of the Final section below).
+S15 shipped the acceptance work without it.)*
 
 ## Sequencing rules
 
@@ -129,11 +136,38 @@ Done and continuously maintained: production runs commit `8271c17` ==
 repo HEAD; every stage was deployed manually on Render and verified live
 before being declared done. Keep the rule: no stage is "done" until the
 deployed commit matches the repo and a production check passes.
+*(Review annotation, 2026-10-07: the `8271c17` pin was the state at the
+Phase 0 re-audit. Production has since advanced through the Final-spec
+batches and the post-audit P0/P1 programs — most recently `ab05ab0`
+(Phase 25), with the repo HEAD beyond it in documentation only. The
+rule itself stands and is how every later closeout was run; current
+pins live in `docs/cycles/` and `CURRENT_STATE.md`.)*
 
 ### 2. P0 blockers (do first, in this order)
 
 None of these is an active production exposure; they are the
 verification/documentation depth gaps in the P0 tier.
+
+*(Review annotation, 2026-10-07: **all ten items below are closed.**
+They landed through the Final-spec batches and the post-audit P0
+program; per-item evidence is in `PHASE_STATUS.md` and
+`docs/cycles/`. Divergences from this section's letter, recorded
+honestly: item 3 (HSTS) shipped in Batch A at the full
+`max-age=31536000; includeSubDomains`, not a conservative-first
+value; item 4 (Phase 70) shipped first as the resolve-and-check
+guard this section describes, and was then **superseded by
+connection pinning** in the post-audit program — the
+resolve-then-fetch version left a DNS-rebinding window the audit
+later flagged INSECURE, and pinning is the fix that closed it;
+item 6 (Phase 107) shipped the lock file as exact version pins
+**without artifact hashes**, and the Render build does not perform
+hash checking — the divergence is recorded in the phase's row;
+item 8 (WebAuthn) shipped in Batch D1 as a hand-built stdlib
+implementation (`accounts/webauthn.py`, `accounts/cbor.py`) with
+no new dependency, contrary to this item's "document the deferral
+instead of hand-rolling" fallback. Items 1, 2, 5, 7, 9 landed as
+written; item 10's gate re-ran at the v2.1 reconciliation and
+closed Phases 173/180.)*
 
 1. **Restore test + backup/DR procedure** (Phases 170, 78, 79) —
    perform a Neon point-in-time restore into a scratch project, verify
@@ -186,9 +220,37 @@ verification/documentation depth gaps in the P0 tier.
 5. **Per-cycle report files** (Phase 149) — land each implementation
    cycle's completion report under `docs/cycles/` going forward.
 
+*(Review annotation, 2026-10-07: **all five P1 items are closed** —
+items 1, 2 and 4 in Final Batch B (`d2c2030`), item 3 in the P1-B
+cycle (`ab05ab0`, migration `0012_finding_lifecycle.sql`), item 5
+in the P1-C cycle (`docs/cycles/`, 13 reports + format guard test).
+See `docs/cycles/2026-10-07-p1b-phase-25-lifecycle.md` for item 3's
+one recorded wart: lifecycle writes converge asynchronously, up to
+~a minute after a large scan.)*
+
 ### 4. P2 remediation / intelligence / reliability
 
 Ordered by user value, then risk reduction:
+
+*(Review annotation, 2026-10-07: **mixed — this section is now
+partly history.** Shipped since it was written: item 1 (source
+change detection — the daily broker source sweep, Final Batch C),
+items 2–3 (finding feedback + dispute guidance, Batch C), item 4
+(scan priority queue, Batch B), item 7 (kill switches, Batch B —
+**with different variable names than proposed here**: the shipped
+controls are `LEAKGUARD_FLAG_REGISTRATION` /
+`LEAKGUARD_FLAG_ACCOUNT_SCANS` / `LEAKGUARD_FLAG_REMOVAL_RUNS` /
+`LEAKGUARD_FLAG_MONITORING_SCHEDULER` in `core/flags.py`, and they
+gate routes + the scheduler tick rather than "route + worker
+level"), item 8 (CI, Batch A — the workflow runs the suite on
+push/PR and weekly; no merge-blocking is configured, and the
+"static security pass" is the suite itself plus a frontend syntax
+check), item 9 (staging environment, post-audit program), item 15
+in lite form (per-broker source health in the admin overview),
+item 16 (incident response runbook + tabletop drill — `docs/
+INCIDENT_RESPONSE.md`, `docs/drills/`). The remaining items (5, 6,
+10–14, 17–22) are still open at the depth `PHASE_STATUS.md`
+records; that file, not this section, is the live authority.)*
 
 1. **Source change detection** (Phase 32) — periodic hash/diff of
    broker opt-out pages + playbook flows at seed/scheduler level;
@@ -294,6 +356,21 @@ Ordered by user value, then risk reduction:
 12. **Regional policy rules** (Phase 168) — promote the letter-law
     templates (Phase 81) into configurable per-region rules.
 
+*(Review annotation, 2026-10-07: item 1 is **moot** — organizations
+shipped in Stage S11 of the Sentinel program, before this section
+was written, and remain PARTIAL in the audit taxonomy on depth,
+not existence. Also shipped since: item 2's pages (privacy, terms,
+support — Final Batch D2 and the S13 trust surface), item 4's flags
+(the `core/flags.py` emergency controls, shipped via the P2 item 7
+work), item 8's substance (regions documented on `/trust`), item 7's
+`security.txt` (served at `/.well-known/security.txt`), item 10
+(privacy-policy analyzer, Batch D2) and item 11 (propagation on
+`/api/graph`, Batch D2). Still open: item 3 (report documents),
+item 5's depth, item 6's in-product tooling, item 9 (localization
+— Phase 98 is the program's one MISSING phase; not even the string
+extraction has been done), item 12. `PHASE_STATUS.md` carries the
+per-phase truth.)*
+
 **Permanently closed by owner rules (not planned):** AI phases 51–56,
 121, 163–165 (AI only if free *and* unlimited — no such tier exists)
 and Phase 105 business model (monetization deferred until the owner
@@ -312,6 +389,12 @@ from the Sentinel program: migrations are additive and idempotent, run
 at startup by `db/migrate.py`, and never rewrite history — a bad
 migration is fixed forward, with the backup restore (§2 item 1) as the
 safety net.
+*(Review annotation, 2026-10-07: three of the four planned items
+shipped — `0009_monitoring_pause.sql` (the pause column shipped
+named `monitoring_paused`, not `paused`), `0010_feedback_sources.sql`
+(feedback/dispute), `0012_finding_lifecycle.sql` (lifecycle state +
+backfill). The daily provider-usage counters table has **not**
+shipped; Phases 66/124 remain PARTIAL.)*
 
 ### 7. Rollback
 
@@ -321,10 +404,21 @@ rollback = edit in the Render dashboard; database rollback = Neon
 point-in-time restore (owner-run, untested — P0 item 1 closes this).
 Every future change must state its rollback in its cycle report, per
 the spec's implementation loop.
+*(Review correction, 2026-10-07: the paragraph above is stale.
+Phase 174 is DONE: the point-in-time restore was drilled (a
+point-in-time branch was restored, verified — 19 public tables /
+40 brokers / migrations / users — and deleted), and the app
+rollback path was rehearsed on staging (specific-commit deploy
+back → health → forward). The standing document is
+`docs/ROLLBACK.md`, including the rehearsal record.)*
 
 ### 8. Testing
 
-The full suite (302 tests, 16 files) is the regression gate: security
+The full suite (302 tests, 16 files) is the regression gate *(review
+annotation, 2026-10-07: those were the figures at this section's
+writing; at the P1 closeout the suite stands at 454 passed /
+19 skipped across 28 test files, and CI runs it on every push)*:
+security
 matrix (`tests/test_hardening.py`, `tests/test_accounts.py`,
 `tests/test_orgs_admin.py`, `tests/test_api_tokens.py`), privacy matrix
 (`tests/test_vault.py`, `tests/test_monitoring.py`), provider contracts
@@ -342,6 +436,10 @@ commit only, after the full suite passes locally. Env-var changes save
 via "Save, rebuild, and deploy" (which also deploys the latest commit —
 sequence accordingly). When staging exists (P2 item 9), deploy there
 first, run the acceptance smoke, then promote the same commit.
+*(Review annotation, 2026-10-07: staging exists — a second Render
+service on a Neon branch, manual deploys only — and the
+staging-first sequence in the last sentence is now the standing
+practice every post-audit cycle followed.)*
 
 ### 10. Post-deploy verification
 
@@ -376,6 +474,11 @@ deployment platform. Executed the same day:
 - Phases 173 (production readiness) and 180 (final command) closed on
   this evidence. Scoreboard: **135 DONE / 31 PARTIAL / 1 NOT_DONE /
   11 CUT / 3 NA**.
+*(Review annotation, 2026-10-07: that scoreboard is a dated snapshot.
+It was superseded the same night by the audit re-issue (124 DONE in
+the owner's taxonomy) and then by the P0/P1 closeouts; the current
+scoreboard lives in `PHASE_STATUS.md` — 133 DONE at the P1
+closeout.)*
 
 ---
 
@@ -389,3 +492,8 @@ audit taxonomy — DONE / PARTIAL / MISSING / INSECURE / UNVERIFIED /
 NOT APPLICABLE, with per-phase dependencies, required next actions,
 and required tests). The plan itself is unchanged by the audit; the
 gate is procedural, not technical.
+*(Review annotation, 2026-10-07: the gate was **lifted** — the owner
+approved the audit the same night ("Approve the audit and start
+implementing, P0 first"), and the post-audit P0 and P1 programs ran
+under that approval and closed. This section is kept as the record
+of the gate, not as a live instruction.)*

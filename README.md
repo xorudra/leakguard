@@ -8,10 +8,10 @@
 
 [![Live Demo](https://img.shields.io/badge/▶_Live_Demo-leakguard--hh8e.onrender.com-2ea043?style=for-the-badge)](https://leakguard-hh8e.onrender.com)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![Dependencies](https://img.shields.io/badge/Dependencies-Zero-important?style=for-the-badge)
+![Dependencies](https://img.shields.io/badge/Dependencies-3_runtime-important?style=for-the-badge)
 ![Cost](https://img.shields.io/badge/Cost-₹0_Free-success?style=for-the-badge)
 
-**Scan → Score → Remove.** A free web tool that finds your leaked personal data and walks you through erasing it — built on India's **DPDP Act**, **GDPR** and **CCPA** erasure rights. No accounts. No database. Nothing to install.
+**Scan → Score → Remove.** A free web tool that finds your leaked personal data and walks you through erasing it — built on India's **DPDP Act**, **GDPR** and **CCPA** erasure rights. The anonymous Quick Scan needs no account; a free account adds saved details, automatic monitoring and one-command removal.
 
 </div>
 
@@ -21,7 +21,7 @@
 
 | Step | What happens |
 |---|---|
-| 🔍 **Scan** | Enter your email — LeakGuard checks real breach databases ([XposedOrNot](https://xposedornot.com), free, no API key) and lists exactly which breaches contain you and what data types leaked. Optional password check via [Have I Been Pwned](https://haveibeenpwned.com/Passwords) using k-anonymity — the password itself never leaves your device. |
+| 🔍 **Scan** | Enter your email — LeakGuard checks real breach databases ([XposedOrNot](https://xposedornot.com), free, no API key) and lists exactly which breaches contain you and what data types leaked. Optional password check via [Have I Been Pwned](https://haveibeenpwned.com/Passwords) using k-anonymity — the server hashes your password and only the first 5 characters of the hash ever leave the server; the password itself is never stored or logged. |
 | 📊 **Score** | An exposure score from **0–100** with a clear risk label, so you know how bad it is at a glance. |
 | 🧹 **Remove** | A Removal Centre covering **40 data brokers & people-search sites** (Spokeo, Whitepages, BeenVerified, Acxiom, Epsilon, LexisNexis and more): opt-out links, step-by-step flows, a progress tracker, and a one-click **erasure-request letter generator** citing DPDP Act §12, GDPR Art. 17, or CCPA. |
 | 🌐 **Google** | Builds the searches a stranger would run on you, and links Google's own *Results about you* removal tool. |
@@ -42,7 +42,7 @@ The agent does the boring work with plain deterministic scripts. **No AI tokens 
   It pre-fills the form payload with your details and honestly reports blockers — CAPTCHA, login walls, bot protection — instead of pretending they aren't there.
 - ✉️ **Email channels** — some sites (e.g. BeenVerified, Nuwber) wall their web forms off from datacenter networks entirely. LeakGuard surfaces their official opt-out **email addresses**, which work from anywhere.
 - 🔒 **Guarded submit** — submission only behind your explicit per-broker confirmation, and only to the broker's own host.
-- ⚡ **Optional free-lane fallback** — cryptic form fields can be classified by *your own* FreeLLMAPI gateway (`LEAKGUARD_FREE_LANE_URL` / `LEAKGUARD_FREE_LANE_KEY` / `LEAKGUARD_FREE_LANE_MODEL`, e.g. `openai/gpt-oss-20b`, `gemini-3.5-flash-lite`). Off by default; only your gateway's free tiers.
+- 🚫 **No AI anywhere** — an earlier optional AI fallback for cryptic form fields was removed in Stage S1 and never came back: every step above is deterministic code, so there is nothing to configure and nothing that can hallucinate a result.
 
 ## ⚖️ The honest limits
 
@@ -52,20 +52,21 @@ The agent does the boring work with plain deterministic scripts. **No AI tokens 
 
 ## 🚀 Run it yourself
 
-Zero dependencies — Python 3 standard library only.
+Three small runtime dependencies (a Postgres driver, AES-GCM, Argon2 — see `requirements.txt` for why each exists); everything else is the Python 3.12 standard library.
 
 ```bash
+pip install -r requirements.txt
 python3 app.py
 # open http://localhost:8000
 ```
 
-Environment: `PORT` (default 8000) · `HOST` (default 0.0.0.0)
+Environment: `PORT` (default 8000) · `HOST` (default 0.0.0.0). For the account features, also set `DATABASE_URL` (Postgres), `VAULT_MASTER_KEY` and `VAULT_LOOKUP_KEY` (base64-encoded 32-byte keys — see Operations → Database connections). Without a database configured, the account features answer unavailable and the anonymous surface (Quick Scan, Removal Centre, Agent Mode) still runs.
 
 **📱 On your own device** (recommended for walled sites): `python3 local_agent.py` runs the same engine under your home IP, where broker sites behave normally. It probes, prints the plan, and can open opt-out pages in your browser — it never submits anything automatically.
 
 **🧩 Optional browser probe layer:** `pip install -r requirements-optional.txt` plus any Chromium/Chrome. On proxy-locked networks run `python3 proxy_relay.py` and set `LEAKGUARD_BROWSER_PROXY=http://127.0.0.1:8899`. Disable with `LEAKGUARD_NO_BROWSER=1`.
 
-**☁️ Deploy:** `render.yaml` is included — create a Web Service from this repo on Render's free tier (or use Blueprint). Start command `python3 app.py`, no build step.
+**☁️ Deploy:** `render.yaml` is included — create a Web Service from this repo on Render's free tier (or use Blueprint). Build command `pip install -r requirements.txt`, start command `python3 app.py` (both already in `render.yaml`). Note: Render keeps the dashboard-stored build command — if a deploy behaves like an old configuration, check Settings → Build & Deploy on the service itself.
 
 ## ⚙️ Operations
 
@@ -107,6 +108,8 @@ Accepted off values are `0`, `false`, `off`, `no` (case-insensitive); unset mean
 
 **Database connections:** two environment variables, split by privilege. `DATABASE_URL` is the runtime connection and should be a **least-privilege role** (SELECT/INSERT/UPDATE/DELETE only — no DDL); everything the running app does goes through it. `MIGRATION_DATABASE_URL` is an **owner-level** connection used only by the boot-time migration step, which needs DDL; it is never used to serve requests. When `MIGRATION_DATABASE_URL` is unset, migrations fall back to `DATABASE_URL` (the pre-split behavior — convenient for local development and tests, where one connection does both jobs).
 
+**Email lane & admin:** transactional email (password resets, monitoring alerts) goes through Brevo's free tier — set `BREVO_API_KEY`, `NOTIFY_FROM_EMAIL` and `NOTIFY_FROM_NAME`. `ADMIN_EMAILS` lists the account emails that get the admin overview (comma-separated). `RESET_URL_BASE` pins the public base URL used in password-reset links when it cannot be derived from the request.
+
 **Backups:** the database lives on Neon's free plan. Point-in-time restore is a Neon platform feature and restores are run by the owner from the Neon console; the free plan's restore history is limited, and LeakGuard keeps no second backup copy — the encrypted vault means a database copy alone exposes no identifier values (the master key lives only in the server environment).
 
 **Supply chain:** runtime installs use `requirements.txt` (three version-ranged dependencies; everything else is the Python standard library). `requirements.lock` is the audited snapshot: the exact versions that file — plus `pgserver`, the test-only Postgres — resolved to when last generated, produced by `pip freeze` from a clean throwaway venv so the tested dependency set is reviewable and reproducible. The lock is a snapshot, not the install source; refresh it after any `requirements.txt` change by following the regeneration commands in its header, and expect the weekly CI run (`.github/workflows/tests.yml`) to surface resolution drift in between.
@@ -135,26 +138,40 @@ Token management itself is session-only (`GET`/`POST /api/tokens`, `DELETE /api/
 
 ## 🗂️ Project layout
 
-| File | Role |
+| Path | Role |
 |---|---|
-| `app.py` | The web server + GUI (stdlib only) |
+| `app.py` | The web server: stdlib HTTP, the route table, and the composition root that wires every package together |
 | `agent.py` | Zero-token Agent Mode engine — plans, probes, guarded submit |
+| `core/` | Cross-cutting platform code: SSRF guard + connection pinning, security headers, rate limits, feature flags / emergency controls, retention worker, logging |
+| `accounts/` | Accounts: Argon2id auth, sessions, TOTP, passkeys (WebAuthn), consents, identifiers, households, API tokens, audit, admin |
+| `vault/` | The encrypted identifier vault (AES-256-GCM envelope encryption, HMAC lookup, masking) |
+| `db/` | Postgres pool + the idempotent migration runner and `db/migrations/` |
+| `providers/` | Breach-data provider adapters (XposedOrNot, HIBP Pwned Passwords, username/domain checks) behind a registry with health tracking |
+| `scanning/` | Scan orchestrator + in-process job queue, findings, risk scoring, scan priority |
+| `remediation/` | Removal engine: broker cases, guarded submission, verification & reappearance, the daily broker source sweep |
+| `monitoring/` | Continuous monitoring: scheduler, change diff + stored finding lifecycle, timeline, notifications (Brevo email lane) |
+| `dashboard/` | Action Center / exposure graph + propagation, privacy-policy analyzer |
+| `static/` | The browser UI (SPA) |
+| `extension/` | The read-only browser extension (see `extension/README.md`) |
 | `browser_probe.py` | Headless-Chromium probe for JavaScript-walled pages |
 | `local_agent.py` | Run the engine on your own device/IP |
+| `tools/` | Operator utilities (extension packaging, mobile viewport check) |
+| `docs/` | Runbooks (incident response, disaster recovery, rollback), acceptance evidence, per-cycle reports (`docs/cycles/`) |
 | `brokers.json` | The 40-broker removal directory |
 | `playbooks.json` | Hand-mapped removal flows per broker |
 
 ## 🔐 Privacy
 
-- No accounts, no database, **no server-side storage of scans**.
-- Removal progress lives only in the visitor's browser (`localStorage`).
-- Password checks use k-anonymity — only the first 5 characters of the SHA-1 hash ever leave, and passwords are never logged.
+- **Anonymous Quick Scan:** no account and **no server-side storage** — the scan runs per request and is gone when the response is.
+- **Accounts (optional):** the details you save are stored encrypted in the vault (AES-256-GCM; lookups by HMAC, never plaintext), and your scans, findings and removal cases are stored — that storage is what makes monitoring, the Action Center and one-command removal possible. You can export everything from the Privacy Center (JSON or CSV, password re-auth required) and delete the account at any time: deletion is a 30-day soft delete, then a hard purge of everything the account owns; the PII-free audit trail (counts and actions, never values) is kept.
+- Removal progress for anonymous use lives only in the visitor's browser (`localStorage`).
+- Password checks use k-anonymity — only the first 5 characters of the SHA-1 hash ever leave the server, and passwords are never stored or logged.
 
 ## ❓ FAQ
 
-**Is it really free?** Yes — the breach APIs are free, the code is dependency-free, and it runs on Render's free tier. ₹0.
+**Is it really free?** Yes — the breach APIs are free, the code has only three small runtime dependencies, and it runs on Render's and Neon's free tiers. ₹0.
 
-**Does LeakGuard store my email or scan results?** No. Scans happen per-request and are never stored server-side.
+**Does LeakGuard store my email or scan results?** For the anonymous Quick Scan, no — it is per-request and nothing is kept. If you create an account, yes: your saved details (encrypted), scans and removal cases are stored so monitoring and one-command removal work — and the Privacy Center gives you a full export and a delete that purges them.
 
 **Why can't it remove data from Telegram / the dark web?** Once a breach dump is copied a thousand times, no request can reach every copy — that's true for every tool, including paid ones. What *can* be removed is what's publicly listed: brokers, people-search sites and Google results.
 
@@ -162,7 +179,8 @@ Token management itself is session-only (`GET`/`POST /api/tokens`, `DELETE /api/
 
 ## 🗺️ Roadmap
 
-- **v3:** 150+ brokers · recurring monitoring — monthly re-scans with alerts when your email appears in a *new* breach or a broker re-lists you
+- **Shipped since this list was first written:** recurring monitoring — automatic re-scans on a 7/14/30-day cadence, with alerts when your email appears in a *new* breach or a broker re-lists you
+- **v3:** 150+ brokers
 - Browser form *filling* for rendered opt-out forms · email-confirmation tracking
 
 ---

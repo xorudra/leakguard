@@ -38,7 +38,7 @@ import re
 
 import agent as agent_engine
 from db import pool
-from remediation import verify_sources
+from remediation import policy, verify_sources
 
 _NON_SLUG_RE = re.compile(r"[^a-z0-9]+")
 
@@ -50,12 +50,13 @@ def slugify(name):
 
 
 def derive_channel(broker, playbook):
-    """The channel rule documented in this module's docstring."""
-    if broker.get("contact_email"):
-        return "email"
-    if (playbook or {}).get("automation") == "http_form":
-        return "form"
-    return "manual"
+    """The channel rule documented in this module's docstring.
+
+    The rule itself lives in remediation/policy.py (Phase 153 —
+    channel derivation is a policy decision); this entry point
+    stays because the seed and its tests have always called it
+    here."""
+    return policy.derive_channel(broker, playbook)
 
 
 def seed_brokers():

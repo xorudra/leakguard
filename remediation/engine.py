@@ -32,7 +32,6 @@ Profiles are assembled from the vault per run and live only in
 memory; nothing here logs identifier values.
 """
 
-import re
 import threading
 import time
 import urllib.error
@@ -44,7 +43,7 @@ from accounts import consents as consents_service
 from core import ssrf
 from db import pool
 from providers.ddg_discovery import parse_results as _ddg_parse_results
-from remediation import letters, registry_seed, verify_sources
+from remediation import letters, policy, registry_seed, verify_sources
 from vault import store as vault_store
 
 
@@ -483,45 +482,19 @@ def assemble_profile(user_id):
 # Probe interpretation (pure — unit-tested directly)
 # ---------------------------------------------------------------------------
 
-def _missing_field(probe, profile):
-    """First profile field (in agent.PROFILE_FIELDS order) that some
-    form field maps to but the profile has no value for — or None."""
-    for semantic, patterns in agent_engine.PROFILE_FIELDS.items():
-        if profile.get(semantic):
-            continue
-        for form in probe.get("forms") or []:
-            for field in form.get("fields") or []:
-                hay = " ".join([
-                    field.get("name", ""), field.get("id", ""),
-                    field.get("placeholder", "")]).lower()
-                if any(re.search(p, hay) for p in patterns):
-                    return semantic
-    return None
-
-
 def interpret_probe(probe, profile):
     """Map a probe result onto (action, reason). Actions:
     'submit', 'needs_human', 'blocked'. See the module docstring for
     the full table. CAPTCHA and login are checked first, on every
-    layer's blockers — they are never routed around."""
-    if not isinstance(probe, dict) or probe.get("error"):
-        return ("blocked", "probe_error")
-    blockers = probe.get("blockers") or []
-    if any("CAPTCHA" in b for b in blockers):
-        return ("needs_human", "captcha")
-    if any("account login" in b for b in blockers):
-        return ("needs_human", "login_required")
-    if not probe.get("reachable"):
-        status = probe.get("status")
-        return ("blocked", "http_%s" % status if status else "unreachable")
-    if probe.get("fillable"):
-        return ("submit", None)
-    if not probe.get("forms"):
-        return ("needs_human", "browser_required")
-    missing = _missing_field(probe, profile)
-    if missing:
-        return ("needs_human", "missing_field:" + missing)
-    return ("blocked", "form_not_fillable")
+    layer's blockers — they are never routed around.
+
+    The decision table itself lives in remediation/policy.py
+    (Phase 153, POLICY_VERSION there); this seam stays because the
+    engine owns the field vocabulary the policy consults —
+    agent.PROFILE_FIELDS is passed in, never imported by the
+    policy."""
+    return policy.decide_probe(probe, profile,
+                               agent_engine.PROFILE_FIELDS)
 
 
 # ---------------------------------------------------------------------------
@@ -636,49 +609,71 @@ def remediation_consented(user_id):
 # The case processor (worker entry point)
 # ---------------------------------------------------------------------------
 
+def _apply_decision(case_id, decision, detail=None):
+    """Apply one remediation.policy decision (Phase 153) through
+    the same _transition choke point every engine move has always
+    used: the decision's attempt (when it carries one) is logged
+    with the move, and mark_submitted stamps submitted_at. The
+    attempt's detail is the engine's IO evidence, supplied by the
+    caller — the policy never sees it."""
+    attempt = decision["attempt"]
+    if attempt is None:
+        _transition(case_id, decision["status"], decision["reason"])
+    else:
+        _transition(case_id, decision["status"], decision["reason"],
+                    attempt[0], attempt[1], detail,
+                    submitted=decision["mark_submitted"])
+
+
 def process_case(case_id, executor=None):
     """Drive one queued/running case to its next state. Returns the
     refreshed case dict (or None when the case vanished). Raises only
-    for infrastructure failures — the worker owns those."""
+    for infrastructure failures — the worker owns those.
+
+    Every DECISION below — what state comes next, which attempt is
+    logged, whether a human is needed — comes from
+    remediation/policy.py (Phase 153); this function owns only the
+    IO: loading the case, checking consent, assembling the
+    profile, probing, submitting, rendering letters."""
     executor = executor if executor is not None else AgentExecutor()
     case = load_case(case_id)
     if case is None or case["status"] not in ("queued", "running"):
         return case
     broker = registry_seed.get_broker(case["broker_slug"])
     if broker is None:
-        _transition(case_id, "failed", "unknown_broker",
-                    "route", "failed", {})
+        _apply_decision(case_id, policy.decide_unknown_broker(), {})
         return load_case(case_id)
 
     # Consent is re-checked at execution time, before ANY external
     # action: a withdrawal mid-queue stops the case cold.
-    if not remediation_consented(case["user_id"]):
-        _transition(case_id, "needs_human", "consent_withdrawn",
-                    "consent_check", "withdrawn", {})
+    decision = policy.decide_consent(
+        remediation_consented(case["user_id"]))
+    if decision is not None:
+        _apply_decision(case_id, decision, {})
         return load_case(case_id)
 
     profile = assemble_profile(case["user_id"])
     channel = broker["channel"]
 
     if channel == "email":
-        if _has_attempt(case_id, "letter", "generated"):
-            # The case only returns to the queue via the user's
-            # "I sent it" retry — their attestation is the submission.
-            _transition(case_id, "submitted", "letter_sent_by_user",
-                        "letter_confirmed", "submitted", {}, submitted=True)
-        else:
-            letter = letters.letter_for_broker(broker, profile)
-            _transition(case_id, "needs_human", "email_send_required",
-                        "letter", "generated", letter)
+        letter_on_file = _has_attempt(case_id, "letter", "generated")
+        decision = policy.decide_email(letter_on_file)
+        # The case only returns to the queue via the user's
+        # "I sent it" retry — their attestation is the submission.
+        # First pass: render the ready-to-send letter as the
+        # attempt's detail and park the case for the user.
+        detail = {}
+        if not letter_on_file:
+            detail = letters.letter_for_broker(broker, profile)
+        _apply_decision(case_id, decision, detail)
         return load_case(case_id)
 
     if channel == "manual":
         playbook = agent_engine.get_playbook(
             registry_seed._public_file_shape(broker))
-        reason = ("browser_required"
-                  if playbook.get("automation") == "browser_required"
-                  else "manual_only")
-        _transition(case_id, "needs_human", reason, "route", "manual", {})
+        _apply_decision(
+            case_id, policy.decide_manual(playbook.get("automation")),
+            {})
         return load_case(case_id)
 
     # form channel: probe first — the probe is an auditable action
@@ -694,29 +689,14 @@ def process_case(case_id, executor=None):
         # layers ran, which were skipped, and what each concluded —
         # part of the audit record for the probe action.
         probe_detail["trail"] = probe["probe_trail"]
-    if action == "submit":
-        probe_word = "fillable"
-    elif action == "needs_human":
-        probe_word = reason.split(":")[0]
-    else:
-        probe_word = "blocked"
-    _record_attempt(case_id, "probe", probe_word, probe_detail)
+    _record_attempt(case_id, "probe",
+                    policy.probe_attempt_word(action, reason),
+                    probe_detail)
     if action == "submit":
         result = executor.submit(profile, broker, probe)
-        if result.get("ok"):
-            _transition(case_id, "submitted", None,
-                        "submit", "submitted",
-                        {"http_status": result.get("status")},
-                        submitted=True)
-        elif result.get("status") == 403:
-            _transition(case_id, "blocked", "submit_http_403",
-                        "submit", "blocked", {"http_status": 403})
-        else:
-            _transition(case_id, "failed", "submit_failed",
-                        "submit", "failed",
+        _apply_decision(case_id, policy.decide_submit(result),
                         {"http_status": result.get("status")})
-    elif action == "needs_human":
-        _transition(case_id, "needs_human", reason)
-    else:  # blocked
-        _transition(case_id, "blocked", reason)
+    else:
+        _apply_decision(
+            case_id, policy.decide_probe_transition(action, reason))
     return load_case(case_id)

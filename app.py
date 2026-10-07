@@ -657,6 +657,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/privacy/export", "/api/findings/feedback",
                 "/api/tools/policy-analyzer") \
                 or route.startswith("/api/domains/") \
+                or route.startswith("/api/admin/") \
                 or route.startswith("/api/remediation/cases/"):
             return self._accounts_post(route)
         if route == "/api/agent/plan":
@@ -772,6 +773,21 @@ class Handler(BaseHTTPRequestHandler):
 
         security.require_csrf(self)
         self._require_accounts()
+
+        if route == "/api/admin/replay":
+            # Dead-letter replay (Phase 119): an admin ACTION, so
+            # it follows the house admin pattern exactly —
+            # _require_admin answers 404 to anyone who is not the
+            # owner (the surface stays invisible rather than
+            # forbidden), and the CSRF guard above has already run.
+            admin = self._require_admin()
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            result = self._call(admin_service.replay_dead_letter,
+                                admin["id"], payload.get("kind"),
+                                payload.get("id"))
+            return self._json(200, {"replay": result})
 
         if route == "/api/auth/register":
             # Emergency control (core/flags.py): the owner can shut

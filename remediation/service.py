@@ -17,7 +17,7 @@ from accounts import audit
 from accounts.auth import _iso
 from core import errors
 from db import pool
-from remediation import engine, letters
+from remediation import engine, letters, policy
 
 _CASE_SELECT = (
     "SELECT c.id, c.user_id, c.broker_slug, b.name AS broker_name,"
@@ -32,6 +32,11 @@ def public_case(row):
         "broker_slug": row["broker_slug"],
         "broker_name": row["broker_name"],
         "status": row["status"],
+        # Phase 141: the spec-facing state name rides alongside
+        # the internal one (published in docs/REMOVAL_STATES.md,
+        # defined by remediation/policy.py). Additive only — the
+        # internal `status` stays the field clients key on.
+        "spec_status": policy.spec_state_name(row["status"]),
         "reason": row["reason"],
         "created_at": _iso(row["created_at"]),
         "updated_at": _iso(row["updated_at"]),

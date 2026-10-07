@@ -11,9 +11,10 @@
 <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 </head>
 <body>
+<a class="skipLink" href="#scan">Skip to the scan</a>
 <header class="topbar">
-  <div class="brand">LeakGuard <span class="liveDot" title="Live"></span></div>
-  <nav>
+  <div class="brand">LeakGuard <span class="liveDot" title="Live" aria-hidden="true"></span></div>
+  <nav aria-label="Main">
     <a href="#scan">Scan</a>
     <a href="#agent">Agent Mode</a>
     <a href="#removal">Advanced tools</a>
@@ -47,7 +48,7 @@
     operate a dashboard to stay protected.</p>
     <div class="scoreRow">
       <div class="scoreBox">
-        <svg width="132" height="132" viewBox="0 0 132 132">
+        <svg width="132" height="132" viewBox="0 0 132 132" aria-hidden="true">
           <circle class="ringBg" cx="66" cy="66" r="56" fill="none" stroke-width="11"/>
           <circle class="ringFg" id="acScoreRing" cx="66" cy="66" r="56" fill="none" stroke-width="11"
                   stroke-linecap="round" stroke-dasharray="351.8" stroke-dashoffset="351.8"/>
@@ -92,7 +93,7 @@
           <button type="button" id="acRegisterBtn" class="btnGhost">Create free account</button>
           <button type="button" id="acPasskeyBtn" class="btnGhost" hidden>Sign in with a passkey</button>
         </div>
-        <p id="acStatus" class="hint"></p>
+        <p id="acStatus" class="hint" aria-live="polite"></p>
         <p class="hint"><a href="#" id="acForgotLink">Forgot password?</a></p>
         <div id="forgotBox" hidden>
           <label>Email address
@@ -119,7 +120,7 @@
         <div class="rowBtns">
           <button type="submit" id="rsBtn">Set new password</button>
         </div>
-        <p id="rsStatus" class="hint"></p>
+        <p id="rsStatus" class="hint" aria-live="polite"></p>
       </form>
     </div>
 
@@ -218,7 +219,7 @@
       <h3>Notifications</h3>
       <p class="hint">Everything LeakGuard has flagged for you. If email delivery is not set up or a
       message could not be sent, the entry says so honestly instead of pretending it reached you.</p>
-      <div id="notifList"></div>
+      <div id="notifList" aria-live="polite"></div>
 
       <h3>Exposure map</h3>
       <p class="hint">Your saved details, where your latest scan actually found them, and the
@@ -228,6 +229,16 @@
       else here.</p>
       <div id="graphWrap"></div>
       <div id="propagationWrap"></div>
+
+      <h3>Search exposure</h3>
+      <p class="hint">What a search engine shows about you: the public web pages your scans
+      found that mention one of your saved details, in one place. These are
+      <strong>public search results</strong> — a page mentioning your detail is a
+      <strong>lead to review, never a confirmation</strong> that the page is about you, and
+      LeakGuard never presents it as one. That is why every entry here carries the weakest
+      confidence we assign. Open a result and judge it yourself; if it really is you, the
+      removal tools below are how it gets taken down at the source.</p>
+      <div id="searchExposureList" aria-live="polite"></div>
 
       <h3>Privacy policy checker</h3>
       <p class="hint">Paste another service's privacy policy — or give the address of its
@@ -255,7 +266,7 @@
       <div id="apiTokenOnce" class="letterBox" hidden>
         <p><strong>Your new token — copy it now.</strong> You won't see this again;
         if you lose it, revoke it below and create a fresh one.</p>
-        <textarea id="apiTokenRaw" rows="2" readonly></textarea>
+        <textarea id="apiTokenRaw" rows="2" readonly aria-label="Your new API token"></textarea>
         <div class="rowBtns">
           <button type="button" id="apiTokenCopyBtn" class="btnGhost">Copy token</button>
         </div>
@@ -273,7 +284,7 @@
       honestly as “no checks available yet”, never as “safe”.</p>
       <div class="rowBtns">
         <button type="button" id="fullScanBtn">Scan all my saved details</button>
-        <span id="fullScanStatus" class="hint"></span>
+        <span id="fullScanStatus" class="hint" aria-live="polite"></span>
       </div>
       <div id="fullScanResults" hidden>
         <p id="fsScore"></p>
@@ -293,7 +304,7 @@
       with the exact step to finish — no tool can honestly do those for you.</p>
       <div class="rowBtns">
         <button type="button" id="removalBtn">Remove my data everywhere</button>
-        <span id="removalStatus" class="hint"></span>
+        <span id="removalStatus" class="hint" aria-live="polite"></span>
       </div>
       <div id="removalCounts"></div>
       <div id="removalQueue"></div>
@@ -308,7 +319,7 @@
       <div id="totpEnrollBox" hidden>
         <p class="hint">Copy this setup text into your authenticator app (choose “enter a setup key” /
         scan alternative), then type the 6-digit code it shows to switch two-factor on:</p>
-        <textarea id="totpUri" rows="3" readonly></textarea>
+        <textarea id="totpUri" rows="3" readonly aria-label="Two-factor setup text"></textarea>
         <div class="rowBtns">
           <button type="button" id="totpCopyBtn" class="btnGhost">Copy setup text</button>
         </div>
@@ -411,11 +422,11 @@
       SHA-1 hash are sent. Your password never leaves this page in plain form and is never stored.</p>
       <button type="submit" id="scanBtn">Scan my data</button>
     </form>
-    <div id="scanStatus" class="status" hidden></div>
+    <div id="scanStatus" class="status" hidden aria-live="polite"></div>
     <div id="scanResults" hidden>
       <div class="scoreRow">
         <div class="scoreBox">
-          <svg width="132" height="132" viewBox="0 0 132 132">
+          <svg width="132" height="132" viewBox="0 0 132 132" aria-hidden="true">
             <circle class="ringBg" cx="66" cy="66" r="56" fill="none" stroke-width="11"/>
             <circle class="ringFg" id="scoreRing" cx="66" cy="66" r="56" fill="none" stroke-width="11"
                     stroke-linecap="round" stroke-dasharray="351.8" stroke-dashoffset="351.8"/>
@@ -461,7 +472,7 @@
     <label>City / country (optional) <input type="text" id="agCity" placeholder="City, India"></label>
     <div class="rowBtns">
       <button type="button" id="planBtn">Build my removal plan</button>
-      <span id="planStatus" class="hint"></span>
+      <span id="planStatus" class="hint" aria-live="polite"></span>
     </div>
     <div id="planBox" hidden>
       <h3>Your removal plan</h3>
@@ -482,11 +493,11 @@
       otherwise is not telling the truth.</p>
       <div class="rowBtns">
         <button type="button" id="autoBtn" class="autoBtn">Remove my data everywhere</button>
-        <span id="runStatus" class="hint"></span>
+        <span id="runStatus" class="hint" aria-live="polite"></span>
       </div>
       <p class="hint">Pressing the button is your confirmation: removal requests will be submitted to the brokers in your name.</p>
       <div class="progressTrack" id="runTrack" hidden><div id="runBar"></div></div>
-      <div id="autoFeed" hidden></div>
+      <div id="autoFeed" hidden aria-live="polite"></div>
       <div id="autoSummary" hidden>
         <h3 id="autoSummaryTitle">Run complete</h3>
         <p id="autoSummaryText"></p>
@@ -521,7 +532,7 @@
       </label>
       <p class="hint">Pick a broker below and tap “Letter” — the letter is generated with that broker's name. Or generate a generic one:</p>
       <button type="button" id="genericLetterBtn">Generate generic letter</button>
-      <textarea id="letterOut" rows="12" hidden readonly></textarea>
+      <textarea id="letterOut" rows="12" hidden readonly aria-label="Generated deletion request letter"></textarea>
       <div class="rowBtns" id="letterBtns" hidden>
         <button type="button" id="copyLetterBtn">Copy letter</button>
         <button type="button" id="downloadLetterBtn">Download .txt</button>

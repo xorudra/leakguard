@@ -59,6 +59,7 @@ from core import context, errors, flags, logging_setup, security
 from core import ratelimit as core_ratelimit
 from dashboard import graph as graph_service
 from dashboard import policy_analyzer as policy_analyzer_service
+from dashboard import search_exposure as search_exposure_service
 from dashboard import service as action_center_service
 from db import pool as db_pool
 from monitoring import service as monitoring_service
@@ -231,6 +232,19 @@ class Handler(BaseHTTPRequestHandler):
         rid = self._request_id()
         if rid:
             self.send_header("X-Request-Id", rid)
+        # Cache policy (spec Phase 67 — deliberate privacy design):
+        # API responses are NEVER cached. Every API response —
+        # JSON success or error, and the privacy export download —
+        # carries Cache-Control: no-store, set here at the single
+        # response choke point so no route can forget it. The app
+        # shell and static files are NOT covered: they are served
+        # without a cache header and stored only by the service
+        # worker's explicit shell list (static/sw.js), which never
+        # intercepts /api/* at all. No server-side response caching
+        # exists anywhere in this app.
+        route = urllib.parse.urlparse(self.path or "").path
+        if ctype == "application/json" or route.startswith("/api/"):
+            self.send_header("Cache-Control", "no-store")
         security.apply_security_headers(self)
         for name, value in extra_headers or ():
             self.send_header(name, value)
@@ -576,6 +590,16 @@ class Handler(BaseHTTPRequestHandler):
                 "notifications": self._call(
                     monitoring_service.list_notifications, user["id"]),
             })
+        if route == "/api/search-exposure":
+            # Search exposure (spec Phase 40): the caller's own
+            # public-web discovery findings — what a search engine
+            # shows about them — grouped by saved detail. Read-only,
+            # so session OR Bearer token, owner-gated like every
+            # account API (dashboard/search_exposure.py).
+            self._require_accounts()
+            user = self._require_reader()
+            return self._json(200, self._call(
+                search_exposure_service.search_exposure, user["id"]))
         if route == "/api/graph":
             # The exposure map (Stage S14): the caller's own
             # details → where they appeared → removal state, built

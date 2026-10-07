@@ -260,6 +260,7 @@ async function loadBrokers() {
       meta.textContent = " · " + b.type + " · " + b.region;
       title.appendChild(nm); title.appendChild(meta);
       const sel = document.createElement("select");
+      sel.setAttribute("aria-label", "Removal progress for " + b.name);
       [["", "Not started"], ["sent", "Request sent"], ["removed", "Removed ✓"], ["rejected", "Rejected"], ["notfound", "They didn't have me"]]
         .forEach(([v, t]) => {
           const o = document.createElement("option");
@@ -733,6 +734,7 @@ function renderAccount() {
     loadRemoval();
     loadMonitoring();
     loadGraph();
+    loadSearchExposure();
     loadApiTokens();
     if (renderAccount._fsUser !== meUser.id) {
       // Fresh sign-in (or a different account): clear the last
@@ -1572,6 +1574,23 @@ async function loadAdmin() {
         }
       }
     }
+    // Per-broker verification + workflow health (Phase 125): one
+    // compact row per broker with removal activity — did its
+    // listings actually go away, and is its workflow failing?
+    (d.broker_health || []).forEach((b) => {
+      const v = b.verification || {};
+      let text = "verified gone " + (v.gone || 0) + " of "
+        + ((v.gone || 0) + (v.still_present || 0)) + " checked listings";
+      if (v.removed_rate != null) {
+        text += " (" + Math.round(v.removed_rate * 100) + "%)";
+      }
+      if (v.unknown) text += ", " + v.unknown + " unclear";
+      const cs = fmtCounts(b.cases);
+      if (cs !== "none yet") text += " · cases: " + cs;
+      const at = fmtCounts(b.attempts);
+      if (at !== "none yet") text += " · attempts: " + at;
+      lines.push(["Broker: " + b.name, text]);
+    });
     ov.innerHTML = "";
     lines.forEach(([label, value]) => {
       const row = document.createElement("div");
@@ -1610,6 +1629,67 @@ async function loadAdmin() {
   }
 }
 
+/* ----- search exposure (Phase 40) -----
+   The signed-in user's public-web discovery findings, grouped by
+   saved detail — what a search engine shows about them. Every
+   entry is a weak-confidence candidate mention, never a
+   confirmation (the section copy above the list says so, and
+   the confidence word is rendered with each result). */
+async function loadSearchExposure() {
+  if (!meUser) return;
+  const wrap = $("searchExposureList");
+  try {
+    const r = await apiJson("/api/search-exposure");
+    wrap.innerHTML = "";
+    if (!r.ok) {
+      wrap.innerHTML = "<p class='hint'>Could not load your search exposure.</p>";
+      return;
+    }
+    const groups = (r.data && r.data.identifiers) || [];
+    if (!groups.length) {
+      wrap.innerHTML = "<p class='hint'>No public web mentions found yet — "
+        + "run a full scan and anything a search engine shows about your "
+        + "saved details will appear here.</p>";
+      return;
+    }
+    groups.forEach((g) => {
+      const head = document.createElement("div");
+      head.className = "idRow";
+      const hl = document.createElement("span");
+      const tag = document.createElement("span");
+      tag.className = "kindTag";
+      tag.textContent = g.identifier_kind;
+      const val = document.createElement("span");
+      val.className = "idVal";
+      val.textContent = g.identifier_masked || "(detail removed)";
+      hl.appendChild(tag); hl.appendChild(val);
+      const n = document.createElement("span");
+      n.className = "hint";
+      n.textContent = g.findings.length + (g.findings.length === 1
+        ? " mention" : " mentions");
+      head.appendChild(hl); head.appendChild(n);
+      wrap.appendChild(head);
+      g.findings.forEach((f) => {
+        const row = document.createElement("div");
+        row.className = "idRow";
+        const a = document.createElement("a");
+        a.href = f.source_url || "#";
+        a.target = "_blank"; a.rel = "noopener";
+        a.textContent = f.source_name || f.source_url || "Public web page";
+        const meta = document.createElement("span");
+        meta.className = "hint";
+        const when = f.source_date || f.discovered_at;
+        meta.textContent = (f.confidence || "weak") + " confidence"
+          + (when ? " · " + new Date(when).toLocaleDateString() : "");
+        row.appendChild(a); row.appendChild(meta);
+        wrap.appendChild(row);
+      });
+    });
+  } catch (e) {
+    wrap.innerHTML = "<p class='hint'>Could not load your search exposure.</p>";
+  }
+}
+
 /* ----- saved details (identifiers) ----- */
 async function loadIdentifiers() {
   if (!meUser) return;
@@ -1639,6 +1719,8 @@ async function loadIdentifiers() {
       const sel = document.createElement("select");
       sel.className = "memberSelect";
       sel.title = "Whose detail is this?";
+      sel.setAttribute("aria-label",
+        "Whose detail is this? (" + rec.kind + " " + rec.masked + ")");
       const mine = document.createElement("option");
       mine.value = "";
       mine.textContent = "Mine";
@@ -2193,6 +2275,7 @@ function findingDisputeBox(f) {
   toggle.type = "button";
   toggle.className = "btnGhost miniBtn";
   toggle.textContent = f.dispute.heading || "Dispute or correct this";
+  toggle.setAttribute("aria-expanded", "false");
   const box = document.createElement("div");
   box.className = "disputeBox";
   box.hidden = true;
@@ -2212,7 +2295,10 @@ function findingDisputeBox(f) {
     a.textContent = (f.dispute.url_label || "Open") + " →";
     box.appendChild(a);
   }
-  toggle.addEventListener("click", () => { box.hidden = !box.hidden; });
+  toggle.addEventListener("click", () => {
+    box.hidden = !box.hidden;
+    toggle.setAttribute("aria-expanded", box.hidden ? "false" : "true");
+  });
   return { toggle: toggle, box: box };
 }
 

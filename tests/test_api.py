@@ -207,5 +207,65 @@ class TestSubmitGuards(ApiTestCase):
             status, headers, body, 400, "bad_submission")
 
 
+class TestCachePolicy(ApiTestCase):
+    """Phase 67 — the deliberate cache design, pinned: API
+    responses are NEVER cached (privacy); the service worker
+    caches only the app shell. app.py's single response choke
+    point (_send) stamps Cache-Control: no-store on every API
+    (JSON) response, success or error. The shell and static files
+    carry NO cache header from the server — static/sw.js governs
+    them, and its fetch handler never intercepts /api/* at all."""
+
+    def assert_no_store(self, method, path, body=None, raw=None):
+        status, headers, _payload = self.request(
+            method, path, body=body, raw=raw)
+        self.assertEqual(headers.get("Cache-Control"), "no-store",
+                         "%s %s" % (method, path))
+        return status
+
+    def test_health_no_store(self):
+        self.assertEqual(self.assert_no_store("GET", "/api/health"), 200)
+
+    def test_brokers_no_store(self):
+        self.assertEqual(self.assert_no_store("GET", "/api/brokers"), 200)
+
+    def test_scan_error_no_store(self):
+        # A validation error is still an API response.
+        self.assertEqual(self.assert_no_store(
+            "POST", "/api/scan", body={"email": "not-an-email"}), 400)
+
+    def test_unknown_route_error_no_store(self):
+        self.assertEqual(self.assert_no_store("GET", "/no-such-route"), 404)
+
+    def test_admin_gate_error_no_store(self):
+        # The admin gate's error (404 when accounts are configured,
+        # 503 in this no-database harness) is an API response too
+        # and carries the same no-store stamp. The DB-backed 404
+        # gate itself is pinned in tests/test_surfaces_p2h.py.
+        status = self.assert_no_store("GET", "/api/admin/overview")
+        self.assertIn(status, (404, 503))
+
+    def test_shell_and_static_carry_no_cache_header(self):
+        # The server does not stamp the shell: the service worker's
+        # explicit shell list is the only cache for these, exactly
+        # as static/sw.js declares.
+        for path in ("/", "/static/app.js", "/static/style.css",
+                     "/sw.js", "/static/manifest.webmanifest"):
+            status, headers, _payload = self.request("GET", path)
+            self.assertEqual(status, 200, path)
+            self.assertIsNone(headers.get("Cache-Control"), path)
+
+    def test_service_worker_never_caches_api(self):
+        # The worker's own source is the shell-policy contract:
+        # API paths return before any cache is touched, and the
+        # shell list contains no /api/ entry.
+        sw = (Path(__file__).resolve().parent.parent
+              / "static" / "sw.js").read_text(encoding="utf-8")
+        self.assertIn('url.pathname.startsWith("/api/")', sw)
+        self.assertIn("leakguard-shell", sw)
+        shell = sw.split("LG_SHELL = [", 1)[1].split("]", 1)[0]
+        self.assertNotIn("/api/", shell)
+
+
 if __name__ == "__main__":
     unittest.main()

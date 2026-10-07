@@ -343,6 +343,80 @@ def _metrics_block(conn):
     }
 
 
+def _broker_health_block(conn):
+    """Per-broker verification + workflow health (spec Phase 125).
+
+    source_health answers "is the broker's opt-out page alive";
+    this block answers the question the dashboard was missing:
+    "does this broker actually REMOVE people, and is its removal
+    workflow healthy?" Per broker that has any removal activity:
+
+      * verification — how many post-removal checks ran against
+        its cases and how they came out (gone / still_present /
+        unknown, the verification_checks outcome vocabulary), plus
+        removed_rate: gone over the decisive checks (gone +
+        still_present) — None when no check has been decisive yet,
+        never a fabricated 0.
+      * cases — removal cases by stored status.
+      * attempts — engine attempts by result.
+
+    Counts only, per the module's privacy contract: no user, no
+    case id, no detail ever appears here. Brokers with no cases,
+    checks or attempts are omitted — an idle broker has no health
+    signal to report. Sorted by slug for a stable rendering."""
+    names = {
+        row["slug"]: row["name"]
+        for row in conn.execute(
+            "SELECT slug, name FROM brokers").fetchall()
+    }
+    verification = {}
+    for row in conn.execute(
+            "SELECT c.broker_slug AS slug, v.outcome AS outcome,"
+            " COUNT(*) AS n FROM verification_checks v"
+            " JOIN remediation_cases c ON c.id = v.case_id"
+            " GROUP BY c.broker_slug, v.outcome").fetchall():
+        entry = verification.setdefault(
+            row["slug"], {"checks": 0, "gone": 0, "still_present": 0,
+                          "unknown": 0})
+        entry["checks"] += int(row["n"])
+        if row["outcome"] in entry:
+            entry[row["outcome"]] += int(row["n"])
+    cases = {}
+    for row in conn.execute(
+            "SELECT broker_slug AS slug, status, COUNT(*) AS n"
+            " FROM remediation_cases"
+            " GROUP BY broker_slug, status").fetchall():
+        cases.setdefault(row["slug"], {})[row["status"]] = int(row["n"])
+    attempts = {}
+    for row in conn.execute(
+            "SELECT c.broker_slug AS slug, a.result AS result,"
+            " COUNT(*) AS n FROM remediation_attempts a"
+            " JOIN remediation_cases c ON c.id = a.case_id"
+            " GROUP BY c.broker_slug, a.result").fetchall():
+        attempts.setdefault(row["slug"], {})[row["result"]] = \
+            int(row["n"])
+    block = []
+    for slug in sorted(set(verification) | set(cases) | set(attempts)):
+        ver = verification.get(slug) or {
+            "checks": 0, "gone": 0, "still_present": 0, "unknown": 0}
+        decisive = ver["gone"] + ver["still_present"]
+        block.append({
+            "slug": slug,
+            "name": names.get(slug) or slug,
+            "verification": {
+                "checks": ver["checks"],
+                "gone": ver["gone"],
+                "still_present": ver["still_present"],
+                "unknown": ver["unknown"],
+                "removed_rate": (round(ver["gone"] / decisive, 3)
+                                 if decisive else None),
+            },
+            "cases": cases.get(slug, {}),
+            "attempts": attempts.get(slug, {}),
+        })
+    return block
+
+
 def metrics(admin_user_id):
     """The metrics block on its own (GET /api/admin/metrics) —
     the same object overview() embeds under "metrics"."""
@@ -378,6 +452,7 @@ def overview(admin_user_id):
         ).fetchone()["n"]
         security_events = _security_events(conn)
         metrics_block = _metrics_block(conn)
+        broker_health = _broker_health_block(conn)
     from remediation import source_checks
 
     result = {
@@ -407,6 +482,11 @@ def overview(admin_user_id):
         # trailing-24h throughput and failure numbers. The same
         # block is served standalone at GET /api/admin/metrics.
         "metrics": metrics_block,
+        # Per-broker verification + workflow health (Phase 125):
+        # which brokers actually remove people (verification
+        # outcomes) and which removal workflows are failing
+        # (cases by status, attempts by result).
+        "broker_health": broker_health,
     }
     audit.record(admin_user_id, "admin", "admin.overview_viewed")
     return result

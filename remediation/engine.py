@@ -554,14 +554,28 @@ def _insert_attempt(conn, case_id, action, result, detail):
         " FROM remediation_attempts WHERE case_id = %s",
         (case_id,),
     ).fetchone()
+    # Phase 31: every attempt records the broker workflow version
+    # it ran under, resolved through the case's broker at creation
+    # time. This writer is the single choke point for ALL attempt
+    # paths (worker runs, retries, failure parking), so no path
+    # can forget the stamp. A vanished case/broker leaves the
+    # version NULL — unknown, never guessed.
+    version_row = conn.execute(
+        "SELECT b.workflow_version AS v FROM remediation_cases c"
+        " JOIN brokers b ON b.slug = c.broker_slug"
+        " WHERE c.id = %s",
+        (case_id,),
+    ).fetchone()
+    version = version_row["v"] if version_row is not None else None
     import json as _json
 
     conn.execute(
         "INSERT INTO remediation_attempts"
-        " (case_id, attempt_no, action, result, detail)"
-        " VALUES (%s, %s, %s, %s, %s)",
+        " (case_id, attempt_no, action, result, detail,"
+        " workflow_version)"
+        " VALUES (%s, %s, %s, %s, %s, %s)",
         (case_id, int(row["n"]) + 1, action, result,
-         _json.dumps(detail or {})),
+         _json.dumps(detail or {}), version),
     )
 
 

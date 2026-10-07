@@ -120,8 +120,9 @@ ALLOWLISTED_LITERALS = {
     "leakguard-verify=",
     # tests/test_batch_b.py — fixture password for flag-gate flows.
     "batch-b-password-1",
-    # tests/test_remediation.py and tests/test_verify_sources.py —
-    # shared fixture password for throwaway accounts.
+    # tests/test_remediation.py, tests/test_verify_sources.py and
+    # tests/test_fake_broker_e2e.py — shared fixture password for
+    # throwaway accounts.
     "test-password-123",
     # tests/test_orgs_admin.py — fixture password for the S11
     # password-reset flow.

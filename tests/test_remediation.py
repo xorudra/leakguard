@@ -238,6 +238,39 @@ class TestInterpretProbe(unittest.TestCase):
                                        PROFILE),
             ("blocked", "probe_error"))
 
+    # Phase 137 — precedence pins: human-step evidence is checked
+    # BEFORE the fillable shortcut, so a page that is somehow both
+    # fillable AND walled still routes to a human, never a submit.
+    def test_captcha_beats_fillable(self):
+        probe = _probe(fillable=True,
+                       payload_preview={"email": "a@b.co"},
+                       blockers=["CAPTCHA on the page — a human "
+                                 "must solve this step"])
+        self.assertEqual(engine_mod.interpret_probe(probe, PROFILE),
+                         ("needs_human", "captcha"))
+
+    def test_login_wall_beats_fillable(self):
+        probe = _probe(fillable=True,
+                       payload_preview={"email": "a@b.co"},
+                       blockers=["Password field on the form — this "
+                                 "broker requires an account login "
+                                 "to proceed"])
+        self.assertEqual(engine_mod.interpret_probe(probe, PROFILE),
+                         ("needs_human", "login_required"))
+
+    def test_http_500_reason(self):
+        self.assertEqual(
+            engine_mod.interpret_probe(
+                _probe(reachable=False, status=500), PROFILE),
+            ("blocked", "http_500"))
+
+    def test_garbage_probe_is_probe_error(self):
+        self.assertEqual(engine_mod.interpret_probe(None, PROFILE),
+                         ("blocked", "probe_error"))
+        self.assertEqual(
+            engine_mod.interpret_probe("not-a-probe", PROFILE),
+            ("blocked", "probe_error"))
+
     def test_fillable_submits(self):
         probe = _probe(fillable=True, payload_preview={"email": "a@b.co"})
         self.assertEqual(engine_mod.interpret_probe(probe, PROFILE),
@@ -879,6 +912,88 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
                 for q in body["queue"]}["Epsilon"]
         self.assertEqual(item["action"], "open_optout")
         self.assertIn("city", item["note"])
+
+    # ---------- workflow versioning (Phase 31) ----------
+    def test_attempts_carry_workflow_version(self):
+        # Every attempt records the broker workflow_version at
+        # creation (migration 0016); re-mapping a broker (bumping
+        # its version) changes only NEW attempts — attempts
+        # already written keep the version they ran under.
+        cookie, _uid, _acct = self.register()
+        self.add_full_profile(cookie, self.uniq())
+        self.set_consent(cookie, "automated_remediation", True)
+        self.run_removal(cookie)
+        stub = StubExecutor()
+        stub.probe_by_broker["FastPeopleSearch"] = {
+            "fillable": False, "reachable": False, "status": 403,
+            "forms": [], "payload_preview": {},
+            "via": "http", "probe_trail": [],
+            "blockers": ["Site answered HTTP 403 to a script"]}
+        self.drain(stub)
+
+        fps = self.case_for(cookie, "FastPeopleSearch")
+        self.assertEqual(fps["status"], "blocked")
+        # The case detail serializes the attempt trail, versions
+        # included (all brokers ship workflow_version 1 today).
+        status, _h, body = self.request_json(
+            "GET", "/api/remediation/cases/%s" % fps["id"],
+            cookie=cookie)
+        self.assertEqual(status, 200, body)
+        attempts_v1 = body["case"]["attempts"]
+        self.assertTrue(attempts_v1)
+        self.assertTrue(all(
+            a["workflow_version"] == 1 for a in attempts_v1),
+            attempts_v1)
+        # Anonymous callers hit the reader gate (401); another
+        # signed-in user's view of the case is the house 404,
+        # never a leak.
+        status, _h, _b = self.request_json(
+            "GET", "/api/remediation/cases/%s" % fps["id"])
+        self.assertEqual(status, 401)
+        other_cookie, _ouid, _oacct = self.register()
+        status, _h, _b = self.request_json(
+            "GET", "/api/remediation/cases/%s" % fps["id"],
+            cookie=other_cookie)
+        self.assertEqual(status, 404)
+
+        # Re-map the broker: workflow_version 1 -> 7, then retry.
+        with self.pool.connection() as conn:
+            conn.execute(
+                "UPDATE brokers SET workflow_version = 7"
+                " WHERE slug = 'fastpeoplesearch'")
+        status, _h, body = self.request_json(
+            "POST", "/api/remediation/cases/%s/retry" % fps["id"],
+            body={}, headers=CSRF, cookie=cookie)
+        self.assertEqual(status, 200, body)
+        self.drain(stub)
+
+        status, _h, body = self.request_json(
+            "GET", "/api/remediation/cases/%s" % fps["id"],
+            cookie=cookie)
+        attempts = body["case"]["attempts"]
+        versions = [a["workflow_version"] for a in attempts]
+        self.assertEqual(versions[:len(attempts_v1)],
+                         [1] * len(attempts_v1))
+        self.assertTrue(len(attempts) > len(attempts_v1))
+        self.assertTrue(all(
+            v == 7 for v in versions[len(attempts_v1):]), versions)
+
+        # The admin metrics block groups attempts by
+        # (broker, version, result) — both generations visible.
+        from accounts import admin as admin_mod
+        with self.pool.connection() as conn:
+            metrics = admin_mod._metrics_block(conn)
+        grouped = {(row["broker"], row["workflow_version"],
+                    row["result"])
+                   for row in
+                   metrics["remediation_attempts_by_workflow_version"]}
+        self.assertIn(("fastpeoplesearch", 1, "blocked"), grouped)
+        self.assertIn(("fastpeoplesearch", 7, "blocked"), grouped)
+        # Restore the registry row for any later test in the class.
+        with self.pool.connection() as conn:
+            conn.execute(
+                "UPDATE brokers SET workflow_version = 1"
+                " WHERE slug = 'fastpeoplesearch'")
 
     # ---------- retry + the "I sent it" email flow ----------
     def test_retry_rules_and_letter_confirmation(self):

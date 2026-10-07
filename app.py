@@ -600,6 +600,19 @@ class Handler(BaseHTTPRequestHandler):
                 "queue": self._call(remediation_service.human_queue,
                                     user["id"]),
             })
+        if route.startswith("/api/remediation/cases/"):
+            self._require_accounts()
+            user = self._require_reader()
+            case_id = route[len("/api/remediation/cases/"):]
+            try:
+                uuid.UUID(case_id)
+            except (ValueError, AttributeError, TypeError):
+                return self._fail(errors.not_found(
+                    "Removal case not found"))
+            return self._json(200, {
+                "case": self._call(remediation_service.case_detail,
+                                   user["id"], case_id),
+            })
         if route.startswith("/api/scans/"):
             self._require_accounts()
             user = self._require_reader()

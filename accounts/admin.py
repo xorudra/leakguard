@@ -215,6 +215,27 @@ def _metrics_block(conn):
         " FROM scan_jobs WHERE status IN ('queued', 'running')",
     ).fetchone()
     cases_by_status = _counts_by(conn, "remediation_cases", "status")
+    # Phase 31: attempts grouped by the broker workflow version
+    # they ran under — all-time, because version history is the
+    # point (a re-map's before/after failure modes must both stay
+    # visible). workflow_version is NULL for attempts written
+    # before attempts recorded versions; the row says so honestly
+    # instead of folding them into a guessed version.
+    attempt_version_rows = conn.execute(
+        "SELECT c.broker_slug AS broker,"
+        " a.workflow_version AS workflow_version,"
+        " a.result AS result, COUNT(*) AS n"
+        " FROM remediation_attempts a"
+        " JOIN remediation_cases c ON c.id = a.case_id"
+        " GROUP BY c.broker_slug, a.workflow_version, a.result"
+        " ORDER BY c.broker_slug, a.workflow_version, a.result",
+    ).fetchall()
+    attempts_by_version = [{
+        "broker": row["broker"],
+        "workflow_version": row["workflow_version"],
+        "result": row["result"],
+        "attempts": int(row["n"]),
+    } for row in attempt_version_rows]
     notifications_24h = _counts_by(
         conn, "notifications", "status",
         " WHERE created_at >= now() - " + _DAY)
@@ -291,6 +312,7 @@ def _metrics_block(conn):
                 if queue["oldest_age"] is not None else None),
         },
         "remediation_cases_by_status": cases_by_status,
+        "remediation_attempts_by_workflow_version": attempts_by_version,
         "notifications_by_status_last_24h": notifications_24h,
         "broker_sources": {
             "total": int(sources["total"]),

@@ -119,6 +119,33 @@ def list_cases(user_id):
     return [public_case(row) for row in rows]
 
 
+def case_detail(user_id, case_id):
+    """One of the caller's cases plus its attempt audit trail.
+    Each attempt carries the broker workflow version it ran under
+    (Phase 31; NULL for attempts written before attempts recorded
+    versions). Foreign or unknown ids raise the same 404 as
+    everywhere else (via _case_row)."""
+    row = _case_row(user_id, case_id)
+    out = public_case(row)
+    with pool.connection() as conn:
+        arows = conn.execute(
+            "SELECT attempt_no, action, result, detail,"
+            " workflow_version, created_at"
+            " FROM remediation_attempts WHERE case_id = %s"
+            " ORDER BY attempt_no, id",
+            (case_id,),
+        ).fetchall()
+    out["attempts"] = [{
+        "attempt_no": int(arow["attempt_no"]),
+        "action": arow["action"],
+        "result": arow["result"],
+        "detail": arow["detail"],
+        "workflow_version": arow["workflow_version"],
+        "created_at": _iso(arow["created_at"]),
+    } for arow in arows]
+    return out
+
+
 _FIELD_LABELS = {
     "full_name": "full name",
     "email": "email address",

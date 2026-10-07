@@ -363,6 +363,121 @@ class TestVerifySearchEngine(unittest.TestCase):
         self.assertEqual(fetcher.calls, [])
 
 
+class TestVerifyClassificationMatrix(unittest.TestCase):
+    """Phase 137 — the full verify classification matrix, pinned
+    state by state. TestVerifySearchEngine above pins the core
+    cases; this class pins the states a reader could still doubt,
+    above all the honesty rule: AMBIGUOUS evidence (timeout,
+    blocked, unexpected content, guard refusal) is 'unknown',
+    NEVER 'gone' (removed) and never 'still_present'. A false
+    'gone' would tell a person their data was deleted when it was
+    not checked at all.
+
+    States are driven at the classifier's input seam (the injected
+    fetcher), with recorded-shape pages:
+
+      evidence                              search_index   direct
+      ------------------------------------  -------------  ----------
+      broker result / profile name present  still_present  still_present
+      results without broker / 404 / phrase gone           gone
+      fetch returns nothing (unreachable)   unknown        unknown
+      transport timeout                     unknown        unknown
+      HTTP 403/503 (blocked)                unknown        unknown
+      200 with unexpected content           unknown        unknown
+      SSRF guard refuses the target URL     (n/a)          unknown
+    """
+
+    def setUp(self):
+        # Same resolver stub as TestVerifySearchEngine.setUp, for
+        # the same reason: the direct path's SSRF pre-check
+        # resolves for real, and this sandbox's intercepted DNS
+        # would mask the verdict logic under test. The refusal
+        # cell below re-patches the resolver to a private address
+        # inside its own block.
+        import ipaddress
+        from unittest import mock
+
+        from core import ssrf as ssrf_mod
+        patcher = mock.patch.object(
+            ssrf_mod, "resolve_host",
+            lambda host: [ipaddress.ip_address("93.184.216.34")])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def executor(self, fetcher):
+        return engine_mod.AgentExecutor(fetcher=fetcher)
+
+    def test_timeouts_are_unknown_never_a_verdict(self):
+        import socket
+        for exc in (TimeoutError("timed out"),
+                    socket.timeout("timed out")):
+            for slug in ("spokeo", "fastpeoplesearch"):
+                result = self.executor(
+                    StubFetcher(default=exc)).verify_search(
+                        PROFILE, {"slug": slug})
+                self.assertEqual(result["outcome"], "unknown",
+                                 (exc, slug))
+
+    def test_blocked_statuses_are_unknown_for_direct(self):
+        for status in (401, 403, 429, 500, 503):
+            result = self.executor(
+                StubFetcher(default=(status, "walled"))
+            ).verify_search(PROFILE, {"slug": "fastpeoplesearch"})
+            self.assertEqual(result["outcome"], "unknown", status)
+
+    def test_unexpected_content_is_unknown(self):
+        # A 200 page full of real but unrelated content: no broker
+        # result in the index, no profile name at the broker.
+        page = ("<html><body><h1>Welcome to our new homepage</h1>"
+                "<p>We redesigned everything this spring.</p>"
+                "</body></html>")
+        for slug in ("spokeo", "fastpeoplesearch"):
+            result = self.executor(
+                StubFetcher(default=(200, page))).verify_search(
+                    PROFILE, {"slug": slug})
+            self.assertEqual(result["outcome"], "unknown", slug)
+
+    def test_direct_ssrf_refusal_is_unknown(self):
+        # If the SSRF guard refuses the verification URL itself
+        # (here: the name suddenly resolves private), the outcome
+        # is unknown — the fetcher is never even called.
+        import ipaddress
+        from unittest import mock as _mock
+        from core import ssrf as ssrf_mod
+        fetcher = StubFetcher(default=(200, DIRECT_PRESENT_PAGE))
+        with _mock.patch.object(
+                ssrf_mod, "resolve_host",
+                lambda host: [ipaddress.ip_address("10.0.0.9")]):
+            result = self.executor(fetcher).verify_search(
+                PROFILE, {"slug": "fastpeoplesearch"})
+        self.assertEqual(result["outcome"], "unknown")
+        self.assertEqual(fetcher.calls, [])
+
+    def test_found_and_not_found_still_hold(self):
+        # The two verdicts, restated inside the matrix so the
+        # table above is executable end to end.
+        self.assertEqual(
+            self.executor(StubFetcher(default=(
+                200, DDG_PRESENT_SPOKEO))).verify_search(
+                    PROFILE, {"slug": "spokeo"})["outcome"],
+            "still_present")
+        self.assertEqual(
+            self.executor(StubFetcher(default=(
+                200, DDG_ABSENT))).verify_search(
+                    PROFILE, {"slug": "spokeo"})["outcome"],
+            "gone")
+        self.assertEqual(
+            self.executor(StubFetcher(default=(
+                200, DIRECT_PRESENT_PAGE))).verify_search(
+                    PROFILE, {"slug": "fastpeoplesearch"})["outcome"],
+            "still_present")
+        self.assertEqual(
+            self.executor(StubFetcher(default=(
+                200, DIRECT_MARKER_PAGE))).verify_search(
+                    PROFILE, {"slug": "fastpeoplesearch"})["outcome"],
+            "gone")
+
+
 # ---------------------------------------------------------------------------
 # pgserver: seed + the end-to-end verify flow
 # ---------------------------------------------------------------------------

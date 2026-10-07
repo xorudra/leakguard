@@ -8,6 +8,13 @@ migrations) refreshes public broker facts without touching
 workflow_version, which only moves when a broker's flow is
 deliberately re-mapped.
 
+search_url is seeded from verify_sources.json (the verification
+source map): only 'direct' brokers — whose search is
+server-rendered and name-addressable — get their URL template
+stored; every other broker's search_url stays NULL, because for
+them verification reads the search index (or is impossible by
+design) and there is no broker search URL to record.
+
 Channel derivation (documented rule, applied in this order):
   1. the broker record carries a contact_email  -> 'email'
      (an official email channel exists; for walled brokers it is the
@@ -31,6 +38,7 @@ import re
 
 import agent as agent_engine
 from db import pool
+from remediation import verify_sources
 
 _NON_SLUG_RE = re.compile(r"[^a-z0-9]+")
 
@@ -59,6 +67,13 @@ def seed_brokers():
     with pool.connection() as conn:
         for position, broker in enumerate(brokers):
             playbook = agent_engine.get_playbook(broker)
+            slug = slugify(broker["name"])
+            verify_cfg = verify_sources.config_for(slug)
+            search_url = (
+                verify_cfg.get("url")
+                if verify_cfg and verify_cfg.get("method") == "direct"
+                else None
+            )
             conn.execute(
                 "INSERT INTO brokers (slug, name, category, region,"
                 " optout_url, alt_optout_url, search_url, method_notes,"
@@ -77,13 +92,13 @@ def seed_brokers():
                 " position = EXCLUDED.position, active = true,"
                 " updated_at = now()",
                 (
-                    slugify(broker["name"]),
+                    slug,
                     broker["name"],
                     broker.get("type") or "",
                     broker.get("region") or "",
                     broker["optout_url"],
                     broker.get("alt_optout_url"),
-                    playbook.get("search_url"),
+                    search_url,
                     broker.get("method") or "",
                     broker.get("contact_email"),
                     broker.get("contact_email_alt"),

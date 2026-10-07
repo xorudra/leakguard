@@ -78,11 +78,16 @@ def verify_case(user_id, case_id, executor=None):
     if isinstance(result, dict):
         outcome = result.get("outcome")
         evidence_ref = result.get("evidence_ref")
+        # The executor names the evidence source (search_index /
+        # broker_search / none / unconfigured) so the check row
+        # records HOW the verdict was reached; stub executors that
+        # predate the source map keep the legacy label.
+        method = result.get("method") or "search_probe"
     else:  # a bare outcome string is an acceptable executor result
-        outcome, evidence_ref = result, None
+        outcome, evidence_ref, method = result, None, "search_probe"
     if outcome not in _OUTCOMES:
         outcome = "unknown"
-    _apply_outcome(row, outcome, "search_probe", evidence_ref)
+    _apply_outcome(row, outcome, method, evidence_ref)
     return {"case": service.public_case(
         service._case_row(user_id, case_id)), "outcome": outcome}
 

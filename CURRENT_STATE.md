@@ -61,9 +61,15 @@ reports `db: ok|disabled|error` honestly).
 
 ## 4. Known gaps
 
-1. Per-broker verification search sources unmapped → case-level Verify
-   answers "unknown" in production (never guessed); monitoring diffs
-   cover appearance/disappearance, reappearance wiring is live.
+1. Verification sources mapped (`verify_sources.json`, all 40
+   brokers): people-search brokers verify via the search index (their
+   sites are walled, their listings are indexed),
+   TruePeopleSearch/FastPeopleSearch verify directly against their
+   server-rendered search pages, and the 12 B2B/credit brokers are
+   unverifiable by design (suppression-based, no public listing).
+   Checks record their method. Search-index evidence is strong but
+   indexes lag, so "gone" means "no longer indexed as of the check";
+   ambiguous pages still answer "unknown", never guessed.
 2. Datacenter-IP walls: 27/40 production cases classify blocked with
    reasons + next steps; the residential-IP local agent remains the
    practical route for those brokers.

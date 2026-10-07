@@ -85,10 +85,25 @@ product: test@example.com → 214 breaches, exposure score 100; password
 "password" → pwned 52,372,427×.
 
 Known gaps (honest register):
-1. Per-broker verification search sources are not mapped yet, so the
+1. ~~Per-broker verification search sources are not mapped yet, so the
    case-level Verify action answers "unknown" in production (never a
-   guess). Monitoring diffs already report findings appearing and
-   disappearing across scans, and reappearance detection is wired.
+   guess).~~ **Closed after S15** by `verify_sources.json`, which maps
+   all 40 brokers: 26 people-search brokers are verified against the
+   search index (a `site:`-scoped DuckDuckGo query — their own sites
+   are JS/bot-walled from servers, but their listing pages are
+   publicly indexed), 2 brokers with confirmed server-rendered,
+   name-addressable search (TruePeopleSearch, FastPeopleSearch) are
+   checked directly on the broker's own search page, and the 12
+   B2B/credit brokers are `none` — suppression-based removal with no
+   public listing, unverifiable by design. Monitoring diffs already
+   report findings appearing and disappearing across scans, and
+   reappearance detection is wired. Every verification check now
+   records its method (`search_index` / `broker_search` / `none`).
+   Honest limit: search-index evidence is strong but indexes lag — a
+   "gone" verdict means "no longer publicly indexed/listed as of this
+   check", and a stale cached listing can keep a removed profile
+   looking present until the index refreshes; ambiguous pages (walls,
+   challenges, empty shells) still answer "unknown", never a guess.
 2. Most people-search brokers wall datacenter IPs (27 of 40 cases in
    the production acceptance run classified blocked with reasons);
    those cases carry next steps, and the older local-agent path

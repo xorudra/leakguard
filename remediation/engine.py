@@ -42,8 +42,58 @@ import urllib.request
 import agent as agent_engine
 from accounts import consents as consents_service
 from db import pool
-from remediation import letters, registry_seed
+from providers.ddg_discovery import parse_results as _ddg_parse_results
+from remediation import letters, registry_seed, verify_sources
 from vault import store as vault_store
+
+
+# ---------------------------------------------------------------------------
+# Verification fetching (verify_search's one network path)
+# ---------------------------------------------------------------------------
+
+_VERIFY_TIMEOUT = 15  # seconds, per verification fetch
+_VERIFY_MAX_BYTES = 512 * 1024
+_DDG_HTML_ENDPOINT = "https://html.duckduckgo.com/html/?q="
+
+# DuckDuckGo's bot-challenge page (observed live: "Unfortunately,
+# bots use DuckDuckGo too... Please complete the following
+# challenge") must never be mistaken for a results page — a
+# challenge says nothing about the listing either way.
+_DDG_CHALLENGE_MARKERS = (
+    "bots use duckduckgo",
+    "complete the following challenge",
+    "assets/anomaly",
+)
+
+# Markup that proves a DuckDuckGo page really is a results page:
+# result anchors/snippets (the S6 parser's classes), the results
+# container, or DDG's own zero-hit wording. A genuine zero-hit page
+# carries the last of these and no anchors at all.
+_DDG_RESULTS_CHROME = (
+    "result__a",
+    "result__snippet",
+    'class="links"',
+)
+
+
+def _default_fetcher(url):
+    """GET `url` -> (status, text); status is None on transport
+    failure. Never raises: verification treats every surprise as
+    'unknown', so the fetch layer encodes surprises in the result
+    instead of throwing them."""
+    req = urllib.request.Request(url, headers=agent_engine.UA)
+    try:
+        with urllib.request.urlopen(req, timeout=_VERIFY_TIMEOUT) as resp:
+            body = resp.read(_VERIFY_MAX_BYTES)
+            return resp.status, body.decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read(_VERIFY_MAX_BYTES)
+            return exc.code, body.decode("utf-8", "replace")
+        except Exception:
+            return exc.code, ""
+    except Exception:
+        return None, ""
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +198,12 @@ class AgentExecutor(Executor):
     exactly what was tried. Statuses and reasons are unchanged —
     only the route to the probe result got faster."""
 
-    def __init__(self, probe_budget_seconds=40.0):
+    def __init__(self, probe_budget_seconds=40.0, fetcher=None):
         self.probe_budget_seconds = float(probe_budget_seconds)
+        # Verification's network path — injectable so tests stub it
+        # exactly like they stub agent functions. Signature:
+        # fetcher(url) -> (status, text); see _default_fetcher.
+        self._fetcher = fetcher if fetcher is not None else _default_fetcher
 
     def probe(self, profile, broker):
         started = time.monotonic()
@@ -261,36 +315,119 @@ class AgentExecutor(Executor):
                 action, form.get("method") or "POST", payload)
         return {"ok": False, "status": None, "error": "no_fillable_form"}
 
+    def _fetch(self, url):
+        """The injectable verification fetch, armoured: a stub or a
+        network surprise can never make verification raise."""
+        try:
+            status, text = self._fetcher(url)
+        except Exception:
+            return None, ""
+        if status is not None and not isinstance(status, int):
+            status = None
+        return status, text if isinstance(text, str) else ""
+
     def verify_search(self, profile, broker):
-        """Search-presence check (spec Phase 38): when the broker's
-        playbook/registry row defines a search_url, fetch it with the
-        agent's machinery and look for the user's name on the page —
-        found: still_present; page loads without it (or 404): gone;
-        anything else: unknown. With no search_url defined the honest
-        answer is 'unknown' — presence is never guessed."""
-        search_url = broker.get("search_url")
-        if not search_url:
-            playbook = agent_engine.get_playbook(
-                registry_seed._public_file_shape(broker))
-            search_url = playbook.get("search_url")
-        if not search_url:
-            return {"outcome": "unknown", "evidence_ref": None}
+        """Search-presence check (spec Phase 38), driven by the
+        verification source map (verify_sources.json):
+
+        * method 'search_index' — the broker's site is walled, but
+          its listings are indexed: query DuckDuckGo for
+          site:<domain> "<name>" and read the result hosts. A
+          broker-domain result is still_present; a demonstrably
+          loaded results page with none is gone.
+        * method 'direct' — the broker's own search is
+          server-rendered and name-addressable: fetch the templated
+          URL and read the page (404 or an empty-search phrase is
+          gone; the name on the page is still_present).
+        * method 'none' / unmapped — B2B and credit brokers publish
+          no public listing: unverifiable by design, answered
+          'unknown'. Presence is never guessed, and every
+          ambiguous page (wall, challenge, error, empty shell) is
+          'unknown' too.
+
+        The result carries 'method' ('search_index' |
+        'broker_search' | 'none' | 'unconfigured') so the check
+        row records HOW the verdict was reached."""
+        cfg = verify_sources.config_for(broker)
+        if cfg is None:
+            return {"outcome": "unknown", "evidence_ref": None,
+                    "method": "unconfigured"}
+        method = cfg.get("method")
+        if method == "search_index":
+            result_method = "search_index"
+        elif method == "direct":
+            result_method = "broker_search"
+        else:
+            return {"outcome": "unknown", "evidence_ref": None,
+                    "method": "none"}
         name = (profile.get("full_name") or "").strip()
         if not name:
-            return {"outcome": "unknown", "evidence_ref": search_url}
-        req = urllib.request.Request(search_url, headers=agent_engine.UA)
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                html = resp.read(512 * 1024).decode("utf-8", "replace")
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                return {"outcome": "gone", "evidence_ref": search_url}
-            return {"outcome": "unknown", "evidence_ref": search_url}
-        except Exception:
-            return {"outcome": "unknown", "evidence_ref": search_url}
-        found = name.casefold() in html.casefold()
-        return {"outcome": "still_present" if found else "gone",
-                "evidence_ref": search_url}
+            return {"outcome": "unknown", "evidence_ref": None,
+                    "method": result_method}
+        if method == "search_index":
+            return self._verify_via_index(profile, cfg, name)
+        return self._verify_direct(profile, cfg, name)
+
+    def _verify_via_index(self, profile, cfg, name):
+        """Evidence = the index of the broker's public pages. The
+        query URL is the evidence_ref: it is exactly what was
+        asked, reproducible by anyone."""
+        domain = (cfg.get("domain") or "").strip().lower()
+        query = 'site:%s "%s"' % (domain, name)
+        city = (profile.get("city") or "").strip()
+        if city:
+            query += " " + city
+        url = _DDG_HTML_ENDPOINT + urllib.parse.quote_plus(query)
+        unknown = {"outcome": "unknown", "evidence_ref": url,
+                   "method": "search_index"}
+        status, html = self._fetch(url)
+        if status != 200 or not html:
+            return unknown
+        folded = html.casefold()
+        if any(marker in folded for marker in _DDG_CHALLENGE_MARKERS):
+            return unknown  # a bot wall, not a results page
+        for result in _ddg_parse_results(html):
+            host = (result.get("domain") or "").lower()
+            if host == domain or host.endswith("." + domain):
+                return {"outcome": "still_present",
+                        "evidence_ref": url, "method": "search_index"}
+        has_chrome = (
+            any(marker in html for marker in _DDG_RESULTS_CHROME)
+            or "no results found" in folded
+        )
+        if has_chrome:
+            # A real results page, and the broker's domain is not
+            # in it: as far as the public index shows, the listing
+            # is gone (indexes lag — the check records when and
+            # how this was determined).
+            return {"outcome": "gone", "evidence_ref": url,
+                    "method": "search_index"}
+        return unknown
+
+    def _verify_direct(self, profile, cfg, name):
+        """Evidence = the broker's own search page for this name."""
+        tokens = name.split()
+        first = tokens[0]
+        last = tokens[-1] if len(tokens) > 1 else ""
+        city = (profile.get("city") or "").strip()
+        url = cfg.get("url") or ""
+        for placeholder, value in (("{name}", name), ("{first}", first),
+                                   ("{last}", last), ("{city}", city)):
+            url = url.replace(
+                placeholder, urllib.parse.quote(value, safe=""))
+        result = {"evidence_ref": url, "method": "broker_search"}
+        status, html = self._fetch(url)
+        if status == 404:
+            return dict(result, outcome="gone")
+        if status != 200 or not html:
+            return dict(result, outcome="unknown")
+        folded = html.casefold()
+        for marker in cfg.get("no_results") or []:
+            if marker and str(marker).casefold() in folded:
+                return dict(result, outcome="gone")
+        if name.casefold() in folded:
+            return dict(result, outcome="still_present")
+        return dict(result, outcome="unknown")
 
 
 # ---------------------------------------------------------------------------

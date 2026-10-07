@@ -1,0 +1,28 @@
+# requirements.lock — audited dependency snapshot (Phase 107).
+#
+# GENERATED FILE — do not edit by hand. It pins the exact versions
+# that requirements.txt (+ pgserver, the test-only Postgres) resolve
+# to, so the tested dependency set is reviewable at a glance and
+# reproducible bit-for-bit. Runtime installs still use
+# requirements.txt (see README → Operations → Supply chain); this
+# lock is the snapshot CI and audits compare against.
+#
+# Regenerate (from the repo root):
+#   python3 -m venv /tmp/lg-lock-venv
+#   /tmp/lg-lock-venv/bin/pip install -r requirements.txt pgserver
+#   /tmp/lg-lock-venv/bin/pip freeze > requirements.lock   # then
+#   re-add this header — freeze output starts at the first line below.
+#
+# Snapshot date: 2026-10-07 · Python 3.12
+argon2-cffi==25.1.0
+argon2-cffi-bindings==26.1.0
+cffi==2.1.1
+cryptography==45.0.7
+fasteners==0.20
+pgserver==0.1.4
+platformdirs==4.12.3
+psutil==7.2.2
+psycopg==3.3.6
+psycopg-binary==3.3.6
+pycparser==3.0
+typing_extensions==4.16.0

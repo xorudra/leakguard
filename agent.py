@@ -25,6 +25,29 @@ import urllib.request
 from html.parser import HTMLParser
 from pathlib import Path
 
+try:
+    # SSRF DNS guard (Phase 70): this file ships inside the repo
+    # (the local runner included), so the import succeeds in every
+    # supported layout. If it ever fails, the fetch paths below
+    # fail closed rather than fetch unguarded.
+    from core import ssrf as _ssrf
+except Exception:  # pragma: no cover - broken-layout fallback
+    _ssrf = None
+
+
+def _url_is_public(url):
+    """True only when the SSRF guard clears `url` for fetching:
+    http/https, and the host — literal or DNS-resolved — entirely
+    public. Guard unavailable or rejecting both answer False."""
+    if _ssrf is None:
+        return False
+    try:
+        _ssrf.assert_public_url(url)
+        return True
+    except Exception:
+        return False
+
+
 BASE = Path(__file__).resolve().parent
 UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/126 Safari/537.36 LeakGuard/2.0"}
@@ -165,6 +188,11 @@ def probe_broker(broker_name, profile=None):
     result = {"broker": broker_name, "url": url, "automation": pb["automation"],
               "needs": pb["needs"], "reachable": False, "status": None,
               "forms": [], "blockers": [], "payload_preview": {}}
+    if not _url_is_public(url):
+        # The opt-out URL comes from brokers.json (data): never let
+        # it point this server at a non-public address (Phase 70).
+        result["blockers"].append("Opt-out address did not pass the outbound safety check — use a real browser for this one")
+        return result
     req = urllib.request.Request(url, headers=UA)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -375,7 +403,16 @@ def probe_with_browser_fallback(broker_name, profile=None):
 
 def submit_form(form_action, method, payload, timeout=15):
     """Submit a prepared payload. Only called behind the GUI's explicit
-    per-broker 'Submit' action — never automatically."""
+    per-broker 'Submit' action — never automatically.
+
+    Both call sites host-allowlist the action against the broker
+    registry first; this is the second, independent check on the
+    same path (Phase 70): the action — data from a broker page or
+    an API caller — must also resolve entirely to public addresses,
+    so a compromised or poisoned form action cannot aim the server
+    at internal targets."""
+    if not _url_is_public(form_action):
+        return {"ok": False, "status": None, "error": "ssrf_guard"}
     data = urllib.parse.urlencode(payload).encode("utf-8")
     if method == "GET":
         url = form_action + ("&" if "?" in form_action else "?") + data.decode("utf-8")

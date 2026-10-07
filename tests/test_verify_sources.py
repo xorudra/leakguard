@@ -215,6 +215,24 @@ class TestConfigFor(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestVerifySearchEngine(unittest.TestCase):
+    def setUp(self):
+        # The direct-verify path passes the SSRF DNS guard
+        # (core/ssrf.py) before fetching; the guard resolves for
+        # real, and this sandbox's DNS is intercepted (public
+        # names land on the benchmarking range, which the guard
+        # rightly rejects). Stub the guard's single resolver patch
+        # point to a public address so these offline tests exercise
+        # the verdict logic, not the sandbox's DNS.
+        import ipaddress
+        from unittest import mock
+
+        from core import ssrf as ssrf_mod
+        patcher = mock.patch.object(
+            ssrf_mod, "resolve_host",
+            lambda host: [ipaddress.ip_address("93.184.216.34")])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def executor(self, fetcher):
         return engine_mod.AgentExecutor(fetcher=fetcher)
 

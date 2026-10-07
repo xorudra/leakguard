@@ -31,6 +31,12 @@ SECURITY_HEADERS = (
     ("X-Frame-Options", "DENY"),
     ("Referrer-Policy", "no-referrer"),
     ("Content-Security-Policy", CONTENT_SECURITY_POLICY),
+    # HSTS (Phase 69 depth): one year + subdomains. The site is
+    # HTTPS-only in production (Render terminates TLS and redirects
+    # HTTP), so telling browsers to pin HTTPS is pure gain. No
+    # `preload` directive: preload is a browser-vendor commitment
+    # (hard to reverse) that the owner has not chosen to make.
+    ("Strict-Transport-Security", "max-age=31536000; includeSubDomains"),
 )
 
 

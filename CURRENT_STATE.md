@@ -57,12 +57,12 @@ at `e31e016`.*
 - **Encryption:** identifiers and account emails envelope-encrypted (per-record DEK, AES-256-GCM, env-only master key); lookups via HMAC-SHA256 with a *separate* env-only key; display always masked (e.g. `r•••@domain`)
 - **Secrets:** Render env vars in production; mode-600 files locally; nothing secret in the repo; the GitHub PAT never appears in code or logs
 - **CSRF:** `core/security.require_csrf` on account mutations (X-Requested-With or same-host Origin/Referer)
-- **SSRF:** form-submit actions host-allowlisted against the broker registry; provider/broker fetches constrained to registry-defined endpoints; **no DNS-resolution private-IP validation layer** (Phase 70 PARTIAL)
+- **SSRF:** form-submit actions host-allowlisted against the broker registry; provider/broker fetches constrained to registry-defined endpoints; **DNS-resolution guard `core/ssrf.py`** on the data-driven fetch paths (submit, probe, direct verify) — hosts must resolve entirely to public addresses (Phase 70 DONE; resolve-then-fetch rebinding window documented in the module)
 - **Rate limiting:** `core/ratelimit.py` per route class (anon scan 30/h/IP, register 10/h/IP, forgot-password 5/h/IP, user scans 10/h, removal runs 6/h) + login limiter (10/15min per IP+email); keys use the **last** X-Forwarded-For hop (a first-hop spoofing bypass was caught in production and fixed, `56fb831`); 429s carry Retry-After; rejected attempts don't extend lockouts
 - **Enumeration:** forgot-password answers are byte-identical for known/unknown emails; login uses a dummy verify and one identical error; existence of identifiers/exposures is never revealed cross-account
 - **Audit logs:** `audit_log` (migration `0007`) — auth, consent, identifier, scan, remediation, admin events; detail passes a PII filter; best-effort (an audit failure can never break the user action); a test serializes the whole table and asserts no email/identifier/token appears
-- **Security headers:** CSP `default-src 'self'`, X-Frame-Options DENY, Referrer-Policy no-referrer, X-Request-Id on every response; **no HSTS header** (Phase 69 PARTIAL)
-- **Dependency scanning:** none automated — 3 runtime deps with version ranges, no lock file (Phase 107 PARTIAL)
+- **Security headers:** CSP `default-src 'self'`, X-Frame-Options DENY, Referrer-Policy no-referrer, X-Request-Id on every response; **HSTS `max-age=31536000; includeSubDomains`** on every response (Phase 69 DONE; no `preload` — an owner decision not yet made)
+- **Dependencies:** 3 runtime deps with version ranges in `requirements.txt` + **`requirements.lock`** exact-version snapshot (Phase 107 DONE); CI (`.github/workflows/tests.yml`, Phase 106 DONE) runs the full suite on push/PR and weekly; vulnerability scanning is not automated
 - **Backups:** Neon platform point-in-time restore (owner-run from the Neon console; free-plan history limited); **restoration has never been tested** (Phase 170 NOT_DONE)
 
 ## E. Data Inventory
@@ -130,13 +130,11 @@ spec:
    commit; configuration/DB rollback has no written plan.
 3. **Single Neon database role** (Phase 73 PARTIAL) — no least-privilege
    separation between the app's read/write needs and schema ownership.
-4. **No HSTS header** (Phase 69 PARTIAL) and **no DNS-level private-IP
-   validation on outbound fetches** (Phase 70 PARTIAL) — mitigated today
-   by registry-bound endpoints and host-allowlisted submits.
-5. **WebAuthn/passkeys absent** (Phase 4 PARTIAL) — TOTP is the strongest
+4. **WebAuthn/passkeys absent** (Phase 4 PARTIAL) — TOTP is the strongest
    available factor.
-6. **No distinct security-events view or anomaly alerting** (Phase 62
-   PARTIAL); **no dependency lock file/scanning** (Phase 107 PARTIAL);
+5. **No distinct security-events view or anomaly alerting** (Phase 62
+   PARTIAL); **no automated dependency vulnerability scanning**
+   (the Phase 107 lock file exists; scanning does not);
    security/privacy acceptance evidence is per-stage rather than one
    consolidated runbook (Phases 147/148 PARTIAL).
 
@@ -154,19 +152,18 @@ Only genuinely open items, P0 → P3 (full detail in `PHASE_STATUS.md` and in
 `MIGRATION_PLAN.md` → "Final Remaining Implementation — order of work"):
 
 - **P0:** restore test + written backup/DR procedure (170, 78, 79) →
-  written rollback plan incl. database/config (174, 173) → HSTS header
-  (69) → DNS private-IP validation on outbound fetches (70) → security-
-  events view over the existing audit log (62) → dependency lock file
-  (107) → consolidated security + privacy acceptance runbooks (147, 148)
+  written rollback plan incl. database/config (174, 173) → security-
+  events view over the existing audit log (62) → consolidated security
+  + privacy acceptance runbooks (147, 148)
   → WebAuthn/passkeys (4) → least-privilege DB role (73) → re-run the
-  Phase 180 final gate.
+  Phase 180 final gate. *(Batch A closed 69, 70, 106, 107.)*
 - **P1:** API versioning + deprecation policy (88) → export re-auth +
   CSV (49) → stored finding lifecycle states (25) → monitoring
   pause/resume (142) → per-cycle report files in-repo (149).
 - **P2:** source change detection (32) → false-positive feedback (156) +
   source disputes (157) → priority queue (159) → scan budget engine
   (158) → workflow-version capture on attempts (31) → emergency kill
-  switches (120) → CI pipeline (106) → staging environment (109) →
+  switches (120) → staging environment (109) →
   fake-broker harness (111, 162) → dead-letter replay (119) → standalone
   policy engine (153) → data-quality stage (160) → metrics + engineering
   alerts (76, 77) → per-broker source-health dashboard (125) → incident

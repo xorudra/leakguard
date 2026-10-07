@@ -41,6 +41,7 @@ import urllib.request
 
 import agent as agent_engine
 from accounts import consents as consents_service
+from core import ssrf
 from db import pool
 from providers.ddg_discovery import parse_results as _ddg_parse_results
 from remediation import letters, registry_seed, verify_sources
@@ -416,6 +417,14 @@ class AgentExecutor(Executor):
             url = url.replace(
                 placeholder, urllib.parse.quote(value, safe=""))
         result = {"evidence_ref": url, "method": "broker_search"}
+        # The template comes from verify_sources.json (data): the
+        # built URL must pass the SSRF DNS guard before this server
+        # fetches it (Phase 70). A refusal is ambiguity, not
+        # evidence — the verdict is 'unknown', never a guess.
+        try:
+            ssrf.assert_public_url(url)
+        except ssrf.SsrfError:
+            return dict(result, outcome="unknown")
         status, html = self._fetch(url)
         if status == 404:
             return dict(result, outcome="gone")

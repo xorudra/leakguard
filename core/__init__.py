@@ -9,6 +9,8 @@ stages, the domain/provider/remediation packages:
   * logging_setup  — structured, privacy-safe stderr logging
   * ratelimit      — shared sliding-window rate limiter (Stage S12)
   * retention      — daily retention/purge worker (Stage S12)
+  * ssrf           — DNS-resolution SSRF guard for data-driven
+                     outbound fetches (Final-spec Batch A)
 
 Standard library only, like the rest of the product.
 """

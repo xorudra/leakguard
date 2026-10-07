@@ -53,6 +53,7 @@ from accounts import privacy as privacy_service
 from accounts import ratelimit
 from accounts import sessions as sessions_mod
 from core import context, errors, logging_setup, security
+from core import ratelimit as core_ratelimit
 from dashboard import service as action_center_service
 from db import pool as db_pool
 from monitoring import service as monitoring_service
@@ -68,7 +69,7 @@ STATIC = BASE / "static"
 BROKERS_FILE = BASE / "brokers.json"
 
 EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$")
-MAX_BODY = 32 * 1024
+MAX_BODY = 256 * 1024
 
 
 def _provider(capability):
@@ -204,7 +205,7 @@ class Handler(BaseHTTPRequestHandler):
         """Send an ApiError as the structured error body."""
         return self._send(err.status, errors.error_json(
             err.status, err.code, err.message, self._request_id()),
-            "application/json")
+            "application/json", extra_headers=err.headers)
 
     def _serve_file(self, path, ctype):
         try:
@@ -281,6 +282,18 @@ class Handler(BaseHTTPRequestHandler):
                                           user["id"]):
             raise errors.not_found()
         return user
+
+    def _enforce_rate_limit(self, route_class, principal):
+        """Stage S12 shared limiter (core/ratelimit.py). The key is
+        (route_class, principal) where principal is "ip:<client ip>"
+        or "user:<user id>" — never an email or identifier value.
+        Excess raises the standard structured 429 with a real
+        Retry-After computed from the window."""
+        limit, window = core_ratelimit.limit_for(route_class)
+        key = (route_class, principal)
+        if not core_ratelimit.allow(key, limit, window):
+            raise errors.too_many_requests(
+                retry_after=core_ratelimit.retry_after(key, limit, window))
 
     def _rate_limit_credentials(self, email):
         """Shared register/login limiter: 10 attempts / 15 min per IP
@@ -463,7 +476,13 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = 0
-        if length <= 0 or length > MAX_BODY:
+        if length > MAX_BODY:
+            # Oversize is its own honest answer (413), not a generic
+            # "invalid JSON" (Stage S12 request-size guard). Every
+            # JSON POST route reads through here, so this one check
+            # covers them all.
+            raise errors.payload_too_large()
+        if length <= 0:
             return None
         try:
             data = json.loads(self.rfile.read(length).decode("utf-8"))
@@ -502,6 +521,8 @@ class Handler(BaseHTTPRequestHandler):
                 "engine": "zero-token deterministic scripts (playbooks + live form probe) — no AI involved",
             })
         if parsed.path == "/api/agent/probe":
+            self._enforce_rate_limit("agent_probe",
+                                     "ip:" + self._client_ip())
             payload = self._read_json_body()
             if payload is None:
                 return self._fail(errors.invalid_json())
@@ -517,6 +538,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = agent_engine.probe_broker(broker, profile)
             return self._json(200, result)
         if parsed.path == "/api/agent/submit":
+            self._enforce_rate_limit("agent_submit",
+                                     "ip:" + self._client_ip())
             payload = self._read_json_body()
             if payload is None:
                 return self._fail(errors.invalid_json())
@@ -544,6 +567,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, agent_engine.submit_form(action, method, clean))
         if parsed.path != "/api/scan":
             return self._fail(errors.not_found())
+        self._enforce_rate_limit("anon_scan", "ip:" + self._client_ip())
         payload = self._read_json_body()
         if payload is None:
             return self._fail(errors.invalid_json())
@@ -596,6 +620,13 @@ class Handler(BaseHTTPRequestHandler):
             payload = self._read_json_body()
             if payload is None:
                 return self._fail(errors.invalid_json())
+            # Two caps stack here: the S12 per-IP hourly cap below,
+            # and the S3 credential limiter (per IP + per account
+            # email, 10/15 min) that register shares with login.
+            # Login is NOT routed through core/ratelimit — see that
+            # module's docstring for why the S3 two-bucket semantics
+            # stay as they are.
+            self._enforce_rate_limit("register", "ip:" + self._client_ip())
             self._rate_limit_credentials(payload.get("email"))
             user, token = self._call(
                 auth_service.register,
@@ -622,7 +653,14 @@ class Handler(BaseHTTPRequestHandler):
             if payload is None:
                 return self._fail(errors.invalid_json())
             # Enumeration-safe: the service is silent about whether
-            # the email exists, and this answer NEVER varies.
+            # the email exists, and this answer NEVER varies. The
+            # rate limit is the one exception: an exhausted IP gets
+            # the standard 429 like every other route. A 429 reveals
+            # nothing about any account (it depends only on the
+            # caller's own request count), so enumeration safety is
+            # preserved.
+            self._enforce_rate_limit("forgot_password",
+                                     "ip:" + self._client_ip())
             self._call(auth_service.forgot_password,
                        payload.get("email"))
             return self._json(200, {"ok": True})
@@ -714,6 +752,7 @@ class Handler(BaseHTTPRequestHandler):
             payload = self._read_json_body()
             if payload is None:
                 return self._fail(errors.invalid_json())
+            self._enforce_rate_limit("user_scans", "user:" + user["id"])
             job, created = self._call(
                 scan_jobs_service.create_job, user["id"],
                 payload.get("idempotency_key"))
@@ -722,6 +761,8 @@ class Handler(BaseHTTPRequestHandler):
             # The one command: consent-gated inside the service (403
             # consent_required), then one idempotent case per broker.
             # The worker drains the queue asynchronously.
+            self._enforce_rate_limit("user_remediation_run",
+                                     "user:" + user["id"])
             return self._json(200, self._call(
                 remediation_service.run_removal, user["id"]))
         if route.startswith("/api/remediation/cases/"):
@@ -900,6 +941,20 @@ def _startup_monitoring_scheduler():
                                 "to start: " + type(exc).__name__)
 
 
+def _startup_retention_worker():
+    """Start the in-process retention worker (Stage S12) when a
+    database is configured. Guarded exactly like the other workers:
+    a retention failure must never take the site down."""
+    try:
+        from core import retention
+
+        if retention.start_retention_if_configured():
+            print("LeakGuard: retention worker started")
+    except Exception as exc:
+        logging_setup.log_error(None, "retention worker failed "
+                                "to start: " + type(exc).__name__)
+
+
 def main():
     logging_setup.setup_logging()
     _startup_migrations()
@@ -907,6 +962,7 @@ def main():
     _startup_broker_seed()
     _startup_remediation_worker()
     _startup_monitoring_scheduler()
+    _startup_retention_worker()
     port = int(os.environ.get("PORT", "8000"))
     host = os.environ.get("HOST", "0.0.0.0")
     server = ThreadingHTTPServer((host, port), Handler)

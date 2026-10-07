@@ -16,6 +16,8 @@ never addresses; IPs are connection metadata. Nothing here is logged.
 import threading
 import time
 
+from core import ratelimit as _core_ratelimit
+
 MAX_ATTEMPTS = 10
 WINDOW_SECONDS = 15 * 60
 
@@ -51,6 +53,12 @@ def allow(bucket_keys):
 
 
 def reset():
-    """Drop all buckets (used by tests; also a sane ops escape hatch)."""
+    """Drop all buckets (used by tests; also a sane ops escape hatch).
+
+    Since Stage S12 this also clears the shared limiter in
+    core/ratelimit.py: reset() is the suite-wide per-test hygiene
+    call and the single ops escape hatch, so one call clears every
+    limiter in the process."""
     with _lock:
         _buckets.clear()
+    _core_ratelimit.reset()

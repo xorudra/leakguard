@@ -67,6 +67,33 @@ Environment: `PORT` (default 8000) · `HOST` (default 0.0.0.0)
 
 **☁️ Deploy:** `render.yaml` is included — create a Web Service from this repo on Render's free tier (or use Blueprint). Start command `python3 app.py`, no build step.
 
+## ⚙️ Operations
+
+**Rate limits** (in-memory, per process; excess requests answer a structured `429 rate_limited` with a real `Retry-After`):
+
+| Route | Limit | Keyed by |
+|---|---|---|
+| `POST /api/scan` (anonymous quick scan) | 30 / hour | client IP |
+| `POST /api/agent/probe`, `POST /api/agent/submit` | 30 / hour each | client IP |
+| `POST /api/auth/register` | 10 / hour (plus the credential limiter below) | client IP |
+| `POST /api/auth/login`, `POST /api/auth/register` | 10 attempts / 15 min | client IP **and** account email |
+| `POST /api/auth/forgot-password` | 5 / hour | client IP |
+| `POST /api/scans` | 10 / hour | account |
+| `POST /api/remediation/run` | 6 / hour | account |
+
+JSON request bodies over **256 KB** are rejected with `413 body_too_large`. Read (GET) endpoints are unlimited.
+
+**Retention** (an in-process worker runs one pass daily; every purge is audit-logged with counts only):
+
+| Data | Kept for |
+|---|---|
+| Sessions | deleted once expired or revoked for more than 7 days |
+| Password-reset tokens | deleted once used or expired for more than 7 days |
+| Notifications | 90 days |
+| Deleted accounts | soft-deleted for 30 days (recoverable by support), then hard-purged with everything the account owns — identifiers, scans, findings, removal cases, settings, household. The PII-free audit trail (counts and actions, never values) is kept. |
+
+**Backups:** the database lives on Neon's free plan. Point-in-time restore is a Neon platform feature and restores are run by the owner from the Neon console; the free plan's restore history is limited, and LeakGuard keeps no second backup copy — the encrypted vault means a database copy alone exposes no identifier values (the master key lives only in the server environment).
+
 ## 🗂️ Project layout
 
 | File | Role |

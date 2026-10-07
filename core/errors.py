@@ -15,11 +15,15 @@ import json
 class ApiError(Exception):
     """An error that maps cleanly onto an HTTP response."""
 
-    def __init__(self, status, code, message):
+    def __init__(self, status, code, message, headers=None):
         super().__init__(message)
         self.status = int(status)
         self.code = str(code)
         self.message = str(message)
+        # Optional extra response headers ((name, value) pairs) —
+        # e.g. Retry-After on a 429 (Stage S12). The body contract
+        # above is unchanged.
+        self.headers = list(headers) if headers else None
 
     def to_body(self, request_id):
         return error_body(self.status, self.code, self.message, request_id)
@@ -68,8 +72,16 @@ def conflict(code, message):
 
 
 def too_many_requests(
-        message="Too many attempts — wait a few minutes and try again"):
-    return ApiError(429, "rate_limited", message)
+        message="Too many attempts — wait a few minutes and try again",
+        retry_after=None):
+    headers = None
+    if retry_after is not None:
+        headers = [("Retry-After", str(max(1, int(retry_after))))]
+    return ApiError(429, "rate_limited", message, headers=headers)
+
+
+def payload_too_large(message="Request body too large"):
+    return ApiError(413, "body_too_large", message)
 
 
 def unavailable(code="db_unavailable",

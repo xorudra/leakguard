@@ -7,6 +7,8 @@ stages, the domain/provider/remediation packages:
   * context        — per-request request_id (contextvars)
   * security       — security response headers
   * logging_setup  — structured, privacy-safe stderr logging
+  * ratelimit      — shared sliding-window rate limiter (Stage S12)
+  * retention      — daily retention/purge worker (Stage S12)
 
 Standard library only, like the rest of the product.
 """

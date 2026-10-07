@@ -7,5 +7,5 @@
 # The app still boots and serves every pre-S2 feature if these are missing
 # AND no DATABASE_URL is configured (graceful degradation, see db/pool.py).
 psycopg[binary]>=3.2,<4
-cryptography>=42,<46
+cryptography>=50.0.0,<51
 argon2-cffi>=23,<26

@@ -109,7 +109,7 @@ reconciled state; nothing in this file rests on UI copy alone.*
 - **Enumeration:** forgot-password answers are byte-identical for known/unknown emails; login uses a dummy verify and one identical error; existence of identifiers/exposures is never revealed cross-account
 - **Audit logs:** `audit_log` (migration `0007`) — auth, consent, identifier, scan, remediation, admin events; detail passes a PII filter; best-effort (an audit failure can never break the user action); a test serializes the whole table and asserts no email/identifier/token appears
 - **Security headers:** CSP `default-src 'self'`, X-Frame-Options DENY, Referrer-Policy no-referrer, X-Request-Id on every response; **HSTS `max-age=31536000; includeSubDomains`** on every response (Phase 69 DONE; no `preload` — an owner decision not yet made)
-- **Dependencies:** 3 runtime deps with version ranges in `requirements.txt` + **`requirements.lock`** exact-version snapshot (Phase 107 DONE); CI (`.github/workflows/tests.yml`, Phase 106 DONE) runs the full suite on push/PR and weekly; vulnerability scanning is not automated
+- **Dependencies:** 3 runtime deps with version ranges in `requirements.txt` + **`requirements.lock`** exact-version snapshot (Phase 107 DONE); CI (`.github/workflows/tests.yml`, Phase 106 DONE) runs the full suite on push/PR and weekly; vulnerability scanning runs on a recorded manual cadence (pip-audit on dependency change + monthly) — the first recorded scan (2026-10-07) found 7 advisories in `cryptography==45.0.7`, remediated the same night to 50.0.2 with a clean re-scan (Phase 107)
 - **Backups:** Neon platform point-in-time restore (owner-run from the Neon console; free-plan history limited); **restoration tested 2026-10-07** — PITR branch drill verified 19 public tables, 40 brokers, 8 migrations, 15 users (Phases 78, 170 DONE)
 
 ## E. Data Inventory
@@ -160,11 +160,11 @@ taxonomy (owner-ordered audit issue, 2026-10-07):
 
 | Status | Count |
 |---|---|
-| DONE | 125 |
+| DONE | 128 |
 | PARTIAL | 31 |
 | MISSING | 1 |
 | INSECURE | 0 |
-| UNVERIFIED | 10 |
+| UNVERIFIED | 7 |
 | NOT APPLICABLE | 14 |
 | **Total** | **181** |
 
@@ -201,12 +201,13 @@ spec:
    live), but production remains a single free Render instance that
    sleeps when idle and shares the account's free instance hours with
    staging; there is no redundancy if Render or Neon has an outage.
-3. **No anomaly alerting and no automated dependency vulnerability
-   scanning** — the security-events *view* exists (Phase 62 DONE) and
-   acceptance evidence is consolidated (`docs/ACCEPTANCE.md`, Phases
-   147/148 DONE), but nothing watches the view, and the Phase 107 lock
-   file is pinned, not scanned (Phase 107 UNVERIFIED in the audit
-   taxonomy — no scan run is on record).
+3. **No anomaly alerting; dependency scanning is manual-cadence** —
+   the security-events *view* exists (Phase 62 DONE) and acceptance
+   evidence is consolidated (`docs/ACCEPTANCE.md`, Phases 147/148
+   DONE), but nothing watches the view. Dependency vulnerability
+   scanning is no longer unscanned (Phase 107 DONE — first pip-audit
+   run 2026-10-07 found and fixed 7 advisories in `cryptography`), but
+   it runs on a recorded manual cadence, not in CI.
 4. **SSRF DNS-rebinding residual — CLOSED 2026-10-07 (Phase 70).**
    The audit's one INSECURE finding (resolve-then-fetch let a swapped
    DNS answer reach a non-public address) was fixed the same night

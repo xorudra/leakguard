@@ -9,3 +9,4 @@ __pycache__/
 .brevo-api-key
 .neon-app-*
 .staging-vault-*
+.siteguard-*

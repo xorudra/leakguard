@@ -17,7 +17,7 @@
 argon2-cffi==25.1.0
 argon2-cffi-bindings==26.1.0
 cffi==2.1.1
-cryptography==45.0.7
+cryptography==50.0.2
 fasteners==0.20
 pgserver==0.1.4
 platformdirs==4.12.3

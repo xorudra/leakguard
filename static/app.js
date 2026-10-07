@@ -712,6 +712,7 @@ function renderAccount() {
     loadIdentifiers();
     loadDomains();
     loadConsents();
+    loadRemoval();
     if (renderAccount._fsUser !== meUser.id) {
       // Fresh sign-in (or a different account): clear the last
       // full-scan view so nobody sees a previous session's results.
@@ -720,6 +721,12 @@ function renderAccount() {
       $("fullScanResults").hidden = true;
       $("fullScanStatus").textContent = "";
       $("fullScanBtn").disabled = false;
+      stopRemovalPolling();
+      $("removalCounts").innerHTML = "";
+      $("removalQueue").innerHTML = "";
+      $("removalCases").innerHTML = "";
+      $("removalStatus").textContent = "";
+      $("removalBtn").disabled = false;
     }
   } else {
     renderAccount._fsUser = null;
@@ -1227,6 +1234,227 @@ function renderFullScan(data) {
     p.className = "hint";
     p.textContent = "🔗 " + note.reason;
     corr.appendChild(p);
+  });
+}
+
+/* ----- removal (Stage S7): one command for the whole registry ----- */
+const REMOVAL_LABELS = {
+  queued: "Waiting to run",
+  running: "Working on it",
+  submitted: "Request sent — waiting for the broker",
+  needs_human: "Needs you",
+  blocked: "Blocked by the broker's site",
+  verified_removed: "Removed ✓ (checked — really gone)",
+  reappeared: "Reappeared after removal",
+  failed: "Could not complete",
+};
+let removalTimer = null;
+
+function stopRemovalPolling() {
+  if (removalTimer) { clearTimeout(removalTimer); removalTimer = null; }
+}
+
+function scheduleRemovalPoll() {
+  stopRemovalPolling();
+  removalTimer = setTimeout(async () => {
+    removalTimer = null;
+    if (!meUser) return;  // signed out meanwhile — stop quietly
+    const again = await loadRemoval();
+    if (again) scheduleRemovalPoll();
+  }, 4000);
+}
+
+$("removalBtn").addEventListener("click", async () => {
+  if (!meUser) return;
+  const btn = $("removalBtn");
+  const status = $("removalStatus");
+  btn.disabled = true;
+  status.textContent = "Checking your permission…";
+  try {
+    // Same rule as the full scan: never grant consent for the user —
+    // explain and point at the toggle.
+    const c = await apiJson("/api/consents");
+    const removal = c.ok && (c.data.consents || [])
+      .find((x) => x.purpose === "automated_remediation");
+    if (!removal || !removal.granted) {
+      status.textContent = "The Automatic removal permission is off — turn it on above and press the button again. LeakGuard never submits anything for you without it.";
+      const toggle = document.querySelector(
+        "#consentList input[data-purpose='automated_remediation']");
+      if (toggle) {
+        toggle.scrollIntoView({ behavior: "smooth", block: "center" });
+        toggle.focus();
+      }
+      btn.disabled = false;
+      return;
+    }
+    status.textContent = "Opening your removal cases…";
+    const r = await apiJson("/api/remediation/run", {
+      method: "POST", headers: AH, body: "{}",
+    });
+    if (!r.ok) throw new Error(errMsg(r.data, "Could not start removal"));
+    status.textContent = r.data.cases_created
+      ? "Started — " + r.data.cases_created + " new case(s) opened. LeakGuard is working through them now."
+      : "Your cases are already open — LeakGuard is working through them.";
+    await loadRemoval();
+    scheduleRemovalPoll();
+  } catch (err) {
+    status.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+async function loadRemoval() {
+  if (!meUser) return false;
+  const [casesR, queueR] = await Promise.all([
+    apiJson("/api/remediation/cases"),
+    apiJson("/api/remediation/queue"),
+  ]);
+  if (!casesR.ok) return false;
+  const cases = casesR.data.cases || [];
+  renderRemovalCounts(cases);
+  renderRemovalQueue(queueR.ok ? (queueR.data.queue || []) : []);
+  renderRemovalCases(cases);
+  // Keep polling while anything is still queued or running.
+  return cases.some((c) => c.status === "queued" || c.status === "running");
+}
+
+function renderRemovalCounts(cases) {
+  const wrap = $("removalCounts");
+  wrap.innerHTML = "";
+  if (!cases.length) return;
+  const counts = {};
+  cases.forEach((c) => { counts[c.status] = (counts[c.status] || 0) + 1; });
+  const p = document.createElement("p");
+  p.className = "hint";
+  p.textContent = "Your removal cases: " + Object.keys(REMOVAL_LABELS)
+    .filter((s) => counts[s])
+    .map((s) => counts[s] + " " + REMOVAL_LABELS[s].toLowerCase())
+    .join(" · ");
+  wrap.appendChild(p);
+}
+
+function renderRemovalQueue(queue) {
+  const wrap = $("removalQueue");
+  wrap.innerHTML = "";
+  if (!queue.length) return;
+  const h = document.createElement("p");
+  h.innerHTML = "<b>Needs you:</b> these brokers would not accept an automatic request. Each one below has the exact step to finish it.";
+  wrap.appendChild(h);
+  queue.forEach((item) => {
+    const card = document.createElement("div");
+    card.className = "consentRow";
+    const text = document.createElement("div");
+    text.className = "cText";
+    const b = document.createElement("b");
+    b.textContent = item.broker_name;
+    text.appendChild(b);
+    const note = document.createElement("span");
+    if (item.action === "send_email") {
+      note.textContent = "This broker accepts removal requests by email — but only from YOUR email address. We wrote the letter for you; send it from your own mailbox and it becomes a legal erasure request.";
+    } else {
+      note.textContent = item.note || "";
+    }
+    text.appendChild(note);
+    card.appendChild(text);
+    const btns = document.createElement("div");
+    btns.className = "rowBtns";
+    if (item.action === "send_email") {
+      const mail = document.createElement("button");
+      mail.type = "button";
+      mail.textContent = "Open the letter in my email app";
+      mail.addEventListener("click", () => {
+        window.location.href = "mailto:" + encodeURIComponent(item.to)
+          + "?subject=" + encodeURIComponent(item.subject || "")
+          + "&body=" + encodeURIComponent(item.body || "");
+      });
+      btns.appendChild(mail);
+      const done = document.createElement("button");
+      done.type = "button";
+      done.className = "btnGhost";
+      done.textContent = "I sent it";
+      done.addEventListener("click", () => retryRemovalCase(item.id, done));
+      btns.appendChild(done);
+    } else {
+      const open = document.createElement("button");
+      open.type = "button";
+      open.textContent = "Open opt-out page";
+      open.addEventListener("click", () => {
+        window.open(item.url, "_blank", "noopener");
+      });
+      btns.appendChild(open);
+      const done = document.createElement("button");
+      done.type = "button";
+      done.className = "btnGhost";
+      done.textContent = "I did it — try again";
+      done.addEventListener("click", () => retryRemovalCase(item.id, done));
+      btns.appendChild(done);
+    }
+    card.appendChild(btns);
+    wrap.appendChild(card);
+  });
+}
+
+async function retryRemovalCase(caseId, btn) {
+  btn.disabled = true;
+  const r = await apiJson("/api/remediation/cases/" + caseId + "/retry", {
+    method: "POST", headers: AH, body: "{}",
+  });
+  if (r.ok) {
+    $("removalStatus").textContent = "Queued again — LeakGuard will pick it up in a moment.";
+    await loadRemoval();
+    scheduleRemovalPoll();
+  } else {
+    $("removalStatus").textContent = errMsg(r.data, "Could not re-queue that case");
+    btn.disabled = false;
+  }
+}
+
+function renderRemovalCases(cases) {
+  const wrap = $("removalCases");
+  wrap.innerHTML = "";
+  const checkable = cases.filter(
+    (c) => c.status === "submitted" || c.status === "verified_removed");
+  if (!checkable.length) return;
+  const h = document.createElement("p");
+  h.className = "hint";
+  h.textContent = "Brokers who have your request — “Check now” goes back and looks for your listing. Only a check that finds nothing earns the word Removed.";
+  wrap.appendChild(h);
+  checkable.forEach((c) => {
+    const row = document.createElement("div");
+    row.className = "consentRow";
+    const text = document.createElement("div");
+    text.className = "cText";
+    const b = document.createElement("b");
+    b.textContent = c.broker_name;
+    const s = document.createElement("span");
+    s.textContent = REMOVAL_LABELS[c.status]
+      + (c.reason === "still_listed" ? " — last check: still listed" : "");
+    text.appendChild(b); text.appendChild(s);
+    row.appendChild(text);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btnGhost";
+    btn.textContent = c.status === "verified_removed" ? "Re-check" : "Check now";
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      const r = await apiJson("/api/remediation/cases/" + c.id + "/verify", {
+        method: "POST", headers: AH, body: "{}",
+      });
+      if (r.ok) {
+        $("removalStatus").textContent = r.data.outcome === "gone"
+          ? c.broker_name + ": checked — your listing is gone."
+          : r.data.outcome === "still_present"
+            ? c.broker_name + ": still listed. Brokers can take days — check again later."
+            : c.broker_name + ": couldn't confirm either way this time — nothing was guessed.";
+        await loadRemoval();
+      } else {
+        $("removalStatus").textContent = errMsg(r.data, "Could not check that case");
+      }
+      btn.disabled = false;
+    });
+    row.appendChild(btn);
+    wrap.appendChild(row);
   });
 }
 

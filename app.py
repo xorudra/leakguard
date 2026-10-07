@@ -53,6 +53,9 @@ from accounts import sessions as sessions_mod
 from core import context, errors, logging_setup, security
 from db import pool as db_pool
 from providers import registry as providers_registry
+from remediation import registry_seed as broker_registry
+from remediation import service as remediation_service
+from remediation import verify as remediation_verify
 from scanning import jobs as scan_jobs_service
 from scanning import risk as risk_engine
 
@@ -293,7 +296,14 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/static/app.js":
             return self._serve_file(STATIC / "app.js", "text/javascript; charset=utf-8")
         if route == "/api/brokers":
-            return self._json(200, {"brokers": load_brokers()})
+            # Registry-backed when a database is configured and
+            # seeded (Stage S7); brokers.json otherwise. The shape is
+            # identical either way — the file stays the fallback so
+            # the anonymous page can never break on a database hiccup.
+            brokers = broker_registry.list_brokers_public()
+            return self._json(200, {
+                "brokers": brokers if brokers is not None else load_brokers(),
+            })
         if route == "/api/health":
             # db is a coarse status only ("ok" / "disabled" / "error") —
             # never connection details (spec Phase 76 observability).
@@ -340,6 +350,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {
                 "jobs": self._call(scan_jobs_service.list_jobs, user["id"]),
             })
+        if route == "/api/remediation/cases":
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._json(200, {
+                "cases": self._call(remediation_service.list_cases,
+                                    user["id"]),
+            })
+        if route == "/api/remediation/queue":
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._json(200, {
+                "queue": self._call(remediation_service.human_queue,
+                                    user["id"]),
+            })
         if route.startswith("/api/scans/"):
             self._require_accounts()
             user, _token = self._require_user()
@@ -381,7 +405,9 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path.startswith("/api/auth/") or parsed.path in (
                 "/api/consents", "/api/identifiers", "/api/scans",
-                "/api/domains") or parsed.path.startswith("/api/domains/"):
+                "/api/domains", "/api/remediation/run") \
+                or parsed.path.startswith("/api/domains/") \
+                or parsed.path.startswith("/api/remediation/cases/"):
             return self._accounts_post(parsed.path)
         if parsed.path == "/api/agent/plan":
             payload = self._read_json_body()
@@ -592,6 +618,27 @@ class Handler(BaseHTTPRequestHandler):
                 scan_jobs_service.create_job, user["id"],
                 payload.get("idempotency_key"))
             return self._json(201 if created else 200, {"job": job})
+        if route == "/api/remediation/run":
+            # The one command: consent-gated inside the service (403
+            # consent_required), then one idempotent case per broker.
+            # The worker drains the queue asynchronously.
+            return self._json(200, self._call(
+                remediation_service.run_removal, user["id"]))
+        if route.startswith("/api/remediation/cases/"):
+            case_ref = route[len("/api/remediation/cases/"):]
+            for suffix, service_fn in (
+                    ("/verify", remediation_verify.verify_case),
+                    ("/retry", remediation_service.retry_case)):
+                if case_ref.endswith(suffix):
+                    case_id = case_ref[:-len(suffix)]
+                    try:
+                        uuid.UUID(case_id)
+                    except (ValueError, AttributeError, TypeError):
+                        return self._fail(
+                            errors.not_found("Removal case not found"))
+                    return self._json(200, self._call(
+                        service_fn, user["id"], case_id))
+            return self._fail(errors.not_found())
         return self._fail(errors.not_found())
 
     def do_DELETE(self):
@@ -658,10 +705,38 @@ def _startup_worker():
                                 + type(exc).__name__)
 
 
+def _startup_broker_seed():
+    """Seed the broker registry (Stage S7) from brokers.json when a
+    database is configured. Guarded like migrations — the anonymous
+    product reads brokers.json directly and never depends on this."""
+    try:
+        seeded = broker_registry.seed_brokers_if_configured()
+        if seeded:
+            print("LeakGuard: broker registry seeded (%d brokers)" % seeded)
+    except Exception as exc:
+        logging_setup.log_error(None, "broker seed failed: "
+                                + type(exc).__name__)
+
+
+def _startup_remediation_worker():
+    """Start the in-process remediation worker (Stage S7) when a
+    database is configured. Guarded exactly like the scan worker."""
+    try:
+        from remediation import worker
+
+        if worker.start_worker_if_configured():
+            print("LeakGuard: remediation worker started")
+    except Exception as exc:
+        logging_setup.log_error(None, "remediation worker failed to start: "
+                                + type(exc).__name__)
+
+
 def main():
     logging_setup.setup_logging()
     _startup_migrations()
     _startup_worker()
+    _startup_broker_seed()
+    _startup_remediation_worker()
     port = int(os.environ.get("PORT", "8000"))
     host = os.environ.get("HOST", "0.0.0.0")
     server = ThreadingHTTPServer((host, port), Handler)

@@ -125,6 +125,22 @@
         <div id="fsCorrelations"></div>
       </div>
 
+      <h3>Removal</h3>
+      <p class="hint">One tap opens a removal case with <strong>every data broker</strong> in the
+      registry, and LeakGuard works through them for you — submitting the forms it can and
+      preparing letters for the rest. It needs the <strong>Automatic removal</strong> permission
+      above to be on. A case only ever says <strong>Removed</strong> after LeakGuard has gone back
+      and checked the listing is really gone — “request sent” is not the same thing, and we won't
+      pretend it is. Brokers whose forms demand a CAPTCHA or a sign-in are handed to you below
+      with the exact step to finish — no tool can honestly do those for you.</p>
+      <div class="rowBtns">
+        <button type="button" id="removalBtn">Remove my data everywhere</button>
+        <span id="removalStatus" class="hint"></span>
+      </div>
+      <div id="removalCounts"></div>
+      <div id="removalQueue"></div>
+      <div id="removalCases"></div>
+
       <h3>Two-factor authentication</h3>
       <p class="hint">Status: <b id="totpStatus">–</b>. Use any authenticator app (Google Authenticator,
       Authy, your password manager). Codes are single-use — a code that worked once never works again.</p>

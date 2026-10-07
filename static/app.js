@@ -468,12 +468,19 @@ function feed(icon, text) {
   box.scrollTop = box.scrollHeight;
 }
 
+async function fetchTimeout(url, opts, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try { return await fetch(url, Object.assign({}, opts, { signal: ctrl.signal })); }
+  finally { clearTimeout(t); }
+}
+
 async function probeMode(broker, profile, deep) {
-  const resp = await fetch("/api/agent/probe", {
+  const resp = await fetchTimeout("/api/agent/probe", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ broker, profile, deep: !!deep }),
-  });
+  }, deep ? 60000 : 25000);
   const d = await resp.json();
   if (!resp.ok) throw new Error(d.error || "Probe failed");
   return d;
@@ -481,11 +488,11 @@ async function probeMode(broker, profile, deep) {
 
 async function autoSubmit(broker, probe) {
   const form = probe.forms[probe.forms.length - 1];
-  const resp = await fetch("/api/agent/submit", {
+  const resp = await fetchTimeout("/api/agent/submit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ confirm: true, broker, form_action: form.action, method: form.method, payload: probe.payload_preview || {} }),
-  });
+  }, 30000);
   const d = await resp.json();
   if (!resp.ok) throw new Error(d.error || "Submit failed");
   return d;
@@ -522,11 +529,11 @@ $("autoBtn").addEventListener("click", async () => {
   const bump = () => { done++; $("runBar").style.width = Math.round(100 * done / total) + "%"; $("runStatus").textContent = "Working… " + done + " of " + total + " brokers processed"; };
   try {
     if (!window.__plan) {
-      const resp = await fetch("/api/agent/plan", {
+      const resp = await fetchTimeout("/api/agent/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(profile),
-      });
+      }, 30000);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Plan failed");
       window.__plan = data.plan;

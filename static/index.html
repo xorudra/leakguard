@@ -124,6 +124,18 @@
         <button type="button" id="pcLogoutBtn" class="btnGhost">Sign out</button>
       </div>
 
+      <h3>My household</h3>
+      <p class="hint">Protecting family too? Add a person here, then use the little
+      “whose detail” menu on any saved detail below to mark it as theirs. A person here is
+      just a name label for grouping — they get no account, no login, and we store nothing
+      about them beyond the label you type.</p>
+      <div id="memberList"></div>
+      <label>Name <input type="text" id="memberLabel" placeholder="Person's name or label" maxlength="60" autocomplete="off"></label>
+      <div class="rowBtns">
+        <button type="button" id="memberAddBtn" class="btnGhost">Add person</button>
+        <span id="memberStatus" class="hint"></span>
+      </div>
+
       <h3>My saved details</h3>
       <p class="hint">Stored encrypted — we can only ever show them masked here. These are the details
       LeakGuard can watch and clean up for you, so you never type them again.</p>
@@ -281,6 +293,16 @@
         <span id="delMsg" class="hint"></span>
       </div>
     </div>
+  </section>
+
+  <section id="adminCard" class="card" hidden>
+    <h2>Admin</h2>
+    <p class="hint">Platform totals for the owner only — counts and system health.
+    No user's details, emails, findings or letters ever appear here; the audit trail
+    records actions and counts, never personal data.</p>
+    <div id="adminOverview"></div>
+    <h3>Recent activity (audit)</h3>
+    <div id="adminAudit"></div>
   </section>
 
   <section id="scan" class="card">

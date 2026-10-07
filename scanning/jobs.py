@@ -18,6 +18,7 @@ Responses never contain identifier values — findings join the
 vault's pre-computed masked rendering, and that is all.
 """
 
+from accounts import audit
 from accounts import consents as consents_service
 from accounts import identifiers as identifiers_service
 from core import errors
@@ -115,7 +116,10 @@ def create_job(user_id, idempotency_key):
             (user_id, idempotency_key),
         ).fetchone()
         if row is not None:
-            return {"id": str(row["id"]), "status": row["status"]}, True
+            job = {"id": str(row["id"]), "status": row["status"]}
+            audit.record(user_id, "user", "scan.job_created",
+                         "scan_job", job["id"], {"source": "manual"})
+            return job, True
         row = conn.execute(
             "SELECT id, status FROM scan_jobs"
             " WHERE user_id = %s AND idempotency_key = %s",

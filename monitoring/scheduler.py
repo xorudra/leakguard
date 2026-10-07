@@ -27,6 +27,7 @@ Logs carry user counts only — never user ids, never data.
 import threading
 from datetime import datetime, timedelta, timezone
 
+from accounts import audit
 from core import logging_setup
 from db import pool
 
@@ -108,6 +109,8 @@ def tick(now=None):
             ).fetchone()
         if row is not None:
             created.append(str(row["id"]))
+            audit.record(user_id, "system", "scan.job_created",
+                         "scan_job", row["id"], {"source": "monitor"})
     if created:
         _log("monitoring_scheduler enqueued=%d" % len(created))
     return created

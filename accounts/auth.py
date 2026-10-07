@@ -18,7 +18,7 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from accounts import passwords, sessions, totp
+from accounts import audit, passwords, sessions, totp
 from core import errors
 from db import pool
 from vault import crypto, store as vault_store
@@ -152,6 +152,7 @@ def register(email, password):
                 "email_taken", "An account with this email already exists")
         raise
     token = sessions.create_session(row["id"])
+    audit.record(row["id"], "user", "auth.registered", "user", row["id"])
     return public_user(row), token
 
 
@@ -164,8 +165,15 @@ def login(email, password, totp_code=None):
     if row is None:
         # Burn the same Argon2 time as a real verify: no timing oracle.
         passwords.verify_password(passwords.DUMMY_HASH, password or "")
+        # The audit detail names no reason beyond the same generic
+        # code the API returns — the trail must not become the
+        # enumeration oracle the login response refuses to be.
+        audit.record(None, "user", "auth.login_failed",
+                     detail={"reason": "invalid_credentials"})
         raise _invalid_credentials()
     if not passwords.verify_password(row["password_hash"], password or ""):
+        audit.record(None, "user", "auth.login_failed",
+                     detail={"reason": "invalid_credentials"})
         raise _invalid_credentials()
     if passwords.needs_rehash(row["password_hash"]):
         with pool.connection() as conn:
@@ -182,6 +190,8 @@ def login(email, password, totp_code=None):
         matched = totp.verify(
             secret, str(totp_code), last_accepted_step=row["totp_last_step"])
         if matched is None:
+            audit.record(None, "user", "auth.login_failed",
+                         detail={"reason": "invalid_credentials"})
             raise _invalid_credentials()
         with pool.connection() as conn:
             conn.execute(
@@ -190,6 +200,7 @@ def login(email, password, totp_code=None):
                 (matched, row["id"]),
             )
     token = sessions.create_session(row["id"])
+    audit.record(row["id"], "user", "auth.login", "user", row["id"])
     return {"user": public_user(row), "token": token}
 
 
@@ -243,6 +254,10 @@ def delete_account(user_id, password):
             (user_id,),
         )
     sessions.revoke_all_sessions(user_id)
+    # The audit row outlives the account on purpose: actor_user_id
+    # carries no FK, so "this account existed and was deleted" stays
+    # answerable after the user row is soft-deleted.
+    audit.record(user_id, "user", "account.deleted", "user", user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +313,8 @@ def forgot_password(email):
     notify.create_notification(
         row["id"], "password_reset", {"reset_url": reset_url},
         mode="always", email=normalized)
+    audit.record(row["id"], "user", "auth.password_reset_requested",
+                 "user", row["id"])
 
 
 def _invalid_token():
@@ -347,6 +364,8 @@ def reset_password(raw_token, new_password):
             (passwords.hash_password(new_password), row["user_id"]),
         )
     sessions.revoke_all_sessions(row["user_id"])
+    audit.record(row["user_id"], "user",
+                 "auth.password_reset_completed", "user", row["user_id"])
     return {"ok": True}
 
 

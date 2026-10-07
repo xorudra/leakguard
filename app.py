@@ -43,9 +43,11 @@ from pathlib import Path
 
 import agent as agent_engine
 from accounts import accounts_available
+from accounts import admin as admin_service
 from accounts import auth as auth_service
 from accounts import consents as consents_service
 from accounts import domains as domains_service
+from accounts import households as households_service
 from accounts import identifiers as identifiers_service
 from accounts import privacy as privacy_service
 from accounts import ratelimit
@@ -268,6 +270,18 @@ class Handler(BaseHTTPRequestHandler):
             raise errors.unauthorized()
         return user, self._session_token()
 
+    def _require_admin(self):
+        """The session's user, if they are the product owner
+        (Stage S11). Everyone else — signed out, or signed in as a
+        regular user — gets a 404: the admin surface is invisible,
+        not merely forbidden."""
+        self._require_accounts()
+        user = self._current_user()
+        if user is None or not self._call(admin_service.is_admin,
+                                          user["id"]):
+            raise errors.not_found()
+        return user
+
     def _rate_limit_credentials(self, email):
         """Shared register/login limiter: 10 attempts / 15 min per IP
         AND per account email (counted by its lookup HMAC)."""
@@ -328,7 +342,13 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/auth/me":
             self._require_accounts()
             user, _token = self._require_user()
-            return self._json(200, user)
+            body = dict(user)
+            # Lets the frontend show the owner's Admin card — and
+            # only the owner's (Stage S11). The gate itself is
+            # re-checked server-side on every admin route regardless.
+            body["is_admin"] = bool(self._call(
+                admin_service.is_admin, user["id"]))
+            return self._json(200, body)
         if route == "/api/consents":
             self._require_accounts()
             user, _token = self._require_user()
@@ -349,6 +369,26 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {
                 "domains": self._call(
                     domains_service.list_domains, user["id"]),
+            })
+        if route == "/api/household":
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._json(200, self._call(
+                households_service.get_household, user["id"]))
+        if route == "/api/admin/overview":
+            # Aggregates ONLY (counts, provider health, db status)
+            # — see accounts/admin.py's privacy contract. The gate
+            # answers 404 to everyone who is not the owner.
+            admin = self._require_admin()
+            return self._json(200, self._call(
+                admin_service.overview, admin["id"]))
+        if route == "/api/admin/audit":
+            admin = self._require_admin()
+            query = urllib.parse.parse_qs(parsed.query)
+            limit = query.get("limit", [None])[0]
+            return self._json(200, {
+                "audit": self._call(
+                    admin_service.list_audit, admin["id"], limit),
             })
         if route == "/api/scans":
             self._require_accounts()
@@ -438,7 +478,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path.startswith("/api/auth/") or parsed.path in (
                 "/api/consents", "/api/identifiers", "/api/scans",
-                "/api/domains", "/api/remediation/run") \
+                "/api/domains", "/api/remediation/run",
+                "/api/household/members") \
                 or parsed.path.startswith("/api/domains/") \
                 or parsed.path.startswith("/api/remediation/cases/"):
             return self._accounts_post(parsed.path)
@@ -642,8 +683,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._fail(errors.invalid_json())
             record = self._call(identifiers_service.add_identifier,
                                 user["id"], payload.get("kind"),
-                                payload.get("value"))
+                                payload.get("value"),
+                                payload.get("member_id"))
             return self._json(201, {"identifier": record})
+        if route == "/api/household/members":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            member = self._call(households_service.add_member,
+                                user["id"], payload.get("label"))
+            return self._json(201, {"member": member})
         if route == "/api/domains":
             payload = self._read_json_body()
             if payload is None:
@@ -709,11 +758,50 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, result)
         return self._fail(errors.not_found())
 
+    def do_PATCH(self):
+        return self._safe_dispatch(self._do_PATCH)
+
+    def _do_PATCH(self):
+        parsed = urllib.parse.urlparse(self.path)
+        prefix = "/api/identifiers/"
+        if parsed.path.startswith(prefix) and len(parsed.path) > len(prefix):
+            security.require_csrf(self)
+            self._require_accounts()
+            user, _token = self._require_user()
+            ident = parsed.path[len(prefix):]
+            try:
+                uuid.UUID(ident)
+            except (ValueError, AttributeError, TypeError):
+                return self._fail(errors.not_found("Identifier not found"))
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            # The one PATCH in the API: (re)assign the identifier to
+            # a household member, or back to the owner with null.
+            result = self._call(identifiers_service.update_identifier_member,
+                                user["id"], ident, payload.get("member_id"))
+            return self._json(200, {"identifier": result})
+        return self._fail(errors.not_found())
+
     def do_DELETE(self):
         return self._safe_dispatch(self._do_DELETE)
 
     def _do_DELETE(self):
         parsed = urllib.parse.urlparse(self.path)
+        prefix = "/api/household/members/"
+        if parsed.path.startswith(prefix) and len(parsed.path) > len(prefix):
+            security.require_csrf(self)
+            self._require_accounts()
+            user, _token = self._require_user()
+            member_id = parsed.path[len(prefix):]
+            try:
+                uuid.UUID(member_id)
+            except (ValueError, AttributeError, TypeError):
+                return self._fail(
+                    errors.not_found("Household member not found"))
+            result = self._call(households_service.delete_member,
+                                user["id"], member_id)
+            return self._json(200, result)
         prefix = "/api/identifiers/"
         if parsed.path.startswith(prefix) and len(parsed.path) > len(prefix):
             security.require_csrf(self)

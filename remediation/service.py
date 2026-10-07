@@ -13,6 +13,7 @@ user's one command returns the existing live cases, never duplicates
 them, and never re-submits a case that is already submitted.
 """
 
+from accounts import audit
 from accounts.auth import _iso
 from core import errors
 from db import pool
@@ -62,7 +63,11 @@ def run_removal(user_id):
             "consent_required",
             "Turn on the Automatic removal permission to let LeakGuard "
             "remove your data for you")
-    return create_cases_for_user(user_id)
+    result = create_cases_for_user(user_id)
+    audit.record(user_id, "user", "remediation.run_created",
+                 "remediation_run", user_id,
+                 {"cases_created": result["cases_created"]})
+    return result
 
 
 def create_cases_for_user(user_id):

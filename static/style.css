@@ -172,6 +172,7 @@ footer a{color:var(--muted)}
   text-transform:uppercase;color:var(--muted);margin-right:9px;
 }
 .idRow .idVal{font-weight:600;font-size:14.5px;word-break:break-all}
+.idRow .memberSelect{width:auto;margin:0;padding:6px 9px;font-size:13px;flex:none}
 .miniBtn{padding:7px 15px;font-size:13px}
 .consentRow .cText{flex:1}
 .consentRow .cText b{display:block;font-size:14.5px}

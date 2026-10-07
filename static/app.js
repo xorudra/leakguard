@@ -709,6 +709,7 @@ function renderAccount() {
     $("authForms").hidden = true;
     $("privacyCenter").hidden = true;
     $("actionCenter").hidden = true;
+    $("adminCard").hidden = true;
     $("resetBox").hidden = false;
     return;
   }
@@ -725,7 +726,7 @@ function renderAccount() {
     $("pcSince").textContent = meUser.created_at
       ? "· member since " + new Date(meUser.created_at).toLocaleDateString() : "";
     renderTotp();
-    loadIdentifiers();
+    loadHousehold().then(() => loadIdentifiers());
     loadDomains();
     loadConsents();
     loadRemoval();
@@ -748,6 +749,11 @@ function renderAccount() {
   } else {
     renderAccount._fsUser = null;
   }
+  // The Admin card exists only for the owner: /api/auth/me says so,
+  // and the admin routes 404 for everyone else regardless.
+  const showAdmin = !!(signedIn && meUser.is_admin);
+  $("adminCard").hidden = !showAdmin;
+  if (showAdmin) loadAdmin();
   refreshSaveScanBox();
 }
 
@@ -1033,6 +1039,146 @@ $("acActionBtn").addEventListener("click", () => {
   }
 });
 
+/* ----- my household (family profiles) -----
+   A member is a grouping label only ("whose detail is this") — no
+   account, no login, nothing stored beyond the label. The member
+   list also feeds the little "whose" select on each saved detail. */
+let householdMembers = [];
+async function loadHousehold() {
+  if (!meUser) return;
+  const wrap = $("memberList");
+  try {
+    const r = await apiJson("/api/household");
+    if (!r.ok) {
+      householdMembers = [];
+      wrap.innerHTML = "<p class='hint'>" + errMsg(r.data, "Could not load your household") + "</p>";
+      return;
+    }
+    householdMembers = r.data.members || [];
+    wrap.innerHTML = "";
+    if (!householdMembers.length) {
+      wrap.innerHTML = "<p class='hint'>Just you so far — your own details need no label.</p>";
+      return;
+    }
+    householdMembers.forEach((m) => {
+      const row = document.createElement("div");
+      row.className = "idRow";
+      const label = document.createElement("span");
+      label.className = "idVal";
+      label.textContent = m.label;
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "btnGhost miniBtn";
+      rm.textContent = "Remove";
+      rm.addEventListener("click", async () => {
+        rm.disabled = true;
+        const d = await apiJson("/api/household/members/" + m.id, {
+          method: "DELETE", headers: { "X-Requested-With": "fetch" },
+        });
+        if (d.ok) {
+          $("memberStatus").textContent = "Removed — their details now count as yours.";
+          await loadHousehold();
+          loadIdentifiers();
+        } else {
+          $("memberStatus").textContent = errMsg(d.data, "Remove failed");
+          rm.disabled = false;
+        }
+      });
+      row.appendChild(label); row.appendChild(rm);
+      wrap.appendChild(row);
+    });
+  } catch (e) {
+    wrap.innerHTML = "<p class='hint'>Could not load your household.</p>";
+  }
+}
+
+$("memberAddBtn").addEventListener("click", async () => {
+  const label = $("memberLabel").value.trim();
+  if (!label) { $("memberStatus").textContent = "Type a name first."; return; }
+  const r = await apiJson("/api/household/members", {
+    method: "POST", headers: AH, body: JSON.stringify({ label }),
+  });
+  if (r.ok) {
+    $("memberLabel").value = "";
+    $("memberStatus").textContent = "Added.";
+    await loadHousehold();
+    loadIdentifiers();
+  } else {
+    $("memberStatus").textContent = errMsg(r.data, "Could not add that person");
+  }
+});
+
+/* ----- admin (owner only) -----
+   The card stays hidden unless /api/auth/me reported is_admin; the
+   server re-checks and 404s these routes for everyone else anyway.
+   Everything rendered is counts and audit actions — never anyone's
+   personal data. */
+function fmtCounts(obj) {
+  const keys = Object.keys(obj || {});
+  if (!keys.length) return "none yet";
+  return keys.map((k) => k + " " + obj[k]).join(", ");
+}
+
+async function loadAdmin() {
+  if (!meUser || !meUser.is_admin) return;
+  const ov = $("adminOverview");
+  const au = $("adminAudit");
+  try {
+    const r = await apiJson("/api/admin/overview");
+    if (!r.ok) {
+      ov.innerHTML = "<p class='hint'>Could not load the overview.</p>";
+      return;
+    }
+    const d = r.data;
+    const lines = [
+      ["Users", d.users.total + " total, " + d.users.registered_last_30d + " in the last 30 days"],
+      ["Saved details", fmtCounts(d.identifiers_by_kind)],
+      ["Scan jobs", fmtCounts(d.scan_jobs_by_status)],
+      ["Removal cases", fmtCounts(d.remediation_cases_by_status)],
+      ["Notifications", fmtCounts(d.notifications_by_status)],
+      ["Brokers covered", String(d.brokers)],
+      ["Database", d.db],
+      ["Providers", (d.providers.providers || [])
+        .map((p) => p.name + ": " + p.status).join(", ") || "—"],
+    ];
+    ov.innerHTML = "";
+    lines.forEach(([label, value]) => {
+      const row = document.createElement("div");
+      row.className = "idRow";
+      const l = document.createElement("span");
+      l.className = "kindTag";
+      l.textContent = label;
+      const v = document.createElement("span");
+      v.className = "idVal";
+      v.textContent = value;
+      row.appendChild(l); row.appendChild(v);
+      ov.appendChild(row);
+    });
+    const a = await apiJson("/api/admin/audit?limit=25");
+    au.innerHTML = "";
+    if (a.ok && a.data.audit && a.data.audit.length) {
+      a.data.audit.forEach((entry) => {
+        const row = document.createElement("div");
+        row.className = "idRow";
+        const l = document.createElement("span");
+        l.className = "idVal";
+        l.textContent = new Date(entry.created_at).toLocaleString()
+          + " · " + entry.actor_kind + " · " + entry.action;
+        const det = document.createElement("span");
+        det.className = "hint";
+        det.textContent = Object.keys(entry.detail || {})
+          .map((k) => k + ": " + entry.detail[k]).join(", ");
+        row.appendChild(l); row.appendChild(det);
+        au.appendChild(row);
+      });
+    } else {
+      au.innerHTML = "<p class='hint'>No audit activity yet.</p>";
+    }
+  } catch (e) {
+    ov.innerHTML = "<p class='hint'>Could not load the overview.</p>";
+  }
+}
+
 /* ----- saved details (identifiers) ----- */
 async function loadIdentifiers() {
   if (!meUser) return;
@@ -1059,6 +1205,35 @@ async function loadIdentifiers() {
       val.className = "idVal";
       val.textContent = rec.masked;
       left.appendChild(tag); left.appendChild(val);
+      const sel = document.createElement("select");
+      sel.className = "memberSelect";
+      sel.title = "Whose detail is this?";
+      const mine = document.createElement("option");
+      mine.value = "";
+      mine.textContent = "Mine";
+      sel.appendChild(mine);
+      householdMembers.forEach((m) => {
+        const o = document.createElement("option");
+        o.value = m.id;
+        o.textContent = m.label;
+        sel.appendChild(o);
+      });
+      sel.value = rec.member_id || "";
+      sel.addEventListener("change", async () => {
+        sel.disabled = true;
+        const d = await apiJson("/api/identifiers/" + rec.id, {
+          method: "PATCH", headers: AH,
+          body: JSON.stringify({ member_id: sel.value || null }),
+        });
+        if (d.ok) {
+          rec.member_id = sel.value || null;
+          $("idStatus").textContent = "Saved — whose detail updated.";
+        } else {
+          sel.value = rec.member_id || "";
+          $("idStatus").textContent = errMsg(d.data, "Could not update whose detail this is");
+        }
+        sel.disabled = false;
+      });
       const rm = document.createElement("button");
       rm.type = "button";
       rm.className = "btnGhost miniBtn";
@@ -1071,7 +1246,7 @@ async function loadIdentifiers() {
         if (d.ok) { loadIdentifiers(); loadActionCenter(); $("idStatus").textContent = "Removed."; }
         else { $("idStatus").textContent = errMsg(d.data, "Remove failed"); rm.disabled = false; }
       });
-      row.appendChild(left); row.appendChild(rm);
+      row.appendChild(left); row.appendChild(sel); row.appendChild(rm);
       wrap.appendChild(row);
     });
   } catch (e) {

@@ -11,6 +11,7 @@ sequencing rule): monitoring, automated remediation and
 notifications all check the current state before acting.
 """
 
+from accounts import audit
 from core import errors
 from db import pool
 
@@ -95,4 +96,6 @@ def set_consent(user_id, purpose, granted):
             " VALUES (%s, %s, %s, %s)",
             (user_id, purpose, int(row["v"]) + 1, granted),
         )
+    audit.record(user_id, "user", "consent.changed", "consent", purpose,
+                 {"consent": purpose, "granted": granted})
     return current_consents(user_id)

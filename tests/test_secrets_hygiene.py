@@ -40,7 +40,7 @@ import re
 import subprocess
 from pathlib import Path
 
-import pytest
+import unittest
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -138,6 +138,11 @@ ALLOWLISTED_LITERALS = {
     # host is the literal word "host", not a resolvable name, and
     # the userinfo is the generic placeholder "user:pass".
     "user:pass@host",
+    # tests/test_privacy_center_walk.py — fixture password for the
+    # throwaway walk-through accounts, and the deliberately wrong
+    # password its re-auth rejection case submits.
+    "walk-through-pass-1",
+    "not-the-password-1",
 }
 
 
@@ -150,7 +155,8 @@ def _git(*args):
 
 def _require_git():
     if _git("--version").returncode != 0:
-        pytest.skip("git is required for the secret-hygiene guard")
+        raise unittest.SkipTest(
+            "git is required for the secret-hygiene guard")
 
 
 def _tracked_files():
@@ -159,71 +165,77 @@ def _tracked_files():
     return [REPO / line for line in out.stdout.splitlines() if line]
 
 
-def test_secret_filenames_are_git_ignored():
-    _require_git()
-    not_ignored = [
-        name for name in SECRET_FILENAMES
-        if _git("check-ignore", "-q", name).returncode != 0
-    ]
-    assert not_ignored == [], (
-        f"secret filenames not covered by .gitignore: {not_ignored}")
+class TestSecretsHygiene(unittest.TestCase):
+
+    def test_secret_filenames_are_git_ignored(self):
+        _require_git()
+        not_ignored = [
+            name for name in SECRET_FILENAMES
+            if _git("check-ignore", "-q", name).returncode != 0
+        ]
+        assert not_ignored == [], (
+            f"secret filenames not covered by .gitignore: {not_ignored}")
 
 
-def test_no_secret_filenames_are_tracked():
-    _require_git()
-    tracked = _git("ls-files").stdout.splitlines()
-    offenders = [
-        path for path in tracked
-        if any(marker in Path(path).name for marker in SECRET_PATH_MARKERS)
-    ]
-    assert offenders == [], f"secret-named files tracked: {offenders}"
+    def test_no_secret_filenames_are_tracked(self):
+        _require_git()
+        tracked = _git("ls-files").stdout.splitlines()
+        offenders = [
+            path for path in tracked
+            if any(marker in Path(path).name for marker in SECRET_PATH_MARKERS)
+        ]
+        assert offenders == [], f"secret-named files tracked: {offenders}"
 
 
-def test_no_credential_shapes_in_tracked_files():
-    _require_git()
-    hits = []
-    for path in _tracked_files():
-        data = path.read_bytes()
-        for pattern in STRONG_RES:
-            if pattern.search(data):
-                hits.append(f"{path.relative_to(REPO)}: {pattern.pattern!r}")
-    assert hits == [], f"credential-shaped content in tracked files: {hits}"
+    def test_no_credential_shapes_in_tracked_files(self):
+        _require_git()
+        hits = []
+        for path in _tracked_files():
+            data = path.read_bytes()
+            for pattern in STRONG_RES:
+                if pattern.search(data):
+                    hits.append(f"{path.relative_to(REPO)}: {pattern.pattern!r}")
+        assert hits == [], f"credential-shaped content in tracked files: {hits}"
 
 
-def test_no_credential_assignments_in_tracked_files():
-    _require_git()
-    hits = []
-    for path in _tracked_files():
-        text = path.read_bytes().decode("utf-8", errors="ignore")
-        for match in ASSIGNMENT_RE.finditer(text):
-            value = match.group(1)
-            if value not in ALLOWLISTED_LITERALS:
-                hits.append(
-                    f"{path.relative_to(REPO)}: credential assignment "
-                    f"with non-allowlisted value (length {len(value)})")
-        for match in URL_USERINFO_RE.finditer(text):
-            # Userinfo without a password (a bare username, as in
-            # URL-parsing fixtures and socket-style database URLs)
-            # carries no credential and is not a finding.
-            if ":" not in match.group(1):
-                continue
-            authority = f"{match.group(1)}@{match.group(2)}"
-            if authority not in ALLOWLISTED_LITERALS:
-                hits.append(
-                    f"{path.relative_to(REPO)}: URL with embedded "
-                    f"credentials outside the allowlist")
-    assert hits == [], hits
+    def test_no_credential_assignments_in_tracked_files(self):
+        _require_git()
+        hits = []
+        for path in _tracked_files():
+            text = path.read_bytes().decode("utf-8", errors="ignore")
+            for match in ASSIGNMENT_RE.finditer(text):
+                value = match.group(1)
+                if value not in ALLOWLISTED_LITERALS:
+                    hits.append(
+                        f"{path.relative_to(REPO)}: credential assignment "
+                        f"with non-allowlisted value (length {len(value)})")
+            for match in URL_USERINFO_RE.finditer(text):
+                # Userinfo without a password (a bare username, as in
+                # URL-parsing fixtures and socket-style database URLs)
+                # carries no credential and is not a finding.
+                if ":" not in match.group(1):
+                    continue
+                authority = f"{match.group(1)}@{match.group(2)}"
+                if authority not in ALLOWLISTED_LITERALS:
+                    hits.append(
+                        f"{path.relative_to(REPO)}: URL with embedded "
+                        f"credentials outside the allowlist")
+        assert hits == [], hits
 
 
-def test_no_credential_shapes_in_git_history():
-    _require_git()
-    out = subprocess.run(
-        ["git", "-C", str(REPO), "log", "--all", "-p", "-U0", "--no-color"],
-        capture_output=True, timeout=300,
-    )
-    assert out.returncode == 0
-    hits = [pattern.pattern for pattern in STRONG_RES
-            if pattern.search(out.stdout)]
-    assert hits == [], (
-        f"credential-shaped content found in git history: {hits} — "
-        "a secret that was committed and later removed is still leaked")
+    def test_no_credential_shapes_in_git_history(self):
+        _require_git()
+        out = subprocess.run(
+            ["git", "-C", str(REPO), "log", "--all", "-p", "-U0", "--no-color"],
+            capture_output=True, timeout=300,
+        )
+        assert out.returncode == 0
+        hits = [pattern.pattern for pattern in STRONG_RES
+                if pattern.search(out.stdout)]
+        assert hits == [], (
+            f"credential-shaped content found in git history: {hits} — "
+            "a secret that was committed and later removed is still leaked")
+
+
+if __name__ == "__main__":
+    unittest.main()

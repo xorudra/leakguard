@@ -19,7 +19,14 @@ Rules:
   back through remediation.verify.mark_reappeared (which records
   the evidence as a verification check) and earns a 'reappeared'
   notification. Matching is conservative and documented in
-  _broker_matches_finding.
+  diff.broker_matches_finding. The same flip is fed by the stored
+  lifecycle (Phase 25): a finding the lifecycle writer moved to
+  'reappeared' in this completion (e.g. one remediation had
+  resolved that this cycle found again) is a candidate too.
+* Stored lifecycle (spec Phase 25): the same completion pass
+  persists each identity's canonical lifecycle state through
+  diff.apply_lifecycle — the diff above now only drives the
+  notification ledger, never a per-read state derivation.
 * False-positive feedback (Phase 156): a finding whose identity
   the user has marked 'not_me' (scanning/feedback.py — the one
   shared helper) is excluded from the new-exposure side of this
@@ -34,9 +41,6 @@ Rules:
   the rows land as in_app_only.
 """
 
-import re
-import urllib.parse
-
 from db import pool
 from monitoring import diff, notify
 from scanning import feedback as feedback_service
@@ -46,7 +50,8 @@ NEW_FINDING_CAP = 5
 _FINDING_COLUMNS = (
     "f.id, f.identifier_id, f.identifier_kind, f.provider,"
     " f.source_name, f.source_url, f.discovered_at, f.exposed_fields,"
-    " f.confidence, f.evidence_ref, i.masked AS identifier_masked")
+    " f.confidence, f.evidence_ref, f.lifecycle_state,"
+    " f.lifecycle_changed_at, i.masked AS identifier_masked")
 
 
 def _load_job(job_id):
@@ -105,42 +110,10 @@ def _finding_payload(finding):
 
 
 # ---------------------------------------------------------------------------
-# Reappearance matching
+# Reappearance matching (the matcher itself lives in
+# monitoring/diff.py: broker_matches_finding — one implementation
+# shared with the lifecycle writer)
 # ---------------------------------------------------------------------------
-
-def _norm_text(value):
-    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
-
-
-def _host_of(url):
-    if not url:
-        return ""
-    host = urllib.parse.urlparse(str(url)).netloc.casefold()
-    return host.split("@")[-1].split(":")[0]
-
-
-def _broker_matches_finding(broker, finding):
-    """Conservative broker↔finding source match. True when ANY of:
-    * the finding's source name IS the broker's name (normalized);
-    * the finding's source name IS the broker's slug (normalized);
-    * the finding's source URL lives on the broker's own host (the
-      host of its opt-out or search URL, or a subdomain of it).
-    Anything fuzzier would risk flipping a case on a stranger's
-    listing — a missed match costs a delay, a wrong match costs
-    the truth of the case ledger."""
-    source = _norm_text(finding.get("source_name"))
-    if source and source in (_norm_text(broker.get("name")),
-                             _norm_text(broker.get("slug"))):
-        return True
-    finding_host = _host_of(finding.get("source_url"))
-    if finding_host:
-        for url in (broker.get("optout_url"), broker.get("search_url")):
-            broker_host = _host_of(url)
-            if broker_host and (finding_host == broker_host
-                                or finding_host.endswith("." + broker_host)):
-                return True
-    return False
-
 
 def _verified_cases(user_id):
     with pool.connection() as conn:
@@ -170,7 +143,7 @@ def _handle_reappearance(user_id, new_findings, job_id, created):
             broker = {"name": case["broker_name"], "slug": case["broker_slug"],
                       "optout_url": case["optout_url"],
                       "search_url": case["search_url"]}
-            if _broker_matches_finding(broker, finding):
+            if diff.broker_matches_finding(broker, finding):
                 match = finding
                 break
         if match is None:
@@ -217,8 +190,6 @@ def handle_scan_completed(job_id):
 
     if auth._get_user_by_id(user_id) is None:
         return {"skipped": True, "reason": "user_gone"}
-    if _summary_exists(user_id, job_id):
-        return {"skipped": True, "reason": "already_processed"}
 
     current = _load_findings(job_id, user_id)
     previous = _previous_job(job)
@@ -226,6 +197,16 @@ def handle_scan_completed(job_id):
     previous_findings = [] if baseline else _load_findings(
         previous["id"], user_id)
     delta = diff.diff_findings(previous_findings, current)
+    # Stored lifecycle (Phase 25): persist this cycle's transitions
+    # BEFORE the already-processed check — the writer is idempotent
+    # and refuses stale jobs itself, so re-running the hook can
+    # neither double-apply nor rewind state, and a completion whose
+    # notification pass was already recorded still leaves the
+    # lifecycle correct.
+    lifecycle = diff.apply_lifecycle(
+        user_id, job, current, previous_findings)
+    if _summary_exists(user_id, job_id):
+        return {"skipped": True, "reason": "already_processed"}
     new_findings = delta["new"]
     resolved_findings = delta["resolved"]
     # 'not_me' identities are excluded from everything this hook
@@ -257,8 +238,21 @@ def handle_scan_completed(job_id):
 
     reappeared = 0
     if not baseline:
+        # Case-flip candidates: the diff's NEW findings, plus any
+        # finding the lifecycle writer moved to 'reappeared' in
+        # this completion (a remediation-resolved exposure the set
+        # diff can only call "continuing"). Disowned identities
+        # stay excluded from both, exactly as for new findings.
+        candidates = list(notifiable_new)
+        candidate_ids = {str(f["id"]) for f in candidates}
+        for finding in lifecycle["reappeared"]:
+            if str(finding["id"]) in candidate_ids:
+                continue
+            if diff.identity_of(finding) in disowned:
+                continue
+            candidates.append(finding)
         reappeared = _handle_reappearance(
-            user_id, notifiable_new, job_id, created)
+            user_id, candidates, job_id, created)
 
     extra_new = 0 if baseline else max(
         0, len(notifiable_new) - emitted_new)

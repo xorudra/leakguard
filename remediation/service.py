@@ -20,8 +20,8 @@ from db import pool
 from remediation import engine, letters
 
 _CASE_SELECT = (
-    "SELECT c.id, c.broker_slug, b.name AS broker_name, c.status,"
-    " c.reason, c.created_at, c.updated_at, c.submitted_at"
+    "SELECT c.id, c.user_id, c.broker_slug, b.name AS broker_name,"
+    " c.status, c.reason, c.created_at, c.updated_at, c.submitted_at"
     " FROM remediation_cases c"
     " JOIN brokers b ON b.slug = c.broker_slug")
 

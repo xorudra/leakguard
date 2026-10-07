@@ -19,6 +19,10 @@ Design rules for everything in this package:
   and wires reappearance: a verified-removed broker whose listing
   shows up as a new finding flips back to 'reappeared' through
   remediation.verify.mark_reappeared — the Stage S7 hook.
+* The finding lifecycle itself is STORED, not derived (Phase 25,
+  migration 0012): diff.py's apply_lifecycle()/resolve_for_broker()
+  are the single writer of findings.lifecycle_state, fed by the
+  same completion pass and by the verified_removed flip.
 * The timeline (service.py) is a READ MODEL over rows that already
   exist (scan jobs, findings, remediation cases + verification
   checks, notifications are exposed separately). No events table,

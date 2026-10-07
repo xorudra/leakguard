@@ -16,6 +16,12 @@ mark_reappeared() is the same flip driven from outside (a future
 scan finding / orchestrator hook): it records the evidence as a
 verification check and moves a verified_removed case to reappeared.
 Nothing else may set 'reappeared' or 'verified_removed'.
+
+The verified_removed flip is also the one moment findings learn
+about a removal: _apply_outcome hands the case to
+_resolve_findings(), which moves the broker's findings to
+'resolved' in the stored finding lifecycle (Phase 25) through its
+single writer (monitoring/diff.py's resolve_for_broker).
 """
 
 from core import errors
@@ -35,9 +41,31 @@ def _record_check(conn, case_id, method, outcome, evidence_ref):
     )
 
 
+def _resolve_findings(case):
+    """Phase 25: a case that just became verified_removed resolves
+    its broker's findings in the stored lifecycle. Best-effort by
+    design — the case ledger is already the fact at this point, so
+    a lifecycle failure is logged, never raised into the
+    verification that already succeeded (the next completed scan
+    cycle re-settles the state from the same writer)."""
+    try:
+        from monitoring import diff as lifecycle
+
+        broker = registry_seed.get_broker(case["broker_slug"])
+        if broker is not None:
+            lifecycle.resolve_for_broker(str(case["user_id"]), broker)
+    except Exception as exc:
+        from core import logging_setup
+
+        logging_setup.log_error(
+            None, "lifecycle resolve on verified removal failed: "
+            + type(exc).__name__)
+
+
 def _apply_outcome(case, outcome, method, evidence_ref):
     """Record the check and apply the transition table above."""
     status = case["status"]
+    flipped = False
     with pool.connection() as conn:
         _record_check(conn, case["id"], method, outcome, evidence_ref)
         if status == "submitted" and outcome == "gone":
@@ -47,6 +75,7 @@ def _apply_outcome(case, outcome, method, evidence_ref):
                 " updated_at = now() WHERE id = %s",
                 (case["id"],),
             )
+            flipped = True
         elif status == "submitted" and outcome == "still_present":
             conn.execute(
                 "UPDATE remediation_cases SET reason = 'still_listed',"
@@ -60,6 +89,8 @@ def _apply_outcome(case, outcome, method, evidence_ref):
                 " WHERE id = %s",
                 (case["id"],),
             )
+    if flipped:
+        _resolve_findings(case)
 
 
 def verify_case(user_id, case_id, executor=None):

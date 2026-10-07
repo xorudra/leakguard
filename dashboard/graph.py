@@ -19,7 +19,7 @@ Honesty rules (the same discipline as the rest of the platform):
   (``b•••@example.com``) — the same display-safe string every list
   view uses. Raw values never leave the vault, here included.
 * A source→broker edge exists only when the Stage S8 reappearance
-  matcher (monitoring.events._broker_matches_finding) accepts the
+  matcher (monitoring.diff.broker_matches_finding) accepts the
   pair: the source name IS the broker's name or slug, or the
   source URL lives on the broker's own host. Anything fuzzier
   would draw a removal path we cannot back with a case.
@@ -38,7 +38,7 @@ function takes the caller's user id and scopes every query by it.
 """
 
 from db import pool
-from monitoring import events as _monitoring_events
+from monitoring import diff as _diff
 
 
 def _source_key(provider, source_name):
@@ -212,7 +212,7 @@ def exposure_graph(user_id):
                 "optout_url": case["optout_url"],
                 "search_url": case["search_url"],
             }
-            if any(_monitoring_events._broker_matches_finding(
+            if any(_diff.broker_matches_finding(
                     broker,
                     {"source_name": v["source_name"],
                      "source_url": v["source_url"]})
@@ -272,7 +272,7 @@ def exposure_graph(user_id):
                 "optout_url": broker_row["optout_url"],
                 "search_url": broker_row["search_url"],
             }
-            if _monitoring_events._broker_matches_finding(
+            if _diff.broker_matches_finding(
                     broker, finding):
                 matched_slugs_by_key[entry_key].add(slug)
                 case_status = case_status_by_slug.get(slug)

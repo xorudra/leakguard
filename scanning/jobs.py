@@ -76,6 +76,10 @@ def _public_finding(row):
         "risk": risk.finding_risk(row["exposed_fields"],
                                   row["reliability"]),
         "status": row["status"],
+        # The stored canonical lifecycle (Phase 25, migration
+        # 0012) — read from the row, never derived here.
+        "lifecycle_state": row.get("lifecycle_state") or "open",
+        "lifecycle_changed_at": _iso(row.get("lifecycle_changed_at")),
         "evidence_ref": row["evidence_ref"],
         "remediation_eligible": bool(row["remediation_eligible"]),
         "details": row["details"] or {},

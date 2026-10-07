@@ -185,17 +185,23 @@ def action_center(user_id):
     if latest is not None:
         with pool.connection() as conn:
             latest_findings = conn.execute(
-                "SELECT identifier_id, provider, source_name"
+                "SELECT identifier_id, provider, source_name,"
+                " lifecycle_state"
                 " FROM findings WHERE user_id = %s AND job_id = %s",
                 (user_id, latest["id"]),
             ).fetchall()
         # Findings the user has disowned ('not_me', Phase 156) do
         # not count here — the same shared helper the alerts and
         # the scan view consult, so the surfaces cannot drift.
+        # Neither do findings whose stored lifecycle (Phase 25)
+        # is 'resolved' — a removal verified since the scan must
+        # not keep counting as a current exposure.
         disowned = feedback_service.not_me_identities(user_id)
         findings_total = sum(
             1 for f in latest_findings
-            if diff_mod.identity_of(f) not in disowned)
+            if (f.get("lifecycle_state") or "open")
+            in ("open", "reappeared")
+            and diff_mod.identity_of(f) not in disowned)
 
     cases = {status: 0 for status in _CASE_STATUSES}
     closed = 0

@@ -49,7 +49,7 @@ reconciled state; nothing in this file rests on UI copy alone.*
 | Area | Repository | Production | Match? | Evidence | Action |
 |---|---|---|---|---|---|
 | Authentication | Argon2id, sessions, TOTP, reset, passkeys (`accounts/`) | Live; register/login/TOTP/reset E2Es passed; passkey sign-in options live (challenge, rpId `leakguard-hh8e.onrender.com`, UV required, empty allowCredentials); v2.1 reconciliation E2E (register → login → me → delete) passed 2026-10-07 | YES | Stage S3/S8 production checks + Batch D1 live check + v2.1 reconciliation sweep (parent-verified 2026-10-07) | None |
-| Database | Migrations `0001`–`0011`, Neon Postgres (`db/`) | Live; health reports `db: "ok"` on production and staging; app connects as least-privilege role `leakguard_app`, migrations via `MIGRATION_DATABASE_URL` | YES | Production health + every account-stage E2E + Batch A.1 deploy logs | None |
+| Database | Migrations `0001`–`0012`, Neon Postgres (`db/`) | Live; health reports `db: "ok"` on production and staging; app connects as least-privilege role `leakguard_app`, migrations via `MIGRATION_DATABASE_URL` | YES | Production health + every account-stage E2E + Batch A.1 deploy logs | None |
 | Monitoring | Scheduler + diff + timeline (`monitoring/`) | Live; cadence settings + timeline verified | YES | Stage S8 production check | None |
 | Notifications | Ledger + Brevo lane (`monitoring/notify.py`) | Live; real reset email delivered via Brevo and completed end-to-end | YES | Stage S8 email-lane proof (parent-verified) | None |
 | Admin | Counts-only overview + audit (`accounts/admin.py`) | Live; non-admins get 404, admin sees counts only, no email strings in output | YES | Stage S11 production check (15/15) | None |
@@ -90,7 +90,7 @@ reconciled state; nothing in this file rests on UI copy alone.*
 - **Services:** in-process workers — scan worker (SKIP LOCKED, hand-started jobs claimed before scheduled ones, backoff, dead after 3 attempts), remediation worker (5 concurrent, 40s probe budget), monitoring scheduler (hourly tick, period-bucketed idempotency, paused users skipped), retention worker (daily; its loop also hosts the broker source sweep — SSRF-guarded re-fetch + hash compare of every broker opt-out page, `remediation/source_checks.py`)
 - **Providers:** XposedOrNot (email breaches), HIBP Pwned Passwords (k-anonymity), DuckDuckGo discovery, username presence (13 platforms), domain intel (Cloudflare DoH + crt.sh); MockProvider behind `LEAKGUARD_PROVIDERS=mock`, always flagged
 - **Database models:** users, sessions, consents, password_reset_tokens, identifiers, domains, scan_jobs, findings, finding_feedback, broker_source_checks, brokers, remediation_cases, remediation_attempts, verification_checks, user_settings, notifications, households, household_members, audit_log, api_tokens, passkey_credentials, webauthn_challenges
-- **Migrations:** `db/migrations/0001_vault.sql` … `0011_passkeys.sql`, applied by an idempotent runner at startup
+- **Migrations:** `db/migrations/0001_vault.sql` … `0011_passkeys.sql`, `0012_finding_lifecycle.sql`, applied by an idempotent runner at startup
 - **Frontend pages:** one SPA — Quick Scan, Action Center (signed-in home), Privacy Center (identifiers, consents, household, monitoring, timeline, notifications, API tokens, exposure map, export, deletion), human queue, `/trust`, `/reset`
 - **Browser automation:** Playwright probe locally only (`browser_probe.py`, subprocess-isolated); the server never runs a browser — walled brokers classify from HTTP evidence and the attempt trail records `browser: skipped on_server`
 - **External dependencies:** Render, Neon, Brevo (email), XposedOrNot, Have I Been Pwned, DuckDuckGo, Cloudflare DoH, crt.sh, UptimeRobot
@@ -160,8 +160,8 @@ taxonomy (owner-ordered audit issue, 2026-10-07):
 
 | Status | Count |
 |---|---|
-| DONE | 131 |
-| PARTIAL | 31 |
+| DONE | 132 |
+| PARTIAL | 30 |
 | MISSING | 1 |
 | INSECURE | 0 |
 | UNVERIFIED | 4 |

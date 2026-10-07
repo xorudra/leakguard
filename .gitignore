@@ -3,3 +3,5 @@ __pycache__/
 .env
 *.log
 .neon-database-url
+.vault-master-key
+.vault-lookup-key

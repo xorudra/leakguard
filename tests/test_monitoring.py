@@ -498,7 +498,9 @@ class TestMonitoringDb(PgClassMixin, LaneMixin, AccountMixin,
         self.assertEqual(len(result["findings"]), 1)
         resolved = self.notifications_for(uid, "finding_resolved")
         self.assertEqual(len(resolved), 1)
-        self.assertEqual(resolved[0]["status"], "sent")
+        # Per-finding notices are in-app only now — email is the
+        # once-per-cycle summary, never one email per finding.
+        self.assertEqual(resolved[0]["status"], "in_app_only")
         self.assertEqual(resolved[0]["payload"]["source_name"],
                          "people-fixture.example.com")
         self.assertTrue(resolved[0]["dedupe_key"].startswith("resolved:"))
@@ -507,6 +509,9 @@ class TestMonitoringDb(PgClassMixin, LaneMixin, AccountMixin,
         self.assertEqual(summaries[1]["payload"]["resolved_count"], 1)
         self.assertEqual(summaries[1]["payload"]["new_count"], 0)
         self.assertEqual(self.notifications_for(uid, "new_finding"), [])
+        # Job 2 emailed ONLY its summary: 2 transport calls total
+        # (one summary per cycle), none for the resolved finding.
+        self.assertEqual(len(self.transport.calls_to(email)), 2)
 
         # Job 3 identical to job 2: no changes, still one summary.
         job3 = self.create_job(cookie)
@@ -538,14 +543,16 @@ class TestMonitoringDb(PgClassMixin, LaneMixin, AccountMixin,
 
         news = self.notifications_for(uid, "new_finding")
         self.assertEqual(len(news), 5)  # the cap, exactly
-        self.assertTrue(all(r["status"] == "sent" for r in news))
+        # Per-finding notices are in-app only, consent or not.
+        self.assertTrue(all(r["status"] == "in_app_only" for r in news))
         summaries = self.notifications_for(uid, "scan_summary")
         self.assertEqual(len(summaries), 2)
         payload = summaries[1]["payload"]
         self.assertEqual(payload["new_count"], 6)
         self.assertEqual(payload["extra_new_count"], 1)
-        # 5 findings + 1 summary emailed for job 2 (plus job 1's).
-        self.assertEqual(len(self.transport.calls_to(email)), 1 + 6)
+        # Job 2 emailed ONLY its summary (plus job 1's summary):
+        # exactly one email per cycle, never one per finding.
+        self.assertEqual(len(self.transport.calls_to(email)), 1 + 1)
 
     # ---------- consent off: in-app only, lane untouched ----------
     def test_notifications_consent_off_in_app_only(self):
@@ -928,7 +935,7 @@ class TestMonitoringServiceDb(PgClassMixin, LaneMixin, AccountMixin,
         events.handle_scan_completed(job1)
         news = self.notifications_for(uid, "new_finding")
         self.assertEqual(len(news), 1)
-        self.assertEqual(news[0]["status"], "sent")
+        self.assertEqual(news[0]["status"], "in_app_only")
         calls_after_first = len(self.transport.calls_to(email))
 
         job2 = self.insert_job(uid, now - timedelta(days=1))
@@ -944,10 +951,11 @@ class TestMonitoringServiceDb(PgClassMixin, LaneMixin, AccountMixin,
         self.assertEqual(news[0]["dedupe_key"], news[1]["dedupe_key"])
         self.assertEqual(news[1]["status"], "suppressed")
         # The suppressed repeat produced no email: after the first
-        # pass, the lane saw job2's resolved + summary and job3's
-        # summary — and nothing for the suppressed re-finding.
+        # pass, the lane saw job2's summary and job3's summary —
+        # the resolved notice is in-app only, and the suppressed
+        # re-finding emailed nothing. One email per cycle.
         self.assertEqual(len(self.transport.calls_to(email)),
-                         calls_after_first + 3)
+                         calls_after_first + 2)
 
         # The hook is idempotent per job: reprocessing changes nil.
         before = len(self.notifications_for(uid))

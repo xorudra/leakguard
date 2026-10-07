@@ -36,9 +36,19 @@ Rules:
   the user still owns behave exactly as before.
 * The hook is idempotent per job: the summary's dedupe key is
   'summary:<job id>', and a job that already has one is skipped.
-* Delivery honours the 'notifications' consent inside
-  notify.create_notification (mode "auto"): no consent, no email —
-  the rows land as in_app_only.
+* Delivery split (the inbox rule): per-finding notices are
+  IN-APP ONLY — written through
+  notify.create_notifications_batch in a single transaction,
+  never emailed, whatever the consent. Email for a cycle is
+  the once-per-cycle scan_summary, still created via
+  notify.create_notification (mode "auto"), so the
+  'notifications' consent governs the digest: no consent, no
+  email — the summary row lands as in_app_only. One finding
+  must never mean one email: a single large cycle would
+  otherwise burn the free lane's daily quota (~215 emails for
+  a 214-finding cycle against Brevo's 300/day) and bury the
+  inbox. If the batch write fails, the hook falls back to the
+  per-item loop (mode "auto") so the ledger is still written.
 """
 
 from db import pool
@@ -219,22 +229,52 @@ def handle_scan_completed(job_id):
     created = []
     emitted_new = 0
     if not baseline:
-        for finding in notifiable_new[:NEW_FINDING_CAP]:
-            try:
-                created.append(notify.create_notification(
-                    user_id, "new_finding", _finding_payload(finding),
-                    dedupe_key="new:" + diff.identity_hash(finding)))
-                emitted_new += 1
-            except Exception:
-                pass  # one bad notice must not sink the rest
-        for finding in resolved_findings:
-            try:
-                created.append(notify.create_notification(
-                    user_id, "finding_resolved",
-                    _finding_payload(finding),
-                    dedupe_key="resolved:" + diff.identity_hash(finding)))
-            except Exception:
-                pass
+        # Per-finding notices are in-app only (see the module
+        # docstring): one batch write for the whole cycle. The
+        # per-item fallback below preserves the old path —
+        # including its mode "auto" delivery — for the day the
+        # batch itself fails.
+        new_items = [
+            {"kind": "new_finding",
+             "payload": _finding_payload(finding),
+             "dedupe_key": "new:" + diff.identity_hash(finding)}
+            for finding in notifiable_new[:NEW_FINDING_CAP]]
+        resolved_items = [
+            {"kind": "finding_resolved",
+             "payload": _finding_payload(finding),
+             "dedupe_key": "resolved:" + diff.identity_hash(finding)}
+            for finding in resolved_findings]
+        batch = None
+        try:
+            batch = notify.create_notifications_batch(
+                user_id, new_items + resolved_items)
+        except Exception as exc:
+            from core import logging_setup
+
+            logging_setup.log_error(
+                None, "notification batch failed, falling back to"
+                " per-item writes: " + type(exc).__name__)
+        if batch is not None:
+            created.extend(batch)
+            emitted_new = len(new_items)
+        else:
+            for finding in notifiable_new[:NEW_FINDING_CAP]:
+                try:
+                    created.append(notify.create_notification(
+                        user_id, "new_finding",
+                        _finding_payload(finding),
+                        dedupe_key="new:" + diff.identity_hash(finding)))
+                    emitted_new += 1
+                except Exception:
+                    pass  # one bad notice must not sink the rest
+            for finding in resolved_findings:
+                try:
+                    created.append(notify.create_notification(
+                        user_id, "finding_resolved",
+                        _finding_payload(finding),
+                        dedupe_key="resolved:" + diff.identity_hash(finding)))
+                except Exception:
+                    pass
 
     reappeared = 0
     if not baseline:

@@ -171,3 +171,36 @@ strategy revisited (pooler transaction mode, fewer round trips
 per request) and, only if reads dominate, a read replica. Each
 step past the first is a project, not a config flip, and none is
 claimed as done.
+
+### Live staging measurements (2026-10-08)
+
+The first live numbers for the P2-B lifecycle bulk write,
+measured on the staging service (Render free, Oregon) against
+its Neon branch database (Singapore) — the production-shaped
+link the local bench above cannot reproduce:
+
+* **Lifecycle convergence after the set-based writer:** a
+  214-finding cycle's stored states had already flipped at the
+  first poll ~10.1 s after the follow-up job completed, down
+  from up to ~60 s with the per-identity writer.
+* **Residual — birth stamps on a cold database:** on the first
+  (baseline) cycle, the findings' lifecycle stamps landed
+  ~47 s after the job's finished_at. The writer itself is 5
+  statements; the delay sits in the completion hook's
+  pre-apply reads, each opening a fresh connection over the
+  trans-Pacific link to a cold Neon compute. Connection churn
+  — item 2 of the breaks-first list above — is the confirmed
+  residual bottleneck: connection-per-operation remains the
+  architecture's known scaling tax.
+* **Notification tail (pre-fix):** the same hook then wrote
+  per-finding ledger rows one connection at a time, ~3.5 s per
+  notice on the no-lane branch — and on the consented branch
+  each per-finding notice was also an EMAIL: ~215 emails for
+  one 214-finding cycle against Brevo's free 300/day quota.
+  That defect is removed by the inbox rule (2026-10-08):
+  per-finding notices are in-app only, written by
+  notify.create_notifications_batch in one transaction, and
+  email is the once-per-cycle scan_summary digest.
+* **Post-fix live timing:** _to be filled in after the staging
+  re-deploy of the batch change — deliberately left blank
+  rather than estimated._

@@ -1777,7 +1777,7 @@ const CONSENT_INFO = [
   ["scanning", "Scanning", "Run breach scans for my saved details when I ask."],
   ["monitoring", "Monitoring", "Re-check my saved details regularly and tell me when a new leak appears."],
   ["automated_remediation", "Automatic removal", "Submit removal requests to data brokers for me, without asking me each time."],
-  ["notifications", "Notifications", "Email me when something important changes — a new leak found, a removal finished."],
+  ["notifications", "Notifications", "Email me when something important changes — one summary email per check with any new leaks in it, and a note when a removal finishes."],
 ];
 
 function renderConsents(state) {

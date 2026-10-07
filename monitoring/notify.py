@@ -1,8 +1,8 @@
 """Notification ledger + the email lane (spec Phases 44, 45, 99).
 
-create_notification() is the single entry point. It ALWAYS writes
-the ledger row first (migration 0006) and only then decides what
-"delivery" means for this row:
+create_notification() is the entry point for a single
+notification. It ALWAYS writes the ledger row first (migration
+0006) and only then decides what "delivery" means for this row:
 
 * dedupe — when a dedupe_key is given and a non-suppressed row with
   the same (user, dedupe_key) exists from the last 7 days, the new
@@ -20,6 +20,21 @@ the ledger row first (migration 0006) and only then decides what
   delivered is recorded as unsent, NEVER as sent.
 * lane refuses / errors   -> 'failed'. Only a 2xx from Brevo flips
   a row to 'sent' (with sent_at).
+
+create_notifications_batch() is the bulk ledger writer for
+PER-FINDING notices (new_finding / finding_resolved from the
+scan-completion hook). Those rows are ALWAYS 'in_app_only' —
+never emailed, whatever the consent or the lane. Email for a
+monitoring cycle is the one scan_summary digest, created via
+create_notification() above. Why: one finding must never mean
+one email. A single 214-finding cycle would otherwise send
+~215 emails against the Brevo free tier's 300/day quota and
+bury the user's inbox; the digest carries the same totals.
+The batch also fixes the cost shape: one connection, one
+transaction — one per-user advisory lock, one dedupe select,
+one multi-row insert — instead of a fresh connection and
+several round trips per finding (~3.5 s each over the
+production link, measured 2026-10-08; docs/PERFORMANCE.md).
 
 The lane is Brevo's HTTP API (free tier), configured purely by
 environment: BREVO_API_KEY, NOTIFY_FROM_EMAIL, NOTIFY_FROM_NAME
@@ -254,6 +269,15 @@ def _dedupe_lock_key(user_id, dedupe_key):
     return int.from_bytes(digest[:8], "big", signed=True)
 
 
+def _user_lock_key(user_id):
+    """Advisory-lock key serializing one user's batch writes —
+    same derivation as _dedupe_lock_key (sha256, first 8 bytes,
+    signed) over a batch-scoped string."""
+    digest = hashlib.sha256(
+        ("notifications-batch|%s" % user_id).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
 def _insert_row(conn, user_id, kind, dedupe_key, payload, status):
     row = conn.execute(
         "INSERT INTO notifications (user_id, kind, dedupe_key,"
@@ -323,3 +347,80 @@ def create_notification(user_id, kind, payload, dedupe_key=None,
                 "UPDATE notifications SET status = 'failed'"
                 " WHERE id = %s", (row_id,))
     return {"id": row_id, "kind": kind, "status": final}
+
+
+def create_notifications_batch(user_id, items):
+    """Record many IN-APP-ONLY notifications in one transaction.
+
+    items is a list of {"kind", "payload", "dedupe_key"} dicts
+    (dedupe_key may be None or absent). Every surviving item is
+    recorded 'in_app_only'; an item whose dedupe_key already has
+    a non-suppressed row inside DEDUPE_WINDOW_DAYS — or repeats
+    a surviving key from earlier in the same batch — is recorded
+    'suppressed', exactly as create_notification() records it.
+    No email is ever sent from here: per-finding notices are
+    in-app only by design (see the module docstring); email for
+    a cycle is the scan_summary digest via create_notification().
+
+    One connection, one transaction: one advisory lock for the
+    user, one dedupe SELECT, one multi-row INSERT. Returns
+    [{"id", "kind", "status"}] in input order — the same shape
+    create_notification() returns for a single row.
+    """
+    items = list(items or [])
+    for item in items:
+        if item.get("kind") not in KINDS:
+            raise ValueError(
+                "unknown notification kind: %r" % (item.get("kind"),))
+    if not items:
+        return []
+
+    keys = []
+    seen = set()
+    for item in items:
+        key = item.get("dedupe_key")
+        if key and key not in seen:
+            seen.add(key)
+            keys.append(key)
+
+    with pool.connection() as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(%s)",
+                     (_user_lock_key(user_id),))
+        existing = set()
+        if keys:
+            rows = conn.execute(
+                "SELECT DISTINCT dedupe_key FROM notifications"
+                " WHERE user_id = %s AND dedupe_key = ANY(%s)"
+                " AND status <> 'suppressed'"
+                " AND created_at > now() - (%s || ' days')::interval",
+                (user_id, keys, str(DEDUPE_WINDOW_DAYS)),
+            ).fetchall()
+            existing = {row["dedupe_key"] for row in rows}
+
+        surviving = set()
+        statuses = []
+        for item in items:
+            key = item.get("dedupe_key")
+            if key and (key in existing or key in surviving):
+                statuses.append("suppressed")
+            else:
+                if key:
+                    surviving.add(key)
+                statuses.append("in_app_only")
+
+        placeholders = []
+        params = []
+        for item, status in zip(items, statuses):
+            placeholders.append("(%s, %s, %s, %s::jsonb, %s)")
+            params.extend([
+                user_id, item["kind"], item.get("dedupe_key"),
+                json.dumps(item.get("payload") or {}), status])
+        rows = conn.execute(
+            "INSERT INTO notifications (user_id, kind, dedupe_key,"
+            " payload, status) VALUES "
+            + ", ".join(placeholders) + " RETURNING id",
+            tuple(params),
+        ).fetchall()
+    return [{"id": str(row["id"]), "kind": item["kind"],
+             "status": status}
+            for row, item, status in zip(rows, items, statuses)]

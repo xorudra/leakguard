@@ -7,7 +7,6 @@
 ### 🌐 Live Website: [leakguard-hh8e.onrender.com](https://leakguard-hh8e.onrender.com)
 
 [![Live Demo](https://img.shields.io/badge/▶_Live_Demo-leakguard--hh8e.onrender.com-2ea043?style=for-the-badge)](https://leakguard-hh8e.onrender.com)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Dependencies](https://img.shields.io/badge/Dependencies-Zero-important?style=for-the-badge)
 ![Cost](https://img.shields.io/badge/Cost-₹0_Free-success?style=for-the-badge)
@@ -104,6 +103,6 @@ Environment: `PORT` (default 8000) · `HOST` (default 0.0.0.0)
 
 <div align="center">
 
-**License: MIT** · Made as a sister project to [SiteGuard](https://github.com/xorudra/siteguard)
+**© 2026 Rudra Singh — All rights reserved** · Made as a sister project to [SiteGuard](https://github.com/xorudra/siteguard)
 
 </div>

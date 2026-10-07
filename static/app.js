@@ -43,6 +43,15 @@ function scoreLabel(score) {
 function renderScan(d) {
   $("scanResults").hidden = false;
   $("scoreNum").textContent = d.exposure_score === null ? "–" : d.exposure_score;
+  const ring = $("scoreRing");
+  if (ring) {
+    const s = d.exposure_score;
+    const C = 351.8;
+    ring.style.strokeDashoffset = s === null ? C : String(C * (1 - s / 100));
+    ring.style.stroke = s === null ? "#5b8cff" : s === 0 ? "#2fd68f" : s < 35 ? "#ffb84d" : s < 70 ? "#ff8a5c" : "#ff3d5e";
+    const num = $("scoreNum");
+    num.className = s === null ? "" : s === 0 ? "sev-low" : s < 35 ? "sev-med" : s < 70 ? "sev-high" : "sev-crit";
+  }
   $("scoreText").textContent = scoreLabel(d.exposure_score);
   $("sourceText").textContent = "Sources: " + d.sources.join(" · ");
   const list = $("breachList");
@@ -189,11 +198,17 @@ function renderProgress() {
   const done = vals.filter((v) => v === "removed").length;
   const sent = vals.filter((v) => v === "sent").length;
   $("brokerProgress").textContent = "Progress: " + done + " removed · " + sent + " requested · " + vals.filter((v) => v && v !== "removed" && v !== "sent").length + " other — out of the list below.";
+  const bar = $("brokerBar");
+  if (bar) {
+    const total = (window.__brokerTotal || vals.length || 40);
+    bar.style.width = Math.round(100 * done / Math.max(1, total)) + "%";
+  }
 }
 async function loadBrokers() {
   try {
     const resp = await fetch("/api/brokers");
     const data = await resp.json();
+    window.__brokerTotal = data.brokers.length;
     const statuses = getStatuses();
     const wrap = $("brokerList");
     data.brokers.forEach((b) => {

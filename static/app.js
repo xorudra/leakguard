@@ -61,7 +61,7 @@ function renderScan(d) {
     const s = d.exposure_score;
     const C = 351.8;
     ring.style.strokeDashoffset = s === null ? C : String(C * (1 - s / 100));
-    ring.style.stroke = s === null ? "#5b8cff" : s === 0 ? "#2fd68f" : s < 35 ? "#ffb84d" : s < 70 ? "#ff8a5c" : "#ff3d5e";
+    ring.style.stroke = s === null ? "#4f46e5" : s === 0 ? "#15803d" : s < 35 ? "#b45309" : s < 70 ? "#c2410c" : "#b91c1c";
     const num = $("scoreNum");
     num.className = s === null ? "" : s === 0 ? "sev-low" : s < 35 ? "sev-med" : s < 70 ? "sev-high" : "sev-crit";
   }
@@ -406,7 +406,7 @@ async function probeBroker(broker, btn) {
     lines.forEach((t) => {
       const p = document.createElement("p");
       p.className = "hint";
-      p.style.color = "#c6cdea";
+      p.style.color = "#2c2f36";
       p.textContent = t;
       out.appendChild(p);
     });

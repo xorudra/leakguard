@@ -100,6 +100,49 @@
       <h3 id="probeTitle">Probe result</h3>
       <div id="probeOut"></div>
     </div>
+
+    <div class="letterBox" id="runPanel">
+      <h3>⚡ One-tap removal run</h3>
+      <p class="hint">The agent probes every broker in your plan and sorts them into three groups, so you do
+      as little manual work as possible: one confirm submits every form the agent can fill, email requests open
+      pre-written in your own mail app (brokers require the request to come from <em>your</em> email), and the
+      guided queue walks you through the few that legally need a human — a CAPTCHA, a login, or clicking the
+      confirmation link they email you. Those steps no tool can do for you; anyone claiming otherwise is lying.</p>
+      <div class="rowBtns">
+        <button type="button" id="runAllBtn">Run everything for me</button>
+        <span id="runStatus" class="hint"></span>
+      </div>
+      <div class="progressTrack" id="runTrack" hidden><div id="runBar"></div></div>
+      <div id="runBox" hidden>
+        <h3>✅ Ready — the agent can submit these (<span id="readyCount">0</span>)</h3>
+        <div id="readyList"></div>
+        <label class="confirmRow"><input type="checkbox" id="confirmAll"> I confirm: submit my removal requests to all the brokers above</label>
+        <div class="rowBtns">
+          <button type="button" id="submitAllBtn">Submit all ready</button>
+          <span id="submitAllStatus" class="hint"></span>
+        </div>
+        <h3>✉️ Email requests — one tap each (<span id="emailCount">0</span>)</h3>
+        <p class="hint">Opens your mail app with the erasure letter already written — you just press Send there.</p>
+        <div id="emailList"></div>
+        <h3>✋ Needs you — guided queue (<span id="manualCount">0</span>)</h3>
+        <div id="manualList"></div>
+        <div class="rowBtns">
+          <button type="button" id="queueBtn">Start guided queue</button>
+          <span id="queueStatus" class="hint"></span>
+        </div>
+        <div id="queueBox" hidden>
+          <h3 id="queueTitle">Guided queue</h3>
+          <p id="queueWhy" class="hint"></p>
+          <p>Your details, ready to paste: <code id="queueProfile"></code></p>
+          <div class="rowBtns">
+            <a class="btnLink" id="queueOpen" href="#" target="_blank" rel="noopener">Open opt-out page →</a>
+            <button type="button" id="queueCopy">Copy my details</button>
+            <button type="button" id="queueDone">Done — next</button>
+            <button type="button" id="queueSkip">Skip</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section id="removal" class="card">

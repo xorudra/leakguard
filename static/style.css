@@ -178,6 +178,13 @@ footer a{color:var(--muted)}
 .consentRow .cText span{color:var(--faint);font-size:12.5px;line-height:1.45;display:block;margin-top:2px}
 .consentRow input{width:auto;margin:0;accent-color:var(--green);transform:scale(1.35);flex:none}
 
+/* ---------- action center (Stage S9) ---------- */
+#acScoreText{font-size:16.5px;font-weight:700;margin:0}
+#acChips{margin-top:14px}
+#acChips:empty{margin-top:0}
+#acActionBtn{font-size:15.5px;padding:13px 28px}
+#acActionBtn:disabled{cursor:default}
+
 /* reveal on scroll (JS-added class only) */
 .reveal{opacity:0;transform:translateY(12px)}
 .reveal.in{opacity:1;transform:none;transition:opacity .55s ease,transform .55s cubic-bezier(.22,.8,.3,1)}

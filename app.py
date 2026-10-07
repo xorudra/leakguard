@@ -51,6 +51,7 @@ from accounts import privacy as privacy_service
 from accounts import ratelimit
 from accounts import sessions as sessions_mod
 from core import context, errors, logging_setup, security
+from dashboard import service as action_center_service
 from db import pool as db_pool
 from monitoring import service as monitoring_service
 from providers import registry as providers_registry
@@ -367,6 +368,14 @@ class Handler(BaseHTTPRequestHandler):
                 "events": self._call(monitoring_service.timeline,
                                      user["id"]),
             })
+        if route == "/api/action-center":
+            # The signed-in home (Stage S9): one aggregate read
+            # model — exposure, counts, recent activity and the
+            # single server-computed next action.
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._json(200, self._call(
+                action_center_service.action_center, user["id"]))
         if route == "/api/notifications":
             self._require_accounts()
             user, _token = self._require_user()

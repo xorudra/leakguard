@@ -36,8 +36,37 @@
     </div>
   </section>
 
+  <section id="actionCenter" class="card" hidden>
+    <h2>Action Center</h2>
+    <p class="hint">Full protection at a glance: your exposure, your removals, and the
+    <strong>one</strong> most useful thing to do next — LeakGuard works out which, so you never
+    operate a dashboard to stay protected.</p>
+    <div class="scoreRow">
+      <div class="scoreBox">
+        <svg width="132" height="132" viewBox="0 0 132 132">
+          <circle class="ringBg" cx="66" cy="66" r="56" fill="none" stroke-width="11"/>
+          <circle class="ringFg" id="acScoreRing" cx="66" cy="66" r="56" fill="none" stroke-width="11"
+                  stroke-linecap="round" stroke-dasharray="351.8" stroke-dashoffset="351.8"/>
+        </svg>
+        <div class="scoreCenter"><span id="acScoreNum">–</span><small>Exposure score / 100</small></div>
+      </div>
+      <div>
+        <p id="acScoreText"></p>
+        <p class="hint" id="acCounts"></p>
+      </div>
+    </div>
+    <div id="acChips"></div>
+    <div class="rowBtns">
+      <button type="button" id="acActionBtn">…</button>
+    </div>
+    <p class="hint" id="acActionDetail"></p>
+    <h3>Recent activity</h3>
+    <div id="acRecent"></div>
+  </section>
+
   <section id="account" class="card" hidden>
     <h2>Account</h2>
+    <p><span class="pill">FULL PROTECTION — SAVED DETAILS, REMOVAL, MONITORING</span></p>
     <div id="authForms">
       <p class="hint">An account is optional — the scan above always works without one. An account just
       saves your details <strong>encrypted</strong> so you never type them twice, and unlocks monitoring,
@@ -256,6 +285,12 @@
 
   <section id="scan" class="card">
     <h2><span class="step">1</span> Leak scan</h2>
+    <p><span class="pill">QUICK SCAN — ONE EMAIL ADDRESS, RIGHT NOW</span></p>
+    <p class="hint">No account, nothing stored: type one email address and see its breaches in
+    seconds. For the full protection — your details saved once, removals run for you and
+    monitoring that keeps watch — create the free account above instead. Either way the honest
+    limits below apply: brokers, people-search sites and Google results can be removed; a breach
+    dump already copied to Telegram, dark-web forums or torrents cannot.</p>
     <form id="scanForm">
       <label>Email address *
         <input type="email" id="email" required placeholder="you@example.com" autocomplete="email">

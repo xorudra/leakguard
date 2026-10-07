@@ -708,11 +708,14 @@ function renderAccount() {
     $("acctBtn").textContent = "Sign in";
     $("authForms").hidden = true;
     $("privacyCenter").hidden = true;
+    $("actionCenter").hidden = true;
     $("resetBox").hidden = false;
     return;
   }
   const signedIn = !!meUser;
   $("acctBtn").textContent = signedIn ? "My Privacy Center" : "Sign in";
+  $("actionCenter").hidden = !signedIn;
+  if (signedIn) loadActionCenter();
   $("acctLabel").hidden = !signedIn;
   if (signedIn) $("acctLabel").textContent = meUser.email_masked;
   $("authForms").hidden = signedIn;
@@ -894,6 +897,142 @@ $("pcLogoutBtn").addEventListener("click", async () => {
   $("acStatus").textContent = "Signed out.";
 });
 
+/* ----- action center (Stage S9): the signed-in home -----
+   One aggregate from the server: exposure, counts, recent
+   activity, and next_action — the SINGLE most useful next step,
+   computed server-side so this page stays one glance + one
+   button. The button dispatches to the existing flows below
+   (which re-check consent themselves); it never grants a
+   permission or submits anything on its own. */
+let actionCenterData = null;
+
+async function loadActionCenter() {
+  if (!meUser) return;
+  try {
+    const r = await apiJson("/api/action-center");
+    if (!r.ok) { $("actionCenter").hidden = true; return; }
+    $("actionCenter").hidden = false;
+    renderActionCenter(r.data);
+  } catch (e) {
+    $("actionCenter").hidden = true;
+  }
+}
+
+function renderActionCenter(d) {
+  actionCenterData = d;
+  const exp = d.exposure || {};
+  const num = $("acScoreNum");
+  const ring = $("acScoreRing");
+  const C = 351.8;
+  if (exp.score === null || exp.score === undefined) {
+    num.textContent = "–";
+    num.className = "";
+    ring.style.strokeDashoffset = String(C);
+    ring.style.stroke = "#1ed760";
+    $("acScoreText").textContent =
+      "Not scanned yet — run your first scan and your exposure score lands here.";
+  } else {
+    num.textContent = exp.score;
+    num.className = exp.score === 0 ? "sev-low" : exp.score < 35
+      ? "sev-med" : exp.score < 70 ? "sev-high" : "sev-crit";
+    ring.style.strokeDashoffset = String(C * (1 - exp.score / 100));
+    ring.style.stroke = exp.score === 0 ? "#1ed760" : exp.score < 35
+      ? "#ffa42b" : exp.score < 70 ? "#ff7a45" : "#ff4d6d";
+    let text = (exp.band || "Exposure") + " — score " + exp.score + " / 100";
+    if (exp.delta !== null && exp.delta !== undefined) {
+      text += exp.delta > 0
+        ? " · up " + exp.delta + " since the scan before (worse)"
+        : exp.delta < 0
+          ? " · down " + Math.abs(exp.delta) + " since the scan before (better)"
+          : " · unchanged since the scan before";
+    }
+    $("acScoreText").textContent = text + ".";
+  }
+  const counts = [
+    d.counts.identifiers + (d.counts.identifiers === 1
+      ? " saved detail" : " saved details"),
+  ];
+  if (exp.findings_total) {
+    counts.push(exp.findings_total + (exp.findings_total === 1
+      ? " exposure" : " exposures") + " in the latest scan");
+  }
+  $("acCounts").textContent = counts.join(" · ");
+
+  const chips = $("acChips");
+  chips.innerHTML = "";
+  Object.keys(REMOVAL_LABELS).forEach((s) => {
+    const n = (d.counts.cases || {})[s] || 0;
+    if (!n) return;
+    const chip = document.createElement("span");
+    chip.className = "tag";
+    chip.textContent = n + " · " + REMOVAL_LABELS[s];
+    chips.appendChild(chip);
+  });
+
+  const na = d.next_action || {};
+  const btn = $("acActionBtn");
+  btn.textContent = na.label || "…";
+  btn.disabled = na.kind === "scanning" || na.kind === "all_clear";
+  $("acActionDetail").textContent = na.detail || "";
+
+  const wrap = $("acRecent");
+  wrap.innerHTML = "";
+  const events = d.recent || [];
+  if (!events.length) {
+    wrap.innerHTML = "<p class='hint'>Nothing yet — your first scan will start the story.</p>";
+  } else {
+    events.forEach((ev) => {
+      const row = document.createElement("div");
+      row.className = "idRow";
+      const left = document.createElement("span");
+      left.textContent = ev.summary;
+      const when = document.createElement("span");
+      when.className = "hint";
+      when.textContent = _fmtWhen(ev.at);
+      row.appendChild(left); row.appendChild(when);
+      wrap.appendChild(row);
+    });
+  }
+}
+
+function openAccountPanel() {
+  $("account").hidden = false;
+}
+
+function focusConsentToggle(purpose) {
+  const t = document.querySelector(
+    "#consentList input[data-purpose='" + purpose + "']");
+  if (t) {
+    t.scrollIntoView({ behavior: "smooth", block: "center" });
+    t.focus();
+  }
+}
+
+$("acActionBtn").addEventListener("click", () => {
+  const kind = (actionCenterData && actionCenterData.next_action
+    && actionCenterData.next_action.kind) || "";
+  if (kind === "add_details") {
+    openAccountPanel();
+    $("idValue").scrollIntoView({ behavior: "smooth", block: "center" });
+    $("idValue").focus({ preventScroll: true });
+  } else if (kind === "scan_now") {
+    openAccountPanel();
+    $("fullScanBtn").click();
+  } else if (kind === "remove_all") {
+    openAccountPanel();
+    $("removalBtn").click();
+  } else if (kind === "review_queue") {
+    openAccountPanel();
+    $("removalQueue").scrollIntoView({ behavior: "smooth", block: "start" });
+  } else if (kind === "enable_removal") {
+    openAccountPanel();
+    focusConsentToggle("automated_remediation");
+  } else if (kind === "enable_monitoring") {
+    openAccountPanel();
+    focusConsentToggle("monitoring");
+  }
+});
+
 /* ----- saved details (identifiers) ----- */
 async function loadIdentifiers() {
   if (!meUser) return;
@@ -929,7 +1068,7 @@ async function loadIdentifiers() {
         const d = await apiJson("/api/identifiers/" + rec.id, {
           method: "DELETE", headers: { "X-Requested-With": "fetch" },
         });
-        if (d.ok) { loadIdentifiers(); $("idStatus").textContent = "Removed."; }
+        if (d.ok) { loadIdentifiers(); loadActionCenter(); $("idStatus").textContent = "Removed."; }
         else { $("idStatus").textContent = errMsg(d.data, "Remove failed"); rm.disabled = false; }
       });
       row.appendChild(left); row.appendChild(rm);
@@ -951,6 +1090,7 @@ $("idAddBtn").addEventListener("click", async () => {
     $("idValue").value = "";
     $("idStatus").textContent = "Saved ✓ (stored encrypted, shown masked).";
     loadIdentifiers();
+    loadActionCenter();
   } else {
     $("idStatus").textContent = errMsg(r.data, "Could not save that detail");
   }
@@ -1118,6 +1258,7 @@ function renderConsents(state) {
         $("consentStatus").textContent = "Saved — " + title + (toggle.checked ? " is ON." : " is OFF.");
         renderConsents(r.data.consents);
         syncMonitoringConsent(r.data.consents);
+        loadActionCenter();
       } else {
         toggle.checked = !toggle.checked;
         toggle.disabled = false;
@@ -1324,6 +1465,7 @@ function pollFullScan(jobId, tries) {
         $("fullScanStatus").textContent = "Scan complete.";
         $("fullScanBtn").disabled = false;
         renderFullScan(r.data);
+        loadActionCenter();
         return;
       }
       if (job.status === "dead") {
@@ -1504,6 +1646,7 @@ $("removalBtn").addEventListener("click", async () => {
       : "Your cases are already open — LeakGuard is working through them.";
     await loadRemoval();
     scheduleRemovalPoll();
+    loadActionCenter();
   } catch (err) {
     status.textContent = err.message;
   } finally {

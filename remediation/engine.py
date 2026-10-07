@@ -33,6 +33,8 @@ memory; nothing here logs identifier values.
 """
 
 import re
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -63,12 +65,138 @@ class Executor:
         raise NotImplementedError
 
 
+def _probe_inconclusive(result):
+    """True when a fast (HTTP) probe result cannot settle the case:
+    the broker was unreachable, or a page loaded with no form and no
+    definitive blocker. CAPTCHA and login blockers are definitive —
+    human steps at every layer, never routed around — as are a found
+    form (interpret_probe can judge it) and a fillable form."""
+    blockers = result.get("blockers") or []
+    if any("CAPTCHA" in b for b in blockers):
+        return False
+    if any("account login" in b for b in blockers):
+        return False
+    if result.get("fillable"):
+        return False
+    if result.get("forms"):
+        return False
+    return True
+
+
 class AgentExecutor(Executor):
-    """Production executor over agent.py (the anonymous engine)."""
+    """Production executor over agent.py (the anonymous engine).
+
+    Probe strategy (Stage 7.1 — speed): the anonymous engine's full
+    chain (agent.probe_with_browser_fallback) always paid for the
+    relay layer plus a browser step that cannot run on the server at
+    all, so a walled broker burned ~2 minutes of relay retries per
+    case. Remediation probes are staged instead:
+
+    1. fast probe (agent.probe_broker) — one HTTP fetch;
+    2. ONE relay-reader escalation, only when the fast probe is
+       inconclusive, merged with exactly the rules of the fallback
+       chain's layer 2 — but WITHOUT the browser step (Playwright
+       cannot run on Render; attempting it per case wastes time and
+       the skip is recorded in the trail);
+    3. a per-case SOFT budget (default ~50s of probing): if the
+       relay outruns the remaining budget it is abandoned and the
+       best evidence so far is classified by the unchanged
+       interpret_probe — a 403 seen at any point still lands
+       blocked/http_403, persistent unreachability still lands
+       blocked/unreachable.
+
+    Every step appends to probe["probe_trail"], which process_case
+    copies into the probe attempt's detail: the audit trail shows
+    exactly what was tried. Statuses and reasons are unchanged —
+    only the route to the probe result got faster."""
+
+    def __init__(self, probe_budget_seconds=50.0):
+        self.probe_budget_seconds = float(probe_budget_seconds)
 
     def probe(self, profile, broker):
-        return agent_engine.probe_with_browser_fallback(
-            broker["name"], profile)
+        started = time.monotonic()
+        result = agent_engine.probe_broker(broker["name"], profile)
+        if not isinstance(result, dict) or result.get("error"):
+            return result
+        result.setdefault("via", "http")
+        trail = [{
+            "step": "http",
+            "status": result.get("status"),
+            "reachable": bool(result.get("reachable")),
+            "ms": int((time.monotonic() - started) * 1000),
+        }]
+        result["probe_trail"] = trail
+        if not _probe_inconclusive(result):
+            return result
+        remaining = self.probe_budget_seconds - (time.monotonic() - started)
+        if remaining <= 0:
+            trail.append({"step": "relay", "skipped": "probe_budget"})
+        else:
+            relay, timed_out = self._relay_attempt(
+                result["url"], profile, remaining)
+            if timed_out:
+                trail.append({
+                    "step": "relay", "outcome": "budget_exceeded",
+                    "ms": int((time.monotonic() - started) * 1000)})
+            elif relay is None:
+                trail.append({"step": "relay", "outcome": "error"})
+            else:
+                trail.append({
+                    "step": "relay",
+                    "status": relay.get("status"),
+                    "reachable": bool(relay.get("reachable")),
+                    "challenge": bool(relay.get("challenge")),
+                    "forms": len(relay.get("forms") or []),
+                    "ms": int((time.monotonic() - started) * 1000),
+                })
+                self._merge_relay(result, relay)
+        trail.append({"step": "browser", "skipped": "on_server"})
+        return result
+
+    @staticmethod
+    def _relay_attempt(url, profile, timeout):
+        """Run agent.relay_probe in a daemon thread, waiting at most
+        `timeout` seconds. The relay's own retry loop (3 x 45s plus
+        backoff) far exceeds the per-case budget, so a hung relay is
+        abandoned — its thread is a daemon and its late result is
+        discarded. Returns (relay_dict_or_None, timed_out)."""
+        box = {}
+
+        def _run():
+            try:
+                box["relay"] = agent_engine.relay_probe(url, profile)
+            except Exception:
+                box["relay"] = None
+
+        thread = threading.Thread(target=_run, name="leakguard-relay-probe",
+                                  daemon=True)
+        thread.start()
+        thread.join(timeout)
+        if thread.is_alive():
+            return None, True
+        return box.get("relay"), False
+
+    @staticmethod
+    def _merge_relay(result, relay):
+        """Merge a relay result into the fast-probe result with the
+        same rules as layer 2 of agent.probe_with_browser_fallback."""
+        result["relay"] = {"reachable": relay["reachable"],
+                           "challenge": relay["challenge"],
+                           "status": relay["status"],
+                           "title": relay.get("title", "")}
+        if relay["reachable"] and relay["forms"]:
+            result["via"] = "http+relay"
+            result["reachable"] = True
+            result["status"] = result.get("status") or relay["status"]
+            result["forms"] = relay["forms"]
+            if relay["payload_preview"]:
+                result["payload_preview"] = relay["payload_preview"]
+            result["blockers"] = relay["blockers"]
+            result["fillable"] = (bool(result["payload_preview"])
+                                  and not relay["challenge"])
+        else:
+            result["blockers"] = list(dict.fromkeys(
+                result.get("blockers", []) + relay["blockers"]))
 
     def submit(self, profile, broker, probe):
         # Same SSRF guard as POST /api/agent/submit: the form action
@@ -351,6 +479,11 @@ def process_case(case_id, executor=None):
                     else None,
                     "via": probe.get("via") if isinstance(probe, dict)
                     else None}
+    if isinstance(probe, dict) and probe.get("probe_trail"):
+        # The executor's step-by-step trail (Stage 7.1): which probe
+        # layers ran, which were skipped, and what each concluded —
+        # part of the audit record for the probe action.
+        probe_detail["trail"] = probe["probe_trail"]
     if action == "submit":
         probe_word = "fillable"
     elif action == "needs_human":

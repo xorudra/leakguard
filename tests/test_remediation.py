@@ -28,6 +28,7 @@ import json
 import os
 import sys
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -267,6 +268,192 @@ class TestInterpretProbe(unittest.TestCase):
         probe = _probe(forms=[form])
         self.assertEqual(engine_mod.interpret_probe(probe, PROFILE),
                          ("blocked", "form_not_fillable"))
+
+
+# ---------------------------------------------------------------------------
+# Offline: Stage 7.1 executor probe strategy (staged + budgeted)
+# ---------------------------------------------------------------------------
+
+def _fast_probe(**kw):
+    base = {"broker": "Spokeo", "url": "https://www.spokeo.com/optout",
+            "automation": "http_form", "needs": [], "reachable": False,
+            "status": None, "forms": [], "blockers": [],
+            "payload_preview": {}, "fillable": False}
+    base.update(kw)
+    return base
+
+
+_RELAY_FORM = [{
+    "action": "https://www.spokeo.com/optout", "method": "POST",
+    "fields": [{"name": "email", "type": "email", "id": "",
+                "placeholder": ""}],
+    "unmapped_fields": [],
+}]
+
+_FILLABLE_RELAY = {"via": "relay", "reachable": True, "status": 200,
+                   "forms": _RELAY_FORM, "challenge": False,
+                   "payload_preview": {"email": "a@b.co"},
+                   "blockers": [], "title": ""}
+
+
+class TestAgentExecutorProbeStrategy(unittest.TestCase):
+    """The remediation executor's staged probe: fast first, ONE
+    relay escalation only when the fast probe is inconclusive, the
+    browser step never attempted from the server, and a soft budget
+    that abandons a hung relay and classifies from the best evidence
+    via the unchanged interpret_probe."""
+
+    def setUp(self):
+        self.agent = engine_mod.agent_engine
+        self._saved = {
+            name: getattr(self.agent, name)
+            for name in ("probe_broker", "relay_probe", "browser_probe",
+                         "probe_with_browser_fallback")
+        }
+        self.browser_calls = []
+        self.agent.browser_probe = (
+            lambda url: self.browser_calls.append(url))
+
+        def _no_fallback(*args, **kwargs):
+            raise AssertionError("the full fallback chain must not run")
+        self.agent.probe_with_browser_fallback = _no_fallback
+
+    def tearDown(self):
+        for name, fn in self._saved.items():
+            setattr(self.agent, name, fn)
+
+    def _executor(self, fast, relay, budget=30.0):
+        calls = {"relay": []}
+        self.agent.probe_broker = lambda name, profile=None: dict(fast)
+
+        def _relay(url, profile=None):
+            calls["relay"].append(url)
+            return relay(url, profile) if callable(relay) else relay
+        self.agent.relay_probe = _relay
+        executor = engine_mod.AgentExecutor(probe_budget_seconds=budget)
+        return executor, calls
+
+    def test_fillable_fast_probe_never_escalates(self):
+        executor, calls = self._executor(
+            _fast_probe(reachable=True, status=200, fillable=True,
+                        forms=FILLABLE_FORM,
+                        payload_preview={"email": "a@b.co"}),
+            relay=_FILLABLE_RELAY)
+        result = executor.probe(PROFILE, {"name": "Spokeo"})
+        self.assertTrue(result["fillable"])
+        self.assertEqual(calls["relay"], [])
+        self.assertEqual([t["step"] for t in result["probe_trail"]],
+                         ["http"])
+        self.assertEqual(self.browser_calls, [])
+
+    def test_captcha_fast_probe_never_escalates(self):
+        executor, calls = self._executor(
+            _fast_probe(reachable=True, status=200,
+                        blockers=["CAPTCHA on the page — a human must "
+                                  "solve this step"]),
+            relay=_FILLABLE_RELAY)
+        result = executor.probe(PROFILE, {"name": "Spokeo"})
+        self.assertEqual(calls["relay"], [])
+        self.assertEqual(engine_mod.interpret_probe(result, PROFILE),
+                         ("needs_human", "captcha"))
+
+    def test_form_found_fast_probe_never_escalates(self):
+        form = {"action": "https://www.spokeo.com/optout",
+                "method": "POST",
+                "fields": [{"name": "xyz", "id": "", "placeholder": "",
+                            "type": "text"}],
+                "unmapped_fields": ["xyz"]}
+        executor, calls = self._executor(
+            _fast_probe(reachable=True, status=200, forms=[form]),
+            relay=_FILLABLE_RELAY)
+        result = executor.probe(PROFILE, {"name": "Spokeo"})
+        self.assertEqual(calls["relay"], [])
+        self.assertEqual(engine_mod.interpret_probe(result, PROFILE),
+                         ("blocked", "form_not_fillable"))
+
+    def test_hung_relay_is_abandoned_at_budget_unreachable(self):
+        def hang(url, profile=None):
+            time.sleep(10)
+            return _FILLABLE_RELAY
+        executor, calls = self._executor(
+            _fast_probe(blockers=["Page unreachable from this server "
+                                  "right now"]),
+            relay=hang, budget=0.3)
+        started = time.monotonic()
+        result = executor.probe(PROFILE, {"name": "Spokeo"})
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 3.0)  # the 10s hang was abandoned
+        self.assertEqual(len(calls["relay"]), 1)
+        # Best evidence wins: persistent unreachability is still
+        # blocked/unreachable via the unchanged transitions.
+        self.assertEqual(engine_mod.interpret_probe(result, PROFILE),
+                         ("blocked", "unreachable"))
+        trail = {t["step"]: t for t in result["probe_trail"]}
+        self.assertEqual(trail["relay"]["outcome"], "budget_exceeded")
+        self.assertEqual(trail["browser"]["skipped"], "on_server")
+        self.assertEqual(self.browser_calls, [])
+
+    def test_hung_relay_keeps_the_403_classification(self):
+        def hang(url, profile=None):
+            time.sleep(10)
+            return _FILLABLE_RELAY
+        executor, calls = self._executor(
+            _fast_probe(status=403,
+                        blockers=["Site answered HTTP 403 to a script "
+                                  "(bot protection or moved page)"]),
+            relay=hang, budget=0.3)
+        result = executor.probe(PROFILE, {"name": "Spokeo"})
+        self.assertEqual(len(calls["relay"]), 1)
+        # A 403 seen at any point is still blocked/http_403.
+        self.assertEqual(engine_mod.interpret_probe(result, PROFILE),
+                         ("blocked", "http_403"))
+
+    def test_budget_spent_means_no_relay_attempt(self):
+        executor, calls = self._executor(
+            _fast_probe(blockers=["Page unreachable from this server "
+                                  "right now"]),
+            relay=_FILLABLE_RELAY, budget=0.0)
+        result = executor.probe(PROFILE, {"name": "Spokeo"})
+        self.assertEqual(calls["relay"], [])
+        trail = {t["step"]: t for t in result["probe_trail"]}
+        self.assertEqual(trail["relay"]["skipped"], "probe_budget")
+        self.assertEqual(trail["browser"]["skipped"], "on_server")
+        self.assertEqual(engine_mod.interpret_probe(result, PROFILE),
+                         ("blocked", "unreachable"))
+
+    def test_relay_challenge_keeps_fast_probe_evidence(self):
+        relay = {"via": "relay", "reachable": False, "status": None,
+                 "forms": [], "challenge": True, "payload_preview": {},
+                 "blockers": ["Cloudflare challenge page even via the "
+                              "relay reader — this site only talks to "
+                              "real residential browsers"],
+                 "title": ""}
+        executor, calls = self._executor(
+            _fast_probe(status=403,
+                        blockers=["Site answered HTTP 403 to a script "
+                                  "(bot protection or moved page)"]),
+            relay=relay)
+        result = executor.probe(PROFILE, {"name": "Spokeo"})
+        self.assertEqual(len(calls["relay"]), 1)
+        self.assertFalse(result["fillable"])
+        self.assertEqual(engine_mod.interpret_probe(result, PROFILE),
+                         ("blocked", "http_403"))
+
+    def test_relay_fillable_form_escalates_to_submit(self):
+        executor, calls = self._executor(
+            _fast_probe(blockers=["Page unreachable from this server "
+                                  "right now"]),
+            relay=_FILLABLE_RELAY)
+        result = executor.probe(PROFILE, {"name": "Spokeo"})
+        self.assertEqual(calls["relay"], ["https://www.spokeo.com/optout"])
+        self.assertTrue(result["fillable"])
+        self.assertEqual(result["via"], "http+relay")
+        self.assertEqual(engine_mod.interpret_probe(result, PROFILE),
+                         ("submit", None))
+        steps = [t["step"] for t in result["probe_trail"]]
+        self.assertEqual(steps, ["http", "relay", "browser"])
+        self.assertEqual(result["probe_trail"][2]["skipped"], "on_server")
+        self.assertEqual(self.browser_calls, [])
 
 
 # ---------------------------------------------------------------------------
@@ -756,6 +943,143 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
             self.assertEqual(body["error"]["code"], "not_verifiable")
         finally:
             engine_mod.AgentExecutor = orig_executor
+
+    # ---------- Stage 7.1: staged probe escalation ----------
+    def test_relay_escalation_submits_and_audits_trail(self):
+        cookie, _uid, _acct = self.register()
+        _name, email = self.add_full_profile(cookie, self.uniq())
+        self.set_consent(cookie, "automated_remediation", True)
+        self.run_removal(cookie)
+        agent = engine_mod.agent_engine
+        saved = {n: getattr(agent, n) for n in
+                 ("probe_broker", "relay_probe", "browser_probe",
+                  "submit_form", "probe_with_browser_fallback")}
+        relay_urls = []
+        submit_actions = []
+        browser_hits = []
+        brokers_by_name = {b["name"]: b for b in agent.load_brokers()}
+
+        def fast(name, profile=None):
+            return {"broker": name,
+                    "url": brokers_by_name[name]["optout_url"],
+                    "automation": "http_form", "needs": [],
+                    "reachable": False, "status": None, "forms": [],
+                    "blockers": ["Page unreachable from this server "
+                                 "right now"],
+                    "payload_preview": {}, "fillable": False}
+
+        def relay(url, profile=None):
+            relay_urls.append(url)
+            return {"via": "relay", "reachable": True, "status": 200,
+                    "forms": FILLABLE_FORM, "challenge": False,
+                    "payload_preview": {
+                        "email": (profile or {}).get("email", "")},
+                    "blockers": [], "title": ""}
+
+        def submit(action, method, payload, timeout=15):
+            submit_actions.append(action)
+            return {"ok": True, "status": 200}
+
+        def _no_fallback(*args, **kwargs):
+            raise AssertionError("the full fallback chain must not run")
+
+        agent.probe_broker = fast
+        agent.relay_probe = relay
+        agent.browser_probe = lambda url: browser_hits.append(url)
+        agent.submit_form = submit
+        agent.probe_with_browser_fallback = _no_fallback
+        try:
+            executor = engine_mod.AgentExecutor(probe_budget_seconds=30)
+            self.drain(executor)
+        finally:
+            for n, fn in saved.items():
+                setattr(agent, n, fn)
+
+        spokeo = self.case_for(cookie, "Spokeo")
+        self.assertEqual(spokeo["status"], "submitted")
+        self.assertIsNotNone(spokeo["submitted_at"])
+        # The relay path was taken exactly once for Spokeo, the form
+        # it found was submitted, and the browser step never ran.
+        spokeo_url = brokers_by_name["Spokeo"]["optout_url"]
+        self.assertEqual(relay_urls.count(spokeo_url), 1)
+        self.assertEqual(browser_hits, [])
+        self.assertIn("https://www.spokeo.com/optout", submit_actions)
+        # The probe attempt's audit detail carries the whole trail.
+        row = self.db_row(
+            "SELECT detail FROM remediation_attempts"
+            " WHERE case_id = %s AND action = 'probe'",
+            (spokeo["id"],))
+        detail = row["detail"]
+        if isinstance(detail, str):
+            detail = json.loads(detail)
+        self.assertEqual(detail["via"], "http+relay")
+        self.assertEqual([t["step"] for t in detail["trail"]],
+                         ["http", "relay", "browser"])
+        self.assertEqual(detail["trail"][2]["skipped"], "on_server")
+
+    # ---------- Stage 7.1: concurrent worker ----------
+    def test_worker_drains_nine_cases_concurrently(self):
+        cookie, uid, _acct = self.register()
+        _name, email = self.add_full_profile(cookie, self.uniq())
+        self.set_consent(cookie, "automated_remediation", True)
+        with self.pool.connection() as conn:
+            slugs = [r["slug"] for r in conn.execute(
+                "SELECT slug FROM brokers WHERE channel = 'form'"
+                " ORDER BY position LIMIT 9").fetchall()]
+            self.assertEqual(len(slugs), 9)
+            for slug in slugs:
+                conn.execute(
+                    "INSERT INTO remediation_cases (user_id, broker_slug)"
+                    " VALUES (%s, %s)", (uid, slug))
+
+        class SleepingStub(StubExecutor):
+            """Probe sleeps 0.3s and tracks live concurrency."""
+
+            def __init__(self):
+                super().__init__()
+                self._lock = threading.Lock()
+                self._current = 0
+                self.max_concurrent = 0
+
+            def probe(self, profile, broker):
+                with self._lock:
+                    self._current += 1
+                    self.max_concurrent = max(self.max_concurrent,
+                                              self._current)
+                try:
+                    time.sleep(0.3)
+                    return super().probe(profile, broker)
+                finally:
+                    with self._lock:
+                        self._current -= 1
+
+        stub = SleepingStub()
+        started = time.monotonic()
+        self.assertTrue(worker_mod.start_worker(stub))
+        settled = 0
+        try:
+            deadline = started + 30
+            while time.monotonic() < deadline:
+                row = self.db_row(
+                    "SELECT COUNT(*) AS n FROM remediation_cases"
+                    " WHERE user_id = %s AND status = 'submitted'",
+                    (uid,))
+                settled = row["n"]
+                if settled == 9:
+                    break
+                time.sleep(0.02)
+            wall = time.monotonic() - started
+        finally:
+            worker_mod.stop_worker()
+            thread = worker_mod._thread
+            if thread is not None:
+                thread.join(timeout=15)
+        self.assertEqual(settled, 9)
+        # Sequential draining would spend 9 x 0.3s in probe sleeps
+        # alone; three concurrent drainers must beat 60% of that.
+        self.assertLess(wall, 9 * 0.3 * 0.6)
+        self.assertGreaterEqual(stub.max_concurrent, 2)
+        self.assertEqual(len(stub.submits_for(email)), 9)
 
     # ---------- IDOR ----------
     def test_idor(self):

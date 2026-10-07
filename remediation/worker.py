@@ -1,11 +1,18 @@
 """In-process remediation worker (spec Phases 12, 35).
 
-Mirrors scanning/worker.py: one daemon thread inside the web process
-polls remediation_cases every 2 seconds and claims one queued case
-at a time with SELECT ... FOR UPDATE SKIP LOCKED inside an UPDATE,
-so a case can never be processed twice concurrently — and combined
-with the one-live-case index and the submitted-case guards, never
+Mirrors scanning/worker.py's shape: daemon thread(s) inside the web
+process poll remediation_cases every 2 seconds and claim queued
+cases with SELECT ... FOR UPDATE SKIP LOCKED inside an UPDATE, so a
+case can never be processed twice concurrently — and combined with
+the one-live-case index and the submitted-case guards, never
 submitted twice at all.
+
+Stage 7.1 (speed): the polling loop now keeps up to MAX_CONCURRENT
+drainer threads busy instead of processing one case at a time —
+cases are independent (one broker each, consent re-checked per case
+inside the engine), so a 40-case run no longer pays the slowest
+broker's probe latency forty times in a row. Claims, stale-running
+recovery, and failure parking are unchanged.
 
 There is no retry backoff for cases (unlike scan jobs): a broker
 outcome is a state, not a failure — walls park the case at blocked,
@@ -19,6 +26,7 @@ values, never user data.
 """
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from core import logging_setup
 from db import pool
@@ -26,6 +34,7 @@ from remediation import engine
 
 POLL_SECONDS = 2.0
 STALE_RUNNING_MINUTES = 10
+MAX_CONCURRENT = 3
 
 _thread = None
 _thread_lock = threading.Lock()
@@ -94,7 +103,16 @@ def run_once(executor=None):
     return True
 
 
-def _loop():
+def _drain(executor):
+    """Claim and process cases until the queue is empty (or a stop
+    is signalled). Runs on a pool thread; the SKIP LOCKED claim means
+    concurrent drainers can never take the same case."""
+    while not _stop.is_set():
+        if not run_once(executor):
+            return
+
+
+def _loop(executor=None):
     try:
         requeued = requeue_stale()
         if requeued:
@@ -102,26 +120,41 @@ def _loop():
     except Exception as exc:
         logging_setup.log_error(None, "remediation worker requeue failed: "
                                 + type(exc).__name__)
-    while not _stop.is_set():
-        try:
-            worked = run_once()
-        except Exception as exc:
-            logging_setup.log_error(None, "remediation worker cycle failed: "
-                                    + type(exc).__name__)
-            worked = False
-        if not worked:
+    with ThreadPoolExecutor(max_workers=MAX_CONCURRENT,
+                            thread_name_prefix="leakguard-remediation") as pool:
+        futures = set()
+        while not _stop.is_set():
+            # Reap finished drainers. A drainer raises only when the
+            # claim itself failed (e.g. database down) — run_once
+            # parks engine failures itself. Log the class and let
+            # the top-up below replace the drainer.
+            for fut in list(futures):
+                if fut.done():
+                    futures.discard(fut)
+                    exc = fut.exception()
+                    if exc is not None:
+                        logging_setup.log_error(
+                            None, "remediation worker cycle failed: "
+                            + type(exc).__name__)
+            while len(futures) < MAX_CONCURRENT:
+                futures.add(pool.submit(_drain, executor))
             _stop.wait(POLL_SECONDS)
+    # Leaving the with-block waits for the pool: drainers check _stop
+    # between cases, so each finishes its in-flight case and exits.
 
 
-def start_worker():
-    """Start the polling thread (idempotent)."""
+def start_worker(executor=None):
+    """Start the polling thread (idempotent). The executor is
+    injectable for tests; production passes None and the engine
+    builds its AgentExecutor per case."""
     global _thread
     with _thread_lock:
         if _thread is not None and _thread.is_alive():
             return True
         _stop.clear()
         _thread = threading.Thread(
-            target=_loop, name="leakguard-remediation-worker", daemon=True)
+            target=_loop, args=(executor,),
+            name="leakguard-remediation-worker", daemon=True)
         _thread.start()
         return True
 

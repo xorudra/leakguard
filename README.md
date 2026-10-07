@@ -94,6 +94,8 @@ JSON request bodies over **256 KB** are rejected with `413 body_too_large`. Read
 
 Accepted off values are `0`, `false`, `off`, `no` (case-insensitive); unset means on. The current state of every flag is visible to the owner in the Admin overview (`flags`) and lives in `core/flags.py`. Emergency procedure: set the one variable for the misbehaving capability, redeploy, confirm the gated route answers `503 feature_disabled`, fix the cause, then remove the variable (or set it back to `on`) and redeploy again. Nothing else needs to change — flags are read from the environment, never stored in the database.
 
+**Passkeys (WebAuthn):** sign-in with a password is always available; a passkey is an optional extra managed in the Privacy Center (adding or removing one asks for the account password once more). Only the credential's **public** key is stored — nothing server-side can sign in as the user. Deliberate limits, all enforced server-side: attestation format **`none` only** (other formats are rejected by name, never silently trusted); algorithms **ES256** (P-256) and **RS256** (RSA ≥ 2048-bit); sign-in requires the authenticator to verify the user (fingerprint / face / PIN) on every ceremony, and a signature counter that goes backwards fails the sign-in (authenticators that always report 0 are accepted). A passkey sign-in does not additionally demand a TOTP code — the user-verified ceremony is possession + verification in one step. The relying-party id and expected origin are derived from the request's validated origin; pin them explicitly with `LEAKGUARD_WEBAUTHN_ORIGIN` / `LEAKGUARD_WEBAUTHN_RP_ID` if a deployment ever needs fixed values.
+
 **Retention** (an in-process worker runs one pass daily; every purge is audit-logged with counts only):
 
 | Data | Kept for |
@@ -101,7 +103,7 @@ Accepted off values are `0`, `false`, `off`, `no` (case-insensitive); unset mean
 | Sessions | deleted once expired or revoked for more than 7 days |
 | Password-reset tokens | deleted once used or expired for more than 7 days |
 | Notifications | 90 days |
-| Deleted accounts | soft-deleted for 30 days (recoverable by support), then hard-purged with everything the account owns — identifiers, scans, findings, removal cases, settings, household. The PII-free audit trail (counts and actions, never values) is kept. |
+| Deleted accounts | soft-deleted for 30 days (recoverable by support), then hard-purged with everything the account owns — identifiers, scans, findings, removal cases, settings, household, passkeys. The PII-free audit trail (counts and actions, never values) is kept. |
 
 **Database connections:** two environment variables, split by privilege. `DATABASE_URL` is the runtime connection and should be a **least-privilege role** (SELECT/INSERT/UPDATE/DELETE only — no DDL); everything the running app does goes through it. `MIGRATION_DATABASE_URL` is an **owner-level** connection used only by the boot-time migration step, which needs DDL; it is never used to serve requests. When `MIGRATION_DATABASE_URL` is unset, migrations fall back to `DATABASE_URL` (the pre-split behavior — convenient for local development and tests, where one connection does both jobs).
 

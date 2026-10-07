@@ -90,6 +90,7 @@
         <div class="rowBtns">
           <button type="submit" id="acLoginBtn">Sign in</button>
           <button type="button" id="acRegisterBtn" class="btnGhost">Create free account</button>
+          <button type="button" id="acPasskeyBtn" class="btnGhost" hidden>Sign in with a passkey</button>
         </div>
         <p id="acStatus" class="hint"></p>
         <p class="hint"><a href="#" id="acForgotLink">Forgot password?</a></p>
@@ -307,6 +308,26 @@
         </div>
       </div>
       <p id="totpMsg" class="hint"></p>
+
+      <h3>Passkeys</h3>
+      <p class="hint">A passkey signs you in with this device's fingerprint, face or PIN —
+      no password to type, and it cannot be phished or leaked: LeakGuard stores only the
+      passkey's public half, never anything that could sign in as you. Passkeys are
+      optional — your password (and two-factor, if it is on) keeps working exactly as
+      before. Signing in with a passkey asks your device to confirm it is really you
+      (fingerprint, face or PIN) every time.</p>
+      <div id="passkeyList"></div>
+      <label>Passkey name <input type="text" id="pkNickname" maxlength="60" placeholder="For example: My phone" autocomplete="off"></label>
+      <label>Password <input type="password" id="pkPassword" autocomplete="current-password"></label>
+      <p class="hint">Your password is asked once more to add or remove a passkey, so a
+      borrowed session cannot change how you sign in.</p>
+      <div class="rowBtns">
+        <button type="button" id="pkAddBtn" class="btnGhost">Add a passkey</button>
+        <span id="pkMsg" class="hint"></span>
+      </div>
+      <p class="hint" id="pkUnsupported" hidden>This browser or device does not support
+      passkeys, so you cannot add one here. Passkeys you added on other devices are still
+      listed above, and you can remove them from here.</p>
 
       <h3>Download my data</h3>
       <p class="hint">Everything LeakGuard holds about you — account, saved details (shown in full,
@@ -597,7 +618,8 @@
       out immediately and your data becomes inaccessible; the 30-day window above exists so an
       accidental or malicious deletion can still be undone by support, then the hard delete runs.</li>
       <li><strong>Extra protection:</strong> optional two-factor authentication (authenticator
-      app) is available in the Privacy Center.</li>
+      app) and optional passkeys (sign in with your device's fingerprint, face or PIN —
+      LeakGuard stores only the passkey's public half) are available in the Privacy Center.</li>
     </ul>
 
     <h3>Security contact</h3>

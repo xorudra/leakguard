@@ -726,6 +726,7 @@ function renderAccount() {
     $("pcSince").textContent = meUser.created_at
       ? "· member since " + new Date(meUser.created_at).toLocaleDateString() : "";
     renderTotp();
+    loadPasskeys();
     loadHousehold().then(() => loadIdentifiers());
     loadDomains();
     loadConsents();
@@ -2442,6 +2443,189 @@ $("totpDisableBtn").addEventListener("click", async () => {
     renderTotp();
   } else {
     $("totpMsg").textContent = errMsg(r.data, "Could not switch two-factor off");
+  }
+});
+
+/* ----- passkeys (WebAuthn) -----
+   Feature-detected throughout: browsers/devices without the
+   WebAuthn API simply never see the sign-in button, and the
+   management section explains itself instead of offering an
+   "Add" that cannot work. Listing and removing passkeys works
+   everywhere — removing one from a borrowed device matters most
+   exactly where passkeys cannot be created. */
+const WEBAUTHN_AVAILABLE = !!(
+  window.PublicKeyCredential && navigator.credentials
+  && navigator.credentials.create && navigator.credentials.get);
+
+function b64urlToBytes(text) {
+  let s = String(text).replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function bytesToB64url(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+if (WEBAUTHN_AVAILABLE) $("acPasskeyBtn").hidden = false;
+
+$("acPasskeyBtn").addEventListener("click", async () => {
+  $("acStatus").textContent = "Waiting for your device…";
+  try {
+    const opt = await apiJson("/api/auth/passkey/login/options", {
+      method: "POST", headers: AH, body: "{}",
+    });
+    if (!opt.ok) throw new Error(errMsg(opt.data, "Passkey sign-in is not available right now"));
+    const o = opt.data;
+    let assertion;
+    try {
+      assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge: b64urlToBytes(o.challenge),
+          rpId: o.rpId,
+          timeout: o.timeout,
+          userVerification: o.userVerification,
+          allowCredentials: [],
+        },
+      });
+    } catch (e) {
+      $("acStatus").textContent = "Passkey sign-in was cancelled — your password still works below.";
+      return;
+    }
+    const r = await apiJson("/api/auth/passkey/login/verify", {
+      method: "POST", headers: AH,
+      body: JSON.stringify({
+        id: assertion.id,
+        rawId: bytesToB64url(assertion.rawId),
+        type: assertion.type,
+        response: {
+          clientDataJSON: bytesToB64url(assertion.response.clientDataJSON),
+          authenticatorData: bytesToB64url(assertion.response.authenticatorData),
+          signature: bytesToB64url(assertion.response.signature),
+        },
+      }),
+    });
+    if (!r.ok) throw new Error(errMsg(r.data, "Passkey sign-in failed"));
+    meUser = r.data.user;
+    $("acPassword").value = "";
+    $("acStatus").textContent = "";
+    renderAccount();
+  } catch (err) {
+    $("acStatus").textContent = err.message;
+  }
+});
+
+async function loadPasskeys() {
+  const wrap = $("passkeyList");
+  if (!wrap) return;
+  $("pkAddBtn").disabled = !WEBAUTHN_AVAILABLE;
+  $("pkUnsupported").hidden = WEBAUTHN_AVAILABLE;
+  const r = await apiJson("/api/auth/passkeys");
+  if (!r.ok) { wrap.innerHTML = ""; return; }
+  const keys = r.data.passkeys || [];
+  if (!keys.length) {
+    wrap.innerHTML = '<p class="hint">No passkeys yet.</p>';
+    return;
+  }
+  wrap.innerHTML = "";
+  for (const key of keys) {
+    const row = document.createElement("div");
+    row.className = "rowBtns";
+    const added = key.created_at ? new Date(key.created_at).toLocaleDateString() : "";
+    const used = key.last_used_at
+      ? "last used " + new Date(key.last_used_at).toLocaleDateString() : "never used yet";
+    const label = document.createElement("span");
+    label.textContent = key.nickname + " (" + key.id_prefix + "…) · added " + added + " · " + used;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btnGhost";
+    btn.textContent = "Remove this passkey";
+    btn.addEventListener("click", async () => {
+      const password = $("pkPassword").value;
+      if (!password) {
+        $("pkMsg").textContent = "Type your password first — removing a passkey asks for it once more.";
+        return;
+      }
+      const rr = await apiJson("/api/auth/passkeys/" + key.id + "/revoke", {
+        method: "POST", headers: AH, body: JSON.stringify({ password }),
+      });
+      if (rr.ok) {
+        $("pkMsg").textContent = "Passkey removed — it can no longer sign you in.";
+        loadPasskeys();
+      } else {
+        $("pkMsg").textContent = errMsg(rr.data, "Could not remove that passkey");
+      }
+    });
+    row.appendChild(label);
+    row.appendChild(btn);
+    wrap.appendChild(row);
+  }
+}
+
+$("pkAddBtn").addEventListener("click", async () => {
+  const nickname = $("pkNickname").value.trim();
+  const password = $("pkPassword").value;
+  if (!nickname) { $("pkMsg").textContent = "Give the passkey a name first (for example: My phone)."; return; }
+  if (!password) { $("pkMsg").textContent = "Type your password first — adding a passkey asks for it once more."; return; }
+  $("pkMsg").textContent = "Waiting for your device…";
+  try {
+    const opt = await apiJson("/api/auth/passkey/register/options", {
+      method: "POST", headers: AH, body: JSON.stringify({ password }),
+    });
+    if (!opt.ok) throw new Error(errMsg(opt.data, "Could not start passkey setup"));
+    const o = opt.data;
+    let credential;
+    try {
+      credential = await navigator.credentials.create({
+        publicKey: {
+          challenge: b64urlToBytes(o.challenge),
+          rp: o.rp,
+          user: {
+            id: b64urlToBytes(o.user.id),
+            name: o.user.name,
+            displayName: o.user.displayName,
+          },
+          pubKeyCredParams: o.pubKeyCredParams,
+          excludeCredentials: (o.excludeCredentials || []).map((c) => ({
+            type: c.type, id: b64urlToBytes(c.id),
+          })),
+          authenticatorSelection: o.authenticatorSelection,
+          timeout: o.timeout,
+          attestation: o.attestation,
+        },
+      });
+    } catch (e) {
+      $("pkMsg").textContent = "Passkey setup was cancelled on this device — nothing was added.";
+      return;
+    }
+    const r = await apiJson("/api/auth/passkey/register/verify", {
+      method: "POST", headers: AH,
+      body: JSON.stringify({
+        id: credential.id,
+        rawId: bytesToB64url(credential.rawId),
+        type: credential.type,
+        nickname,
+        transports: credential.response.getTransports
+          ? credential.response.getTransports() : [],
+        response: {
+          clientDataJSON: bytesToB64url(credential.response.clientDataJSON),
+          attestationObject: bytesToB64url(credential.response.attestationObject),
+        },
+      }),
+    });
+    if (!r.ok) throw new Error(errMsg(r.data, "Could not add that passkey"));
+    $("pkNickname").value = "";
+    $("pkPassword").value = "";
+    $("pkMsg").textContent = "Passkey added ✓ — you can now sign in with it from the sign-in form.";
+    loadPasskeys();
+  } catch (err) {
+    $("pkMsg").textContent = err.message;
   }
 });
 

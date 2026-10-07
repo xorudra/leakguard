@@ -53,6 +53,7 @@ from accounts import identifiers as identifiers_service
 from accounts import privacy as privacy_service
 from accounts import ratelimit
 from accounts import sessions as sessions_mod
+from accounts import webauthn as webauthn_service
 from core import context, errors, flags, logging_setup, security
 from core import ratelimit as core_ratelimit
 from dashboard import graph as graph_service
@@ -460,6 +461,15 @@ class Handler(BaseHTTPRequestHandler):
             body["is_admin"] = bool(self._call(
                 admin_service.is_admin, user["id"]))
             return self._json(200, body)
+        if route == "/api/auth/passkeys":
+            # The caller's own passkeys (Batch D1): metadata and
+            # display prefixes only — see accounts/webauthn.py.
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._json(200, {
+                "passkeys": self._call(webauthn_service.list_passkeys,
+                                       user["id"]),
+            })
         if route == "/api/consents":
             self._require_accounts()
             user, _token = self._require_user()
@@ -789,7 +799,56 @@ class Handler(BaseHTTPRequestHandler):
                        payload.get("token"), payload.get("new_password"))
             return self._json(200, {"ok": True})
 
+        if route == "/api/auth/passkey/login/options":
+            # Passkey sign-in (Batch D1): PUBLIC like password login
+            # — the ceremony uses discoverable credentials and the
+            # response depends on no account, so it cannot enumerate
+            # accounts or passkeys. The session is created by the
+            # verify step, exactly as a password login creates it.
+            return self._json(200, self._call(
+                webauthn_service.authentication_options, self.headers))
+        if route == "/api/auth/passkey/login/verify":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            user, token = self._call(
+                webauthn_service.complete_authentication,
+                payload, self.headers, self._client_ip())
+            return self._json(200, {"user": user}, extra_headers=[
+                ("Set-Cookie", sessions_mod.cookie_header(token))])
+
         user, token = self._require_user()
+
+        if route == "/api/auth/passkey/register/options":
+            # Enrollment begins with a password re-check inside the
+            # service (accounts/webauthn.py), then a challenge bound
+            # to this user + session.
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            result = self._call(
+                webauthn_service.registration_options, user["id"],
+                payload.get("password"), token, self.headers,
+                self._client_ip())
+            return self._json(200, result)
+        if route == "/api/auth/passkey/register/verify":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            result = self._call(
+                webauthn_service.complete_registration, user["id"],
+                token, payload, self.headers)
+            return self._json(201, {"passkey": result})
+        if route.startswith("/api/auth/passkeys/") and \
+                route.endswith("/revoke"):
+            passkey_id = route[len("/api/auth/passkeys/"):-len("/revoke")]
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            result = self._call(
+                webauthn_service.revoke_passkey, user["id"],
+                passkey_id, payload.get("password"))
+            return self._json(200, result)
 
         if route == "/api/auth/change-password":
             payload = self._read_json_body()

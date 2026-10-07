@@ -115,6 +115,8 @@ _USER_CHILDREN = (
     "DELETE FROM scan_jobs WHERE user_id = %s",
     "DELETE FROM consents WHERE user_id = %s",
     "DELETE FROM sessions WHERE user_id = %s",
+    "DELETE FROM passkey_credentials WHERE user_id = %s",
+    "DELETE FROM webauthn_challenges WHERE user_id = %s",
     "DELETE FROM password_reset_tokens WHERE user_id = %s",
     "DELETE FROM identifiers WHERE user_id = %s",
     "DELETE FROM household_members WHERE household_id IN"

@@ -66,6 +66,7 @@ def is_admin(user_id):
 # it is) stays in the full audit view.
 _SECURITY_ACTION_PATTERNS = (
     "auth.login%",
+    "auth.passkey%",
     "auth.password_reset%",
     "auth.totp%",
     "account.deleted%",

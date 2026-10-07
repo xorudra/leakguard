@@ -38,12 +38,12 @@ at `e31e016`.*
 ## C. Architecture Inventory
 
 - **Entry points:** `app.py` (HTTP server, all routes), `agent.py` (deterministic broker agent — the remediation core), `local_agent.py` (residential-IP runner for the user's own device), `browser_probe.py` (local Playwright probe), `proxy_relay.py` (dev-only egress relay for this VM)
-- **Modules:** `core/` (errors, context/request-ids, security headers + CSRF, logging, rate limiter, retention, feature flags / emergency switches), `accounts/` (auth, sessions, totp, consents, identifiers, households, domains, admin, audit, api_tokens, privacy export, passwords), `providers/` (base HTTP client, registry, xposedornot, hibp_passwords, ddg_discovery, username_platforms, domain_intel, mock), `scanning/` (orchestrator, jobs, worker, normalize, correlation, risk, feedback, disputes), `remediation/` (engine, service, worker, verify, verify_sources, registry_seed, letters, source_checks), `monitoring/` (scheduler, diff, events, notify, service), `dashboard/` (service = Action Center, graph), `db/` (pool, migrate), `vault/` (crypto, store)
+- **Modules:** `core/` (errors, context/request-ids, security headers + CSRF, logging, rate limiter, retention, feature flags / emergency switches), `accounts/` (auth, sessions, totp, webauthn + cbor, consents, identifiers, households, domains, admin, audit, api_tokens, privacy export, passwords), `providers/` (base HTTP client, registry, xposedornot, hibp_passwords, ddg_discovery, username_platforms, domain_intel, mock), `scanning/` (orchestrator, jobs, worker, normalize, correlation, risk, feedback, disputes), `remediation/` (engine, service, worker, verify, verify_sources, registry_seed, letters, source_checks), `monitoring/` (scheduler, diff, events, notify, service), `dashboard/` (service = Action Center, graph), `db/` (pool, migrate), `vault/` (crypto, store)
 - **Routes:** ~45 `/api/...` routes (every one also answering under the canonical `/api/v1/...` spelling — Phase 88) — anonymous (`/api/scan`, `/api/agent/*`, `/api/brokers`, `/api/providers/health`, `/api/health`), account (auth, consents, identifiers, domains, household, privacy export), scanning (`/api/scans`), remediation (`/api/remediation/run|cases|queue`), monitoring (`/api/monitoring/settings|timeline`, `/api/notifications`), dashboard (`/api/action-center`, `/api/graph`), tokens (`/api/tokens`), admin (`/api/admin/overview|audit`), plus `/trust`, `/reset`, `/.well-known/security.txt`, PWA assets (`/sw.js`, `/static/manifest.webmanifest`, icons)
 - **Services:** in-process workers — scan worker (SKIP LOCKED, hand-started jobs claimed before scheduled ones, backoff, dead after 3 attempts), remediation worker (5 concurrent, 40s probe budget), monitoring scheduler (hourly tick, period-bucketed idempotency, paused users skipped), retention worker (daily; its loop also hosts the broker source sweep — SSRF-guarded re-fetch + hash compare of every broker opt-out page, `remediation/source_checks.py`)
 - **Providers:** XposedOrNot (email breaches), HIBP Pwned Passwords (k-anonymity), DuckDuckGo discovery, username presence (13 platforms), domain intel (Cloudflare DoH + crt.sh); MockProvider behind `LEAKGUARD_PROVIDERS=mock`, always flagged
-- **Database models:** users, sessions, consents, password_reset_tokens, identifiers, domains, scan_jobs, findings, finding_feedback, broker_source_checks, brokers, remediation_cases, remediation_attempts, verification_checks, user_settings, notifications, households, household_members, audit_log, api_tokens
-- **Migrations:** `db/migrations/0001_vault.sql` … `0010_feedback_sources.sql`, applied by an idempotent runner at startup
+- **Database models:** users, sessions, consents, password_reset_tokens, identifiers, domains, scan_jobs, findings, finding_feedback, broker_source_checks, brokers, remediation_cases, remediation_attempts, verification_checks, user_settings, notifications, households, household_members, audit_log, api_tokens, passkey_credentials, webauthn_challenges
+- **Migrations:** `db/migrations/0001_vault.sql` … `0011_passkeys.sql`, applied by an idempotent runner at startup
 - **Frontend pages:** one SPA — Quick Scan, Action Center (signed-in home), Privacy Center (identifiers, consents, household, monitoring, timeline, notifications, API tokens, exposure map, export, deletion), human queue, `/trust`, `/reset`
 - **Browser automation:** Playwright probe locally only (`browser_probe.py`, subprocess-isolated); the server never runs a browser — walled brokers classify from HTTP evidence and the attempt trail records `browser: skipped on_server`
 - **External dependencies:** Render, Neon, Brevo (email), XposedOrNot, Have I Been Pwned, DuckDuckGo, Cloudflare DoH, crt.sh, UptimeRobot
@@ -51,7 +51,7 @@ at `e31e016`.*
 
 ## D. Security Inventory
 
-- **Authentication:** Argon2id password hashes (`accounts/passwords.py`); password reset via single-use SHA-256-hashed tokens (1h expiry, enumeration-safe identical responses, all sessions revoked on reset); TOTP MFA (RFC 6238, verify-before-activate, replay protection). **No WebAuthn/passkeys** (Phase 4 PARTIAL)
+- **Authentication:** Argon2id password hashes (`accounts/passwords.py`); password reset via single-use SHA-256-hashed tokens (1h expiry, enumeration-safe identical responses, all sessions revoked on reset); TOTP MFA (RFC 6238, verify-before-activate, replay protection); WebAuthn passkeys (optional, Batch D1: attestation `none` only, ES256/RS256, UV-required discoverable sign-in, single-use DB challenges, counter clone detection; only public keys stored)
 - **Authorization:** every object owner-scoped; foreign ids → 404; API tokens are read-only by construction (mutation routes resolve the session only); admin gated by `ADMIN_EMAILS`, invisible (404) to everyone else
 - **Session handling:** 30-day sliding sessions; cookie `lg_session` HttpOnly + Secure + SameSite=Lax; only SHA-256 digests stored
 - **Encryption:** identifiers and account emails envelope-encrypted (per-record DEK, AES-256-GCM, env-only master key); lookups via HMAC-SHA256 with a *separate* env-only key; display always masked (e.g. `r•••@domain`)
@@ -85,6 +85,7 @@ at `e31e016`.*
 |---|---|---|---|---|---|---|
 | Anonymous Quick Scan (breaches + password k-anonymity + score) | Yes | Yes — baselines identical to pre-upgrade (214 breaches / score 100 / pwned 52,372,427) | Yes | Yes — nothing stored | README, /trust | `app.py`, `providers/`; S15 acceptance |
 | Accounts (register/login/TOTP/reset/delete) | Yes | Yes | Yes | Yes | README | `accounts/`; Stage S3/S8 E2Es |
+| Passkeys (WebAuthn sign-in + management) | Yes | Not yet — ships with Batch D1 deploy | Yes — software-authenticator ceremonies incl. every failure mode | Yes — public keys only, attestation `none` only, UV required, one generic sign-in failure | README Operations, Privacy Center copy | `accounts/webauthn.py`, `accounts/cbor.py`, migration `0011`; `tests/test_webauthn.py` |
 | Encrypted identifier vault + consents | Yes | Yes | Yes | Yes | /trust, README Privacy | `vault/`, migration `0001`/`0002` |
 | Account scanning (all identifier kinds) | Yes | Yes | Yes | Yes | README | `scanning/`; Stage S5/S6 E2Es |
 | One-command remediation + human queue + letters | Yes | Yes — 40-case runs settle (2 submitted / 11 needs_human / 27 blocked in the acceptance run) | Yes | Yes — consent re-checked at execution | README | `remediation/`; Stage S7 E2Es |
@@ -108,8 +109,8 @@ evidence, and gap). Summary counts:
 
 | Status | Count |
 |---|---|
-| DONE | 123 |
-| PARTIAL | 36 |
+| DONE | 124 |
+| PARTIAL | 35 |
 | NOT_DONE | 8 |
 | CUT (owner rule: AI phases + business model) | 11 |
 | NA (surface does not exist: file uploads, webhooks, containers) | 3 |

@@ -19,7 +19,7 @@ NA = the surface the phase governs does not exist in this deployment.*
 | 1 — Repository restructure | P0 | DONE | Packages `core/`, `accounts/`, `providers/`, `scanning/`, `remediation/`, `monitoring/`, `dashboard/`, `db/`, `vault/`; legacy `agent.py` wrapped, not rewritten | |
 | 2 — PostgreSQL persistence | P1 | DONE | `db/migrate.py`, `db/migrations/0001`–`0008`; Neon Postgres; health `db:"ok"` in production (parent-verified) | |
 | 3 — Secure identifier vault | P0 | DONE | `vault/crypto.py` (AES-256-GCM envelope, per-record DEK), `vault/store.py` (HMAC lookup, separate key, masking); `tests/test_vault.py` | |
-| 4 — Authentication | P0 | PARTIAL | `accounts/passwords.py` (Argon2id), `accounts/sessions.py`, reset flow, `accounts/totp.py` (TOTP MFA) | WebAuthn/passkeys not implemented (no webauthn/passkey code anywhere) |
+| 4 — Authentication | P0 | DONE | `accounts/passwords.py` (Argon2id), `accounts/sessions.py`, reset flow, `accounts/totp.py` (TOTP MFA), `accounts/webauthn.py` + `accounts/cbor.py` (WebAuthn passkeys: DB challenges, attestation `none` only, ES256/RS256, UV-required discoverable sign-in, counter clone policy; migration `0011_passkeys.sql`; tests `tests/test_webauthn.py`) | |
 | 5 — Authorization | P0 | DONE | Owner-scoped services; foreign ids → 404; IDOR tests in `tests/test_orgs_admin.py`, `tests/test_api_tokens.py`; production (parent-verified) | |
 | 6 — Consent management | P0 | DONE | `accounts/consents.py` — append-only versioned consents (migration `0002`) for scanning/monitoring/automated_remediation/notifications; gates enforced in scanning, remediation, monitoring | |
 | 7 — Anonymous Quick Scan | P1 | DONE | `POST /api/scan` (no account, nothing stored); production baselines unchanged (parent-verified) | |
@@ -201,11 +201,11 @@ NA = the surface the phase governs does not exist in this deployment.*
 
 | Status | Count |
 |---|---|
-| DONE | 123 |
-| PARTIAL | 36 |
+| DONE | 124 |
+| PARTIAL | 35 |
 | NOT_DONE | 8 |
 | CUT (owner rule) | 11 |
 | NA (surface does not exist) | 3 |
 | **Total** | **181** |
 
-Open by tier — **P0:** 4, 173, 180 (all PARTIAL — none is an active production exposure; they are depth gaps: WebAuthn, production-readiness evidence, and the final gate). **P1:** 25, 149. **P2:** 31, 40, 66, 67, 76, 77, 96, 109, 111, 115, 116, 119, 124, 125, 137, 141, 153, 158, 160, 162, 166, 175, 178. **P3:** 57, 58, 59, 81, 82, 83, 85, 98, 102, 104, 123, 126, 128, 129, 152, 168.
+Open by tier — **P0:** 173, 180 (all PARTIAL — none is an active production exposure; they are depth gaps: production-readiness evidence and the final gate). **P1:** 25, 149. **P2:** 31, 40, 66, 67, 76, 77, 96, 109, 111, 115, 116, 119, 124, 125, 137, 141, 153, 158, 160, 162, 166, 175, 178. **P3:** 57, 58, 59, 81, 82, 83, 85, 98, 102, 104, 123, 126, 128, 129, 152, 168.

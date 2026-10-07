@@ -252,6 +252,15 @@ def _metrics_block(conn):
         " ORDER BY n DESC, context, error_class LIMIT 5",
     ).fetchall()
     providers_block = _provider_usage_block(conn)
+    # Phases 158/160: the scan-budget registry and the findings
+    # data-quality summary. Deferred imports — accounts reaches
+    # scanning only through function-level imports (the recorded
+    # import graph), never at module top.
+    from scanning import budgets as scan_budgets
+    from scanning import data_quality
+
+    budgets_block = scan_budgets.budgets_snapshot()
+    dq_block = data_quality.latest_summary(conn)
     return {
         "scan_jobs": {
             "by_status": scan_by_status,
@@ -301,6 +310,12 @@ def _metrics_block(conn):
         # Provider cost monitoring (Phase 124): today's calls
         # against each provider's daily budget (Phase 66).
         "providers": providers_block,
+        # Scan budget engine (Phase 158): the whole budget
+        # policy, read live from the constants that enforce it.
+        "budgets": budgets_block,
+        # Data-quality stage (Phase 160): latest run + the
+        # per-provider duplicate/malformed rollup.
+        "data_quality": dq_block,
     }
 
 

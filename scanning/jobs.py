@@ -12,7 +12,13 @@ Creation is consent-gated and idempotent:
   400 no_identifiers (a full scan of nothing is a user error, and
   saying so beats queueing a meaningless job);
 * (user_id, idempotency_key) is unique: a retried create returns
-  the existing job instead of queueing a duplicate.
+  the existing job instead of queueing a duplicate;
+* the per-user daily full-scan budget (Phase 158,
+  scanning/budgets.py) refuses a genuinely NEW job past the
+  day's allowance with 429 scan_budget_exhausted. A retry of an
+  existing job is never refused, and scheduled monitoring jobs
+  are a separate lane: the scheduler inserts them directly (not
+  through here) and they never count against this budget.
 
 Responses never contain identifier values — findings join the
 vault's pre-computed masked rendering, and that is all.
@@ -23,7 +29,7 @@ from accounts import consents as consents_service
 from accounts import identifiers as identifiers_service
 from core import errors
 from db import pool
-from scanning import disputes, feedback, risk
+from scanning import budgets, disputes, feedback, risk
 
 _JOB_LIST_COLUMNS = "id, status, score, created_at, finished_at"
 _JOB_FULL_COLUMNS = (
@@ -112,6 +118,19 @@ def create_job(user_id, idempotency_key):
             "no_identifiers",
             "Save at least one detail before running a full scan")
     with pool.connection() as conn:
+        # A retry of an existing job returns it untouched — and
+        # is never budget-refused: the budget gates NEW work
+        # (Phase 158). The INSERT below keeps ON CONFLICT for
+        # the race this SELECT cannot close.
+        row = conn.execute(
+            "SELECT id, status FROM scan_jobs"
+            " WHERE user_id = %s AND idempotency_key = %s",
+            (user_id, idempotency_key),
+        ).fetchone()
+        if row is not None:
+            return {"id": str(row["id"]),
+                    "status": row["status"]}, False
+        budgets.enforce_manual_budget(conn, user_id)
         row = conn.execute(
             "INSERT INTO scan_jobs (user_id, idempotency_key)"
             " VALUES (%s, %s)"

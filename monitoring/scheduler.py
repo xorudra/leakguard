@@ -18,6 +18,12 @@ The whole tick is also behind the owner's emergency switch
 (core/flags.py): with LEAKGUARD_FLAG_MONITORING_SCHEDULER off, a
 tick enqueues nothing at all.
 
+Two guarded passengers ride the tick after the enqueue work,
+behind the same flag and each failure-isolated so neither can
+break it: the engineering-alerts evaluator (Phase 77) and the
+findings data-quality pass (Phase 160, self-gated to ~daily by
+its own run ledger).
+
 Enqueueing inserts a scan_jobs row directly with the idempotency
 key 'monitor-<user_id>-<period_start>', where period_start is the
 start of the current cadence-length bucket (days since the epoch,
@@ -136,6 +142,17 @@ def tick(now=None):
     except Exception as exc:
         logging_setup.log_error(
             None, "engineering alerts failed: " + type(exc).__name__)
+    # Phase 160: the findings data-quality pass rides the same
+    # tick, behind the same flag, guarded exactly like the alerts
+    # step. maybe_run() self-gates against its run ledger, so the
+    # hourly tick produces at most a ~daily pass.
+    try:
+        from scanning import data_quality
+
+        data_quality.maybe_run()
+    except Exception as exc:
+        logging_setup.log_error(
+            None, "data quality pass failed: " + type(exc).__name__)
     return created
 
 

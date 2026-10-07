@@ -18,6 +18,13 @@ full-profile scan:
                    backoff / dead-letter, stale-job recovery.
 * jobs.py        — the user-scoped job API service behind
                    /api/scans (consent-gated, idempotent).
+* budgets.py     — the scan budget engine (Phase 158): the one
+                   policy home for every scanning budget; owns
+                   the per-user daily full-scan budget, registers
+                   the rest by reference.
+* data_quality.py— the data-quality stage over stored findings
+                   (Phase 160): duplicate/malformed detection,
+                   flag + record + surface, never delete.
 
 Honesty rules for the whole package: jobs never check passwords
 (passwords are never stored, so there is nothing to check with);

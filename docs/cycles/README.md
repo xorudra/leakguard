@@ -127,6 +127,7 @@ Copy this skeleton for a new report and fill every field:
 | 2026-10-07 | [P2-A — verification records (Phases 80, 131, 132)](2026-10-07-p2a-records-80-131-132.md) | (docs closeout) | IR tabletop drill + runbook fixes; README 8 inaccuracies fixed; MIGRATION_PLAN annotated to shipped truth |
 | 2026-10-08 | [P2-B — performance & scalability (Phases 115, 116)](2026-10-08-p2b-performance-115-116.md) | `1387fc4` | Set-based lifecycle writer (5 statements); batched in-app notifications + summary-only email (kills the 215-emails/cycle storm); benchmarks + documented single-instance ceiling; flips 10.5s, ledger 17.8s live |
 | 2026-10-08 | [P2-C — observability & engineering alerts (Phases 76, 77)](2026-10-08-p2c-observability-76-77.md) | `f022399` | Error ledger (migration 0013, hash-only rollups, 30-day prune); admin metrics endpoint + overview block; four engineering alert rules on the scheduler tick with daily-deduped owner email; staging + production live-verified |
+| 2026-10-08 | [P2-D — cost control & provider cost monitoring (Phases 66, 124)](2026-10-08-p2d-cost-66-124.md) | `3b89d0e` | Daily provider usage ledger (migration 0014); operator-set safety budgets with fail-open typed enforcement; admin provider metrics + provider_budget alert; Brevo honestly out of scope (binds the notification lane); staging + production live-verified |
 
 All cycles through the P1 closeout are linked above.
 

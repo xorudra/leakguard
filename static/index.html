@@ -12,7 +12,7 @@
   <nav>
     <a href="#scan">Scan</a>
     <a href="#agent">Agent Mode</a>
-    <a href="#removal">Removal Centre</a>
+    <a href="#removal">Advanced tools</a>
     <a href="#google">Google</a>
     <a href="#honest">Honest limits</a>
   </nav>
@@ -78,11 +78,9 @@
 
   <section id="agent" class="card">
     <h2><span class="step">2</span> Agent Mode (zero-token, automatic)</h2>
-    <p>The agent does the boring work with <strong>plain scripts — no AI, no tokens</strong>:
-    it builds your removal plan from per-broker playbooks, then probes each broker's live opt-out page,
-    reads its real form, and pre-fills your details. If a page hides behind a CAPTCHA, a login or a
-    JavaScript wall, the agent says so honestly and hands that one back to you with everything prepared.
-    If a form can't be understood, it may ask <em>your own</em> free gateway (FreeLLMAPI) — never Claude.</p>
+    <p>Fill in your details once and press the green button — the agent does everything else with
+    <strong>plain scripts, no AI, no tokens</strong>: it probes all 40 brokers live, submits every removal
+    form it can fill, and prepares the rest. You watch it work; there is nothing else for you to do.</p>
     <label>Your full name <input type="text" id="agName" placeholder="Rudra"></label>
     <label>Your email <input type="email" id="agEmail" placeholder="you@example.com"></label>
     <label>Phone (optional) <input type="text" id="agPhone" placeholder="+91 …"></label>
@@ -93,7 +91,7 @@
     </div>
     <div id="planBox" hidden>
       <h3>Your removal plan</h3>
-      <p class="hint">Probe = the agent visits that broker's opt-out page right now and reports the real form and blockers. Nothing is submitted without your explicit tap.</p>
+      <p class="hint">Optional preview: Probe visits a broker's opt-out page and reports its real form and blockers. The green button below runs all of this — and submits — automatically.</p>
       <div id="planList"></div>
     </div>
     <div id="probeBox" hidden>
@@ -102,55 +100,39 @@
     </div>
 
     <div class="letterBox" id="runPanel">
-      <h3>⚡ One-tap removal run</h3>
-      <p class="hint">The agent probes every broker in your plan and sorts them into three groups, so you do
-      as little manual work as possible: one confirm submits every form the agent can fill, email requests open
-      pre-written in your own mail app (brokers require the request to come from <em>your</em> email), and the
-      guided queue walks you through the few that legally need a human — a CAPTCHA, a login, or clicking the
-      confirmation link they email you. Those steps no tool can do for you; anyone claiming otherwise is lying.</p>
+      <h3>⚡ Remove my data everywhere</h3>
+      <p class="hint">One press. The agent probes all 40 brokers (quick pass, then a deep pass for the
+      stubborn ones), <strong>submits every form it can fill</strong>, and writes erasure letters for the
+      brokers that only accept email requests. Brokers that hide behind CAPTCHAs or bot walls get listed
+      honestly in the final report — no tool can pass those automatically, and any service claiming
+      otherwise is not telling the truth.</p>
       <div class="rowBtns">
-        <button type="button" id="runAllBtn">Run everything for me</button>
+        <button type="button" id="autoBtn" class="autoBtn">Remove my data everywhere</button>
         <span id="runStatus" class="hint"></span>
       </div>
+      <p class="hint">Pressing the button is your confirmation: removal requests will be submitted to the brokers in your name.</p>
       <div class="progressTrack" id="runTrack" hidden><div id="runBar"></div></div>
-      <div id="runBox" hidden>
-        <h3>✅ Ready — the agent can submit these (<span id="readyCount">0</span>)</h3>
-        <div id="readyList"></div>
-        <label class="confirmRow"><input type="checkbox" id="confirmAll"> I confirm: submit my removal requests to all the brokers above</label>
+      <div id="autoFeed" hidden></div>
+      <div id="autoSummary" hidden>
+        <h3 id="autoSummaryTitle">Run complete</h3>
+        <p id="autoSummaryText"></p>
         <div class="rowBtns">
-          <button type="button" id="submitAllBtn">Submit all ready</button>
-          <span id="submitAllStatus" class="hint"></span>
+          <button type="button" id="draftBtn" hidden>Open email draft</button>
+          <button type="button" id="lettersBtn" hidden>Download all letters (.txt)</button>
+          <button type="button" id="reportBtn">Download full report (.txt)</button>
         </div>
-        <h3>✉️ Email requests — one tap each (<span id="emailCount">0</span>)</h3>
-        <p class="hint">Opens your mail app with the erasure letter already written — you just press Send there.</p>
-        <div id="emailList"></div>
-        <h3>✋ Needs you — guided queue (<span id="manualCount">0</span>)</h3>
-        <div id="manualList"></div>
-        <div class="rowBtns">
-          <button type="button" id="queueBtn">Start guided queue</button>
-          <span id="queueStatus" class="hint"></span>
-        </div>
-        <div id="queueBox" hidden>
-          <h3 id="queueTitle">Guided queue</h3>
-          <p id="queueWhy" class="hint"></p>
-          <p>Your details, ready to paste: <code id="queueProfile"></code></p>
-          <div class="rowBtns">
-            <a class="btnLink" id="queueOpen" href="#" target="_blank" rel="noopener">Open opt-out page →</a>
-            <button type="button" id="queueCopy">Copy my details</button>
-            <button type="button" id="queueDone">Done — next</button>
-            <button type="button" id="queueSkip">Skip</button>
-          </div>
-        </div>
+        <p class="hint" id="draftHint" hidden>Email brokers only accept requests from <em>your own</em> email address, so the agent writes each letter and opens it in your mail app — your only job there is pressing Send.</p>
       </div>
     </div>
   </section>
 
   <section id="removal" class="card">
-    <h2><span class="step">3</span> Removal Centre (manual list &amp; letter)</h2>
+    <h2><span class="step">3</span> Manual tools (advanced)</h2>
     <p>These companies sell your data. Each one legally has to remove it when you ask —
     under India's <strong>DPDP Act §12</strong>, GDPR Art. 17, or CCPA. Work through the list:
     open the opt-out, use the letter generator if they ask for a written request, and mark your progress.
     Progress is saved only in your browser.</p>
+    <details class="advDetails"><summary>Show the manual tools — only if you want to do it by hand</summary>
     <div class="letterBox">
       <h3>Deletion request letter generator</h3>
       <label>Your full name <input type="text" id="lgName" placeholder="Rudra"></label>
@@ -174,6 +156,7 @@
     <p id="brokerProgress" class="hint"></p>
     <div class="progressTrack"><div id="brokerBar"></div></div>
     <div id="brokerList"></div>
+      </details>
   </section>
 
   <section id="google" class="card">

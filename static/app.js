@@ -120,8 +120,8 @@ function renderScan(d) {
   const steps = [];
   if (d.breach_count) steps.push("Change the password on every breached site above — and anywhere you reused the same password.");
   steps.push("Turn on two-factor authentication (authenticator app) on your email first, then banking and social accounts.");
-  steps.push("Work through the Removal Centre below to delete your data from brokers selling it.");
-  steps.push("Use Google “Results about you” (section 3) to hide your phone/address from Google Search.");
+  steps.push("Go to Agent Mode below and press \"Remove my data everywhere\" — the agent submits removal requests to the brokers for you.");
+  steps.push("Use Google “Results about you” (section 4) to hide your phone/address from Google Search.");
   const ol = $("nextSteps");
   ol.innerHTML = "";
   steps.forEach((s) => {
@@ -406,7 +406,7 @@ async function probeBroker(broker, btn) {
     lines.forEach((t) => {
       const p = document.createElement("p");
       p.className = "hint";
-      p.style.color = "#2c2f36";
+      p.style.color = "#e8e8e8";
       p.textContent = t;
       out.appendChild(p);
     });
@@ -451,52 +451,75 @@ $("gSearchBtn").addEventListener("click", () => {
   });
 });
 
-/* ---------------- One-tap removal run ---------------- */
-let runProbes = {};   // broker -> probe result
-let runGroups = { ready: [], email: [], manual: [] };
-let runPlan = [];     // plan items by broker name lookup
+/* ---------------- Zero-touch automation ---------------- */
+let autoPlan = [];
+let autoResults = [];   // {broker, outcome, detail}
+let autoDrafts = [];    // broker names with prepared email drafts
 
-function planItem(broker) { return runPlan.find((p) => p.broker === broker) || {}; }
+function planItem(broker) { return autoPlan.find((x) => x.broker === broker) || {}; }
 
-async function probeFast(broker, profile) {
+function feed(icon, text) {
+  const box = $("autoFeed");
+  box.hidden = false;
+  const line = document.createElement("p");
+  line.className = "feedLine";
+  line.textContent = icon + " " + text;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function probeMode(broker, profile, deep) {
   const resp = await fetch("/api/agent/probe", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ broker, profile, deep: false }),
+    body: JSON.stringify({ broker, profile, deep: !!deep }),
   });
   const d = await resp.json();
   if (!resp.ok) throw new Error(d.error || "Probe failed");
   return d;
 }
 
-function runRow(name, metaText) {
-  const div = document.createElement("div");
-  div.className = "broker";
-  const row = document.createElement("div");
-  row.className = "runRow";
-  const left = document.createElement("div");
-  const nm = document.createElement("span");
-  nm.className = "bname"; nm.textContent = name;
-  const meta = document.createElement("span");
-  meta.className = "bmeta"; meta.textContent = metaText || "";
-  left.appendChild(nm); left.appendChild(meta);
-  row.appendChild(left);
-  div.appendChild(row);
-  return { div, row };
+async function autoSubmit(broker, probe) {
+  const form = probe.forms[probe.forms.length - 1];
+  const resp = await fetch("/api/agent/submit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirm: true, broker, form_action: form.action, method: form.method, payload: probe.payload_preview || {} }),
+  });
+  const d = await resp.json();
+  if (!resp.ok) throw new Error(d.error || "Submit failed");
+  return d;
 }
 
-$("runAllBtn").addEventListener("click", async () => {
+function record(broker, outcome, detail) {
+  autoResults.push({ broker, outcome, detail });
+  if (outcome === "submitted") {
+    feed("✅", broker + " — removal submitted automatically" + (detail ? " (" + detail + ")" : ""));
+    setStatus(broker, "sent");
+  } else if (outcome === "draft") {
+    feed("✉️", broker + " — erasure letter written; opens in your mail app below");
+    autoDrafts.push(broker);
+  } else {
+    feed("🚧", broker + " — " + detail);
+  }
+}
+
+$("autoBtn").addEventListener("click", async () => {
   const profile = agentProfile();
-  const btn = $("runAllBtn");
+  const btn = $("autoBtn");
   if (!profile.full_name || !profile.email) {
-    $("runStatus").textContent = "Fill in your full name and email in Agent Mode above first — the agent needs them to probe and pre-fill.";
+    $("runStatus").textContent = "Fill in your full name and email above first — the agent acts in your name.";
     return;
   }
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Running…';
-  $("runStatus").textContent = "Building your plan…";
+  btn.innerHTML = '<span class="spinner"></span>Working…';
+  $("autoFeed").innerHTML = "";
+  $("autoSummary").hidden = true;
+  autoResults = []; autoDrafts = [];
   $("runTrack").hidden = false;
   $("runBar").style.width = "0%";
+  let done = 0, total = 40;
+  const bump = () => { done++; $("runBar").style.width = Math.round(100 * done / total) + "%"; $("runStatus").textContent = "Working… " + done + " of " + total + " brokers processed"; };
   try {
     if (!window.__plan) {
       const resp = await fetch("/api/agent/plan", {
@@ -508,198 +531,130 @@ $("runAllBtn").addEventListener("click", async () => {
       if (!resp.ok) throw new Error(data.error || "Plan failed");
       window.__plan = data.plan;
     }
-    runPlan = window.__plan;
-    runProbes = {};
-    runGroups = { ready: [], email: [], manual: [] };
-    let done = 0;
-    const total = runPlan.length;
-    const queue = runPlan.slice();
-    async function worker() {
+    autoPlan = window.__plan;
+    total = autoPlan.length;
+    feed("🚀", "Starting — probing all " + total + " brokers…");
+    const deepQueue = [];
+    const queue = autoPlan.slice();
+    async function fastWorker() {
       while (queue.length) {
         const item = queue.shift();
         try {
-          const probe = await probeFast(item.broker, profile);
-          runProbes[item.broker] = probe;
-          if (probe.fillable && probe.forms && probe.forms.length) runGroups.ready.push(item.broker);
-          else if (item.contact_email) runGroups.email.push(item.broker);
-          else runGroups.manual.push(item.broker);
-        } catch (e) {
-          runGroups.manual.push(item.broker);
-          runProbes[item.broker] = { blockers: ["Probe failed: " + e.message] };
-        }
-        done++;
-        $("runBar").style.width = Math.round(100 * done / total) + "%";
-        $("runStatus").textContent = "Probed " + done + " of " + total + " brokers…";
+          const probe = await probeMode(item.broker, profile, false);
+          if (probe.fillable && probe.forms && probe.forms.length) {
+            const r = await autoSubmit(item.broker, probe);
+            if (r.ok) record(item.broker, "submitted", "HTTP " + r.status);
+            else record(item.broker, "blocked", "form found but the broker answered HTTP " + (r.status || "—") + " to the submission");
+          } else if (item.contact_email) {
+            record(item.broker, "draft", item.contact_email);
+          } else {
+            deepQueue.push(item);
+          }
+        } catch (e) { deepQueue.push(item); }
+        bump();
       }
     }
-    await Promise.all([worker(), worker(), worker()]);
-    renderRunGroups();
-    $("runStatus").textContent = "Done — " + runGroups.ready.length + " ready to submit · " + runGroups.email.length + " email requests · " + runGroups.manual.length + " need you.";
-    $("runBox").hidden = false;
-    $("runBox").scrollIntoView({ behavior: "smooth", block: "center" });
+    await Promise.all([fastWorker(), fastWorker(), fastWorker()]);
+    if (deepQueue.length) {
+      feed("🔎", "Deep pass — retrying " + deepQueue.length + " stubborn brokers with the relay and alternate routes…");
+      const dq = deepQueue.slice();
+      async function deepWorker() {
+        while (dq.length) {
+          const item = dq.shift();
+          let outcome = null;
+          try {
+            const probe = await probeMode(item.broker, profile, true);
+            if (probe.fillable && probe.forms && probe.forms.length) {
+              const r = await autoSubmit(item.broker, probe);
+              if (r.ok) outcome = ["submitted", "HTTP " + r.status + " via deep pass"];
+              else outcome = ["blocked", "deep pass found the form but the broker answered HTTP " + (r.status || "—")];
+            }
+            if (!outcome) {
+              const email = item.contact_email || probe.contact_email;
+              if (email) outcome = ["draft", email];
+              else {
+                const why = (probe.blockers && probe.blockers[0]) || "no automatic channel found";
+                outcome = ["blocked", why + " — no tool can pass this automatically"];
+              }
+            }
+          } catch (e) {
+            outcome = ["blocked", "unreachable from the server right now"];
+          }
+          record(item.broker, outcome[0], outcome[1]);
+        }
+      }
+      await Promise.all([deepWorker(), deepWorker()]);
+    }
+    const sub = autoResults.filter((r) => r.outcome === "submitted").length;
+    const dr = autoResults.filter((r) => r.outcome === "draft").length;
+    const bl = autoResults.filter((r) => r.outcome === "blocked").length;
+    $("runStatus").textContent = "Run complete.";
+    $("autoSummary").hidden = false;
+    $("autoSummaryText").textContent = "✅ " + sub + " removals submitted automatically · ✉️ " + dr + " letters written for email brokers · 🚧 " + bl + " blocked by anti-bot walls (CAPTCHA / login / JavaScript) — those refuse every automated tool, including the paid ones; they're listed in the report with the exact reason each.";
+    $("draftBtn").hidden = !autoDrafts.length;
+    $("draftHint").hidden = !autoDrafts.length;
+    $("lettersBtn").hidden = !autoDrafts.length;
+    updateDraftBtn();
+    $("autoSummary").scrollIntoView({ behavior: "smooth", block: "center" });
+    renderProgress();
   } catch (err) {
     $("runStatus").textContent = err.message;
   } finally {
     btn.disabled = false;
-    btn.textContent = "Run everything for me";
+    btn.textContent = "Remove my data everywhere";
   }
 });
 
-function renderRunGroups() {
-  const statuses = getStatuses();
-  // READY
-  $("readyCount").textContent = runGroups.ready.length;
-  const rl = $("readyList"); rl.innerHTML = "";
-  runGroups.ready.forEach((broker) => {
-    const probe = runProbes[broker];
-    const fields = Object.keys(probe.payload_preview || {}).length;
-    const { div, row } = runRow(broker, "form found · " + fields + " field(s) pre-filled" + (statuses[broker] === "sent" ? " · already sent" : ""));
-    const b = document.createElement("button");
-    b.type = "button"; b.textContent = "Submit";
-    b.addEventListener("click", () => submitOne(broker, b, div));
-    const btns = document.createElement("div"); btns.className = "bbtns"; btns.appendChild(b);
-    row.appendChild(btns);
-    rl.appendChild(div);
-  });
-  // EMAIL
-  $("emailCount").textContent = runGroups.email.length;
-  const el = $("emailList"); el.innerHTML = "";
-  runGroups.email.forEach((broker) => {
-    const item = planItem(broker);
-    const { div, row } = runRow(broker, "✉ " + (item.contact_email || "") + (statuses[broker] === "sent" ? " · already sent" : ""));
-    const b = document.createElement("button");
-    b.type = "button"; b.textContent = "Send email request";
-    b.addEventListener("click", () => sendEmailRequest(broker));
-    const btns = document.createElement("div"); btns.className = "bbtns"; btns.appendChild(b);
-    row.appendChild(btns);
-    el.appendChild(div);
-  });
-  // MANUAL
-  $("manualCount").textContent = runGroups.manual.length;
-  const ml = $("manualList"); ml.innerHTML = "";
-  runGroups.manual.forEach((broker) => {
-    const probe = runProbes[broker] || {};
-    const item = planItem(broker);
-    const why = (probe.blockers && probe.blockers[0]) || ("needs: " + ((item.needs || []).join(", ").replace(/_/g, " ") || "manual steps"));
-    const { div, row } = runRow(broker, "");
-    const p = document.createElement("p");
-    p.className = "hint"; p.textContent = "🚧 " + why;
-    const open = document.createElement("a");
-    open.className = "btnLink"; open.href = item.optout_url || "#"; open.target = "_blank"; open.rel = "noopener";
-    open.textContent = "Open opt-out →";
-    const btns = document.createElement("div"); btns.className = "bbtns"; btns.appendChild(open);
-    row.appendChild(btns);
-    div.appendChild(p);
-    ml.appendChild(div);
-  });
-}
-
-async function submitOne(broker, btn, card) {
-  const probe = runProbes[broker];
-  if (!probe || !probe.forms || !probe.forms.length) return { ok: false };
-  const form = probe.forms[probe.forms.length - 1];
-  if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
-  try {
-    const resp = await fetch("/api/agent/submit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ confirm: true, broker, form_action: form.action, method: form.method, payload: probe.payload_preview || {} }),
-    });
-    const d = await resp.json();
-    if (!resp.ok) throw new Error(d.error || "Submit failed");
-    if (d.ok) {
-      setStatus(broker, "sent");
-      if (card) card.classList.add("st-removed");
-      if (btn) btn.textContent = "✓ Submitted (HTTP " + d.status + ")";
-      return { ok: true };
-    }
-    if (btn) btn.textContent = "✗ Broker answered HTTP " + (d.status || "—");
-    return { ok: false };
-  } catch (e) {
-    if (btn) btn.textContent = "✗ " + e.message;
-    return { ok: false };
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-$("submitAllBtn").addEventListener("click", async () => {
-  const btn = $("submitAllBtn");
-  if (!$("confirmAll").checked) {
-    $("submitAllStatus").textContent = "Tick the confirm box first — submissions are real and go to the brokers.";
-    return;
-  }
-  btn.disabled = true;
-  let ok = 0;
-  for (const broker of runGroups.ready) {
-    $("submitAllStatus").textContent = "Submitting " + broker + "… (" + ok + " done)";
-    const r = await submitOne(broker, null, null);
-    if (r.ok) ok++;
-  }
-  $("submitAllStatus").textContent = "Finished: " + ok + " of " + runGroups.ready.length + " submitted. Brokers usually confirm by email — check your inbox and click their confirmation links.";
-  btn.disabled = false;
-  renderRunGroups();
-});
-
-function sendEmailRequest(broker) {
-  const item = planItem(broker);
+function syncLetterFields() {
   const profile = agentProfile();
   if (!$("lgName").value && profile.full_name) $("lgName").value = profile.full_name;
   if (!$("lgEmail").value && profile.email) $("lgEmail").value = profile.email;
   if (!$("lgCity").value && profile.city) $("lgCity").value = profile.city;
+}
+
+function updateDraftBtn() {
+  $("draftBtn").textContent = autoDrafts.length ? "Open email draft (" + autoDrafts.length + " left)" : "All drafts opened";
+  $("draftBtn").disabled = !autoDrafts.length;
+}
+
+$("draftBtn").addEventListener("click", () => {
+  const broker = autoDrafts.shift();
+  if (!broker) return;
+  const item = planItem(broker);
+  syncLetterFields();
   const letter = makeLetter(broker);
-  const subject = "Request for erasure of my personal data — " + broker;
   const a = document.createElement("a");
-  a.href = "mailto:" + (item.contact_email || "") + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(letter);
+  a.href = "mailto:" + (item.contact_email || "") + "?subject=" + encodeURIComponent("Request for erasure of my personal data — " + broker) + "&body=" + encodeURIComponent(letter);
   document.body.appendChild(a);
   a.click();
   a.remove();
   setStatus(broker, "sent");
-  renderRunGroups();
-}
+  updateDraftBtn();
+  renderProgress();
+});
 
-/* Guided queue over the manual group */
-let queueItems = [], queueIdx = 0;
-function showQueueItem() {
-  if (queueIdx >= queueItems.length) {
-    $("queueBox").hidden = true;
-    $("queueStatus").textContent = "🎉 Guided queue finished — everything else is submitted or emailed. Check your inbox for broker confirmation links.";
-    renderProgress();
-    return;
-  }
-  const broker = queueItems[queueIdx];
-  const item = planItem(broker);
-  const probe = runProbes[broker] || {};
-  $("queueBox").hidden = false;
-  $("queueTitle").textContent = "Guided queue — " + (queueIdx + 1) + " of " + queueItems.length + ": " + broker;
-  $("queueWhy").textContent = (probe.blockers && probe.blockers[0]) || "This one needs your hands — the agent prepared everything else.";
-  const p = agentProfile();
-  $("queueProfile").textContent = [p.full_name, p.email, p.phone, p.city].filter(Boolean).join(" · ");
-  $("queueOpen").href = item.optout_url || "#";
-  $("queueStatus").textContent = "";
+$("lettersBtn").addEventListener("click", () => {
+  syncLetterFields();
+  const all = autoResults.filter((r) => r.outcome === "draft").map((r) => makeLetter(r.broker)).join("\n\n========================================\n\n");
+  downloadText("leakguard-erasure-letters.txt", all || "No email drafts in this run.");
+});
+
+$("reportBtn").addEventListener("click", () => {
+  const lines = ["LeakGuard removal report — " + new Date().toLocaleString(), ""];
+  autoResults.forEach((r) => lines.push((r.outcome === "submitted" ? "[SUBMITTED] " : r.outcome === "draft" ? "[EMAIL LETTER] " : "[BLOCKED] ") + r.broker + " — " + (r.detail || "")));
+  downloadText("leakguard-removal-report.txt", lines.join("\n"));
+});
+
+function downloadText(name, text) {
+  const blob = new Blob([text], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
-$("queueBtn").addEventListener("click", () => {
-  const statuses = getStatuses();
-  queueItems = runGroups.manual.filter((b) => statuses[b] !== "removed" && statuses[b] !== "sent");
-  queueIdx = 0;
-  if (!queueItems.length) {
-    $("queueStatus").textContent = runGroups.manual.length ? "All manual brokers are already marked done 🎉" : "Run everything first — the queue is built from the 'Needs you' group.";
-    return;
-  }
-  showQueueItem();
-  $("queueBox").scrollIntoView({ behavior: "smooth", block: "center" });
-});
-$("queueCopy").addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText($("queueProfile").textContent); $("queueStatus").textContent = "Details copied — paste them into the broker's form."; }
-  catch (e) { $("queueStatus").textContent = "Copy blocked by the browser — long-press the details text to copy."; }
-});
-$("queueDone").addEventListener("click", () => {
-  const broker = queueItems[queueIdx];
-  if (broker) setStatus(broker, "removed");
-  queueIdx++;
-  showQueueItem();
-});
-$("queueSkip").addEventListener("click", () => { queueIdx++; showQueueItem(); });
 
 /* ---------------- Reveal on scroll ---------------- */
 (function () {

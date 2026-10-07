@@ -348,6 +348,9 @@ async function probeBroker(broker, btn) {
       lines.push(d.fillable ? "✅ This form is script-fillable." : "Form found, but a blocker stops auto-fill.");
     }
     (d.blockers || []).forEach((b) => lines.push("🚧 " + b));
+    if (d.relay) {
+      lines.push("📡 Relay reader: " + (d.relay.reachable ? "fetched the real page (" + (d.relay.title || "untitled") + ")" : d.relay.challenge ? "Cloudflare challenge even via relay" : "could not fetch it either"));
+    }
     if (d.browser && d.browser.available) {
       lines.push("🌐 Browser check: " + (d.browser.reachable ? "page rendered (" + (d.browser.title || "untitled") + ")" : "could not render either") + (d.browser.challenge ? " — bot-check challenge shown" : ""));
     } else if (d.browser) {

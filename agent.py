@@ -36,7 +36,7 @@ UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
 
 PROFILE_FIELDS = {
     # semantic field -> regexes matched against input name/id/placeholder/label
-    "full_name": [r"full.?name", r"^name$", r"first.?name", r"your.?name"],
+    "full_name": [r"full.?name", r"^name$", r"_name$", r"first.?name", r"your.?name"],
     "email": [r"e-?mail"],
     "phone": [r"phone", r"mobile", r"tel"],
     "city": [r"city", r"location", r"address"],
@@ -206,6 +206,70 @@ def probe_broker(broker_name, profile=None):
     return result
 
 
+RELAY_READER = "https://api.allorigins.win/raw?url={url}"
+
+
+def relay_probe(url, profile=None):
+    """Fetch a page through a public relay reader (a different network than
+    this server). Some brokers let the relay through when they 403 the
+    server directly (measured: Whitepages). Cloudflare-hardened sites
+    challenge the relay too (measured: BeenVerified) — that is reported,
+    not hidden. Read-only: forms found here are for inspection/pre-fill;
+    submission never goes through a third-party relay."""
+    profile = profile or {}
+    out = {"via": "relay", "reachable": False, "status": None, "forms": [],
+           "blockers": [], "challenge": False, "payload_preview": {}}
+    relay_url = RELAY_READER.format(url=urllib.parse.quote(url, safe=""))
+    html = None
+    # The free relay is intermittent (measured 522s between successes) —
+    # retry a few times with backoff before declaring it unreachable.
+    import time
+    for attempt in range(3):
+        req = urllib.request.Request(relay_url, headers=UA)
+        try:
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                out["status"] = resp.status
+                html = resp.read(1024 * 1024).decode("utf-8", "replace")
+            break
+        except Exception:
+            if attempt < 2:
+                time.sleep(3 * (attempt + 1))
+    if html is None:
+        out["blockers"].append("Relay reader could not fetch the page either (free relay is intermittent — retrying the probe often works)")
+        return out
+    low = html.lower()
+    title = ""
+    m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+    if m:
+        title = re.sub(r"\s+", " ", m.group(1)).strip()[:120]
+    out["title"] = title
+    if "just a moment" in low[:3000] or "checking your browser" in low[:3000]:
+        out["challenge"] = True
+        out["blockers"].append("Cloudflare challenge page even via the relay reader — this site only talks to real residential browsers; use the local runner on your own device")
+        return out
+    out["reachable"] = True
+    parser = FormParser()
+    try:
+        parser.feed(html)
+    except Exception:
+        pass
+    if parser.has_captcha:
+        out["blockers"].append("CAPTCHA on the page — a human must solve this step")
+    for form in parser.forms[:3]:
+        payload, unmapped = match_fields(form["fields"], profile)
+        out["forms"].append({
+            "action": urllib.parse.urljoin(url, form["action"]) if form["action"] else url,
+            "method": form["method"],
+            "fields": form["fields"],
+            "unmapped_fields": unmapped,
+        })
+        if payload and not out["payload_preview"]:
+            out["payload_preview"] = payload
+    if not out["forms"]:
+        out["blockers"].append("Relay fetched the page but found no readable form (the form may need JavaScript / a listing search first)")
+    return out
+
+
 def browser_probe(url, timeout=70):
     """Run browser_probe.py in a subprocess (a hung page can never hang the
     server). Returns its dict, or None if the browser layer is unavailable."""
@@ -225,20 +289,40 @@ def browser_probe(url, timeout=70):
 
 
 def probe_with_browser_fallback(broker_name, profile=None):
-    """HTTP probe first; if the page blocks scripts / needs JavaScript /
-    can't be filled, fall back to the real-browser probe and merge."""
+    """Deep probe chain: HTTP -> relay reader -> real browser.
+    Each layer runs only if the previous one could not produce a usable
+    form, and every layer's outcome is reported honestly."""
     result = probe_broker(broker_name, profile)
     if result.get("error"):
         return result
+    result["via"] = "http"
+    # --- layer 2: relay reader (different network) ---
+    if not result.get("fillable"):
+        relay = relay_probe(result["url"], profile)
+        result["relay"] = {"reachable": relay["reachable"], "challenge": relay["challenge"],
+                           "status": relay["status"], "title": relay.get("title", "")}
+        if relay["reachable"] and relay["forms"]:
+            result["via"] = "http+relay"
+            result["reachable"] = True
+            result["status"] = result.get("status") or relay["status"]
+            result["forms"] = relay["forms"]
+            if relay["payload_preview"]:
+                result["payload_preview"] = relay["payload_preview"]
+            result["blockers"] = relay["blockers"]
+            result["fillable"] = bool(result["payload_preview"]) and not relay["challenge"]
+            if result["fillable"]:
+                return result
+        else:
+            result["blockers"] = list(dict.fromkeys(result.get("blockers", []) + relay["blockers"]))
+    # --- layer 3: real browser ---
     b = browser_probe(result["url"])
     if not b:
-        result["via"] = "http"
         result["browser"] = {"available": False}
         return result
     result["browser"] = {"available": True, "reachable": b.get("reachable"),
                          "status": b.get("status"), "title": b.get("title"),
                          "challenge": b.get("challenge")}
-    result["via"] = "http+browser"
+    result["via"] = result.get("via", "http") + "+browser"
     if b.get("reachable"):
         result["reachable"] = True
         result["status"] = b.get("status") or result.get("status")
@@ -255,12 +339,16 @@ def probe_with_browser_fallback(broker_name, profile=None):
                 result["payload_preview"] = payload
         if bforms:
             result["forms"] = bforms
-        # Browser blockers are the ground truth when the page rendered;
-        # keep them, drop the now-misleading HTTP-only ones.
+        # Browser blockers are the ground truth when the page rendered —
+        # UNLESS an earlier layer already got a usable page (e.g. relay):
+        # then the browser result is only a secondary note.
         http_blockers = result.get("blockers", [])
         rendered = bool(b.get("forms")) or b.get("challenge")
-        if rendered:
+        if rendered and not (result.get("reachable") and result.get("forms")):
             result["blockers"] = b.get("blockers", [])
+        elif rendered:
+            result["blockers"] = list(dict.fromkeys(
+                http_blockers + ["Browser layer: " + x for x in b.get("blockers", [])]))
         else:
             result["blockers"] = list(dict.fromkeys(http_blockers + b.get("blockers", [])))
         result["fillable"] = bool(result.get("payload_preview")) and not b.get("challenge") \
@@ -310,16 +398,41 @@ def free_lane_classify(fields, profile_keys):
     if not base or not key or not model:
         return None
     prompt = ("Map each form field to one of: " + ", ".join(profile_keys) + ", ignore. "
-              "Reply ONLY with JSON like {\"field\":\"semantic\"}. Fields: " + json.dumps(fields))
+              "Answer with the JSON object only, no analysis. "
+              "JSON like {\"field\":\"semantic\"}. Fields: " + json.dumps(fields))
+    # Reasoning models on the free lanes spend part of the budget thinking;
+    # 200 tokens was measured to truncate before the JSON (finish=length).
     body = json.dumps({"model": model, "messages": [{"role": "user", "content": prompt}],
-                       "max_tokens": 200}).encode("utf-8")
+                       "max_tokens": 900}).encode("utf-8")
     req = urllib.request.Request(base + "/chat/completions", data=body, method="POST",
                                  headers={"Content-Type": "application/json",
                                           "Authorization": "Bearer " + key})
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=45) as resp:
             data = json.loads(resp.read().decode("utf-8", "replace"))
-        text = data["choices"][0]["message"]["content"]
-        return json.loads(text[text.index("{"):text.rindex("}") + 1])
+        text = data["choices"][0]["message"]["content"] or ""
+        return _extract_mapping(text)
     except Exception:
         return None
+
+
+def _extract_mapping(text):
+    """Pull the field->semantic JSON object out of a model reply, even when a
+    reasoning model wrapped it in analysis. Tries the last '{' first."""
+    starts = [i for i, ch in enumerate(text) if ch == "{"]
+    for start in reversed(starts):
+        depth = 0
+        for end in range(start, len(text)):
+            if text[end] == "{":
+                depth += 1
+            elif text[end] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        obj = json.loads(text[start:end + 1])
+                    except Exception:
+                        break
+                    if isinstance(obj, dict) and obj:
+                        return obj
+                    break
+    return None

@@ -104,17 +104,17 @@
   },
   "Nuwber": {
     "automation": "http_form",
-    "flow": [
-      "Find your Nuwber profile and copy its URL",
-      "Open the removal page and paste the URL + your email",
-      "Click the confirmation link in their email",
-      "Re-check the profile"
-    ],
     "needs": [
       "listing_url",
       "email_confirm"
     ],
-    "notes": ""
+    "flow": [
+      "Find your Nuwber profile and copy its URL",
+      "Open the removal form (nuwber.com/removal/link) and paste the URL",
+      "Enter your email and click Remove / Opt Out",
+      "Click the confirmation link in Nuwber's email — removal completes in ~24-48h"
+    ],
+    "notes": "Removal URL corrected Oct 2026 to /removal/link. Nuwber's domain refused all connections from the dev server network during testing — probe from a home connection (local runner) if the server reports it unreachable."
   },
   "PeopleFinders": {
     "automation": "http_form",

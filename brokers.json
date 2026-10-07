@@ -77,9 +77,9 @@
     "type": "People search"
   },
   {
-    "method": "Web form — paste profile URL, confirm by email",
+    "method": "Web form — paste your listing URL, enter email, click Remove, then confirm via the email link",
     "name": "Nuwber",
-    "optout_url": "https://nuwber.com/removal",
+    "optout_url": "https://nuwber.com/removal/link",
     "region": "US / Global",
     "type": "People search"
   },

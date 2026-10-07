@@ -150,6 +150,34 @@ button:disabled{opacity:.5;cursor:wait;transform:none}
 footer{text-align:center;color:var(--faint);font-size:13px;margin-top:32px;line-height:1.6}
 footer a{color:var(--muted)}
 
+/* ---------- account & privacy center ---------- */
+.acctArea{display:flex;align-items:center;gap:10px;flex:none}
+.acctLabel{color:var(--muted);font-size:13px;font-weight:700}
+.acctBtn{
+  background:transparent;color:#fff;border:1px solid #727272;
+  padding:8px 18px;font-size:13.5px;
+}
+.acctBtn:hover{background:var(--elev);border-color:#fff;transform:none}
+.btnGhost{background:transparent;color:#fff;border:1px solid #727272}
+.btnGhost:hover{background:var(--elev);border-color:#fff}
+.dangerBtn{background:transparent;color:#ff8fa5;border:1px solid #7a2438}
+.dangerBtn:hover{background:#3d1620;transform:none}
+.idRow,.consentRow{
+  display:flex;justify-content:space-between;gap:12px;align-items:center;
+  background:var(--surface2);border-radius:10px;padding:11px 14px;margin-top:8px;
+}
+.idRow .kindTag{
+  display:inline-block;background:var(--elev);border-radius:999px;
+  padding:3px 10px;font-size:11.5px;font-weight:700;letter-spacing:.6px;
+  text-transform:uppercase;color:var(--muted);margin-right:9px;
+}
+.idRow .idVal{font-weight:600;font-size:14.5px;word-break:break-all}
+.miniBtn{padding:7px 15px;font-size:13px}
+.consentRow .cText{flex:1}
+.consentRow .cText b{display:block;font-size:14.5px}
+.consentRow .cText span{color:var(--faint);font-size:12.5px;line-height:1.45;display:block;margin-top:2px}
+.consentRow input{width:auto;margin:0;accent-color:var(--green);transform:scale(1.35);flex:none}
+
 /* reveal on scroll (JS-added class only) */
 .reveal{opacity:0;transform:translateY(12px)}
 .reveal.in{opacity:1;transform:none;transition:opacity .55s ease,transform .55s cubic-bezier(.22,.8,.3,1)}

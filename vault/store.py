@@ -99,6 +99,22 @@ def normalize(kind, value):
     return _WS_RE.sub(" ", value.strip()).casefold()
 
 
+def hmac_with_label(label, normalized_value, lookup_key=None):
+    """HMAC-SHA256 digest (bytes) over an arbitrary label + an
+    ALREADY-normalized value: HMAC(key, label + "\\x00" + value).
+
+    This is the vault's single MAC recipe. lookup_hmac() uses it with
+    the identifier kind as the label; accounts (Stage S3) use it with
+    the label "account_email" so account emails are looked up by the
+    same keyed-HMAC scheme without becoming vault identifiers.
+    """
+    if lookup_key is None:
+        lookup_key = crypto.load_key_from_env("VAULT_LOOKUP_KEY")
+    lookup_key = crypto.validate_key(lookup_key, "lookup key")
+    msg = (str(label) + "\x00" + str(normalized_value)).encode("utf-8")
+    return hmac_mod.new(lookup_key, msg, hashlib.sha256).digest()
+
+
 def lookup_hmac(kind, value, lookup_key=None):
     """HMAC-SHA256 digest (bytes) over kind + normalized value.
 
@@ -107,12 +123,7 @@ def lookup_hmac(kind, value, lookup_key=None):
     as a username can never collide.
     """
     kind = _check_kind(kind)
-    if lookup_key is None:
-        lookup_key = crypto.load_key_from_env("VAULT_LOOKUP_KEY")
-    lookup_key = crypto.validate_key(lookup_key, "lookup key")
-    normalized = normalize(kind, value)
-    msg = (kind + "\x00" + normalized).encode("utf-8")
-    return hmac_mod.new(lookup_key, msg, hashlib.sha256).digest()
+    return hmac_with_label(kind, normalize(kind, value), lookup_key)
 
 
 def mask(kind, value):

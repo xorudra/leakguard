@@ -1,9 +1,11 @@
 # LeakGuard runtime dependencies (Stage S2 onwards).
-# Everything else is Python 3.12 standard library. These two exist because
-# the stdlib has no Postgres driver and no AES-GCM.
+# Everything else is Python 3.12 standard library. These three exist
+# because the stdlib has no Postgres driver, no AES-GCM, and no Argon2.
 #   psycopg[binary]  — PostgreSQL driver (Neon free tier in production)
 #   cryptography     — AES-256-GCM envelope encryption for the identifier vault
+#   argon2-cffi      — Argon2id password hashing for accounts (Stage S3)
 # The app still boots and serves every pre-S2 feature if these are missing
 # AND no DATABASE_URL is configured (graceful degradation, see db/pool.py).
 psycopg[binary]>=3.2,<4
 cryptography>=42,<46
+argon2-cffi>=23,<26

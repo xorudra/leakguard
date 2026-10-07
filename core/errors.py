@@ -55,5 +55,27 @@ def bad_request(code, message):
     return ApiError(400, code, message)
 
 
+def unauthorized(code="unauthenticated", message="Sign in required"):
+    return ApiError(401, code, message)
+
+
+def forbidden(code, message):
+    return ApiError(403, code, message)
+
+
+def conflict(code, message):
+    return ApiError(409, code, message)
+
+
+def too_many_requests(
+        message="Too many attempts — wait a few minutes and try again"):
+    return ApiError(429, "rate_limited", message)
+
+
+def unavailable(code="db_unavailable",
+                message="Accounts are not available right now"):
+    return ApiError(503, code, message)
+
+
 def internal_error():
     return ApiError(500, "internal_error", "Internal server error")

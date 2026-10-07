@@ -4,11 +4,13 @@ LeakGuard — find leaked personal data and help remove it.
 
 GUI-first (web UI, no CLI). Almost entirely Python standard library, so
 it runs anywhere — local machine, Render free tier, any VPS. Since Stage
-S2 there are exactly two third-party dependencies (see requirements.txt:
-a Postgres driver and AES-GCM cryptography) and both are optional at
-runtime: with no DATABASE_URL configured the app boots and serves every
-feature exactly as before — the database and the encrypted identifier
-vault (db/, vault/) simply stay dormant.
+S2/S3 there are exactly three third-party dependencies (see
+requirements.txt: a Postgres driver, AES-GCM cryptography, Argon2id
+password hashing) and all are optional at runtime: with no DATABASE_URL
+configured the app boots and serves the anonymous features exactly as
+before — the database, the encrypted identifier vault (db/, vault/)
+and accounts (accounts/) simply stay dormant, and every account route
+answers a clean structured 503.
 
 What it does
   * Email breach scan      -> XposedOrNot free API (no key needed)
@@ -30,16 +32,25 @@ people-search sites and Google search results.
 """
 
 import hashlib
+import http.cookies
 import json
 import os
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import agent as agent_engine
+from accounts import accounts_available
+from accounts import auth as auth_service
+from accounts import consents as consents_service
+from accounts import identifiers as identifiers_service
+from accounts import privacy as privacy_service
+from accounts import ratelimit
+from accounts import sessions as sessions_mod
 from core import context, errors, logging_setup, security
 from db import pool as db_pool
 
@@ -204,7 +215,7 @@ class Handler(BaseHTTPRequestHandler):
     def _request_id(self):
         return getattr(self, "request_id", None) or context.get_request_id()
 
-    def _send(self, code, body, ctype="application/json"):
+    def _send(self, code, body, ctype="application/json", extra_headers=None):
         data = body if isinstance(body, bytes) else body.encode("utf-8")
         self._response_status = code
         self.send_response(code)
@@ -214,12 +225,14 @@ class Handler(BaseHTTPRequestHandler):
         if rid:
             self.send_header("X-Request-Id", rid)
         security.apply_security_headers(self)
+        for name, value in extra_headers or ():
+            self.send_header(name, value)
         self.end_headers()
         if not getattr(self, "_head_only", False):
             self.wfile.write(data)
 
-    def _json(self, code, obj):
-        self._send(code, json.dumps(obj), "application/json")
+    def _json(self, code, obj, extra_headers=None):
+        self._send(code, json.dumps(obj), "application/json", extra_headers)
 
     def _fail(self, err):
         """Send an ApiError as the structured error body."""
@@ -233,6 +246,72 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return self._fail(errors.not_found())
         self._send(200, data, ctype)
+
+    # ---------- accounts (Stage S3) ----------
+    def _call(self, fn, *args, **kwargs):
+        """Run an accounts/db service call, translating a database
+        outage into a clean structured 503 instead of a 500. ApiErrors
+        pass through untouched."""
+        try:
+            return fn(*args, **kwargs)
+        except errors.ApiError:
+            raise
+        except Exception as exc:
+            if (type(exc).__module__ or "").startswith("psycopg"):
+                raise errors.unavailable()
+            raise
+
+    def _require_accounts(self):
+        """503 unless accounts are configured (DB + vault keys)."""
+        if not accounts_available():
+            raise errors.unavailable()
+
+    def _client_ip(self):
+        # Render (and most hosts) sit behind a proxy that sets
+        # X-Forwarded-For; its first entry is the client. Fall back to
+        # the direct peer (local dev, tests).
+        xff = self.headers.get("X-Forwarded-For") or ""
+        if xff.strip():
+            return xff.split(",")[0].strip()
+        return self.client_address[0] if self.client_address else "-"
+
+    def _session_token(self):
+        raw = self.headers.get("Cookie") or ""
+        try:
+            jar = http.cookies.SimpleCookie(raw)
+        except Exception:
+            return None
+        morsel = jar.get(sessions_mod.COOKIE_NAME)
+        return morsel.value if morsel is not None else None
+
+    def _current_user(self):
+        """The session's user (public dict) or None. Cached per
+        request; session validation itself lives in accounts."""
+        cached = getattr(self, "_user_cache", None)
+        if cached is not None or getattr(self, "_user_loaded", False):
+            return cached
+        self._user_loaded = True
+        token = self._session_token()
+        self._user_cache = (
+            self._call(sessions_mod.validate_session, token) if token else None
+        )
+        return self._user_cache
+
+    def _require_user(self):
+        """(user, raw_token) for a protected route, else a 401."""
+        user = self._current_user()
+        if user is None:
+            raise errors.unauthorized()
+        return user, self._session_token()
+
+    def _rate_limit_credentials(self, email):
+        """Shared register/login limiter: 10 attempts / 15 min per IP
+        AND per account email (counted by its lookup HMAC)."""
+        digest = auth_service.account_email_hmac(
+            auth_service.normalize_email(email))
+        keys = ("ip:" + self._client_ip(), "email:" + digest.hex())
+        if not ratelimit.allow(keys):
+            raise errors.too_many_requests()
 
     # ---------- routes ----------
     def do_HEAD(self):
@@ -264,6 +343,33 @@ class Handler(BaseHTTPRequestHandler):
                 "service": "leakguard",
                 "db": db_pool.db_status(),
             })
+        if route == "/api/auth/me":
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._json(200, user)
+        if route == "/api/consents":
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._json(200, {
+                "consents": self._call(consents_service.current_consents,
+                                       user["id"]),
+            })
+        if route == "/api/identifiers":
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._json(200, {
+                "identifiers": self._call(
+                    identifiers_service.list_identifiers, user["id"]),
+            })
+        if route == "/api/privacy/export":
+            self._require_accounts()
+            user, _token = self._require_user()
+            document = self._call(privacy_service.build_export, user["id"])
+            return self._send(
+                200, json.dumps(document, indent=2), "application/json",
+                extra_headers=[(
+                    "Content-Disposition",
+                    'attachment; filename="leakguard-export.json"')])
         return self._fail(errors.not_found())
 
     def _read_json_body(self):
@@ -284,6 +390,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith("/api/auth/") or parsed.path in (
+                "/api/consents", "/api/identifiers"):
+            return self._accounts_post(parsed.path)
         if parsed.path == "/api/agent/plan":
             payload = self._read_json_body()
             if payload is None:
@@ -371,6 +480,124 @@ class Handler(BaseHTTPRequestHandler):
             "exposure_score": score,
             "sources": ["XposedOrNot (email breaches)", "Have I Been Pwned Pwned Passwords (password, k-anonymity)"],
         })
+
+
+    # ---------- accounts POST routes (Stage S3) ----------
+    def _accounts_post(self, route):
+        """All state-changing account routes. Every one passes the
+        CSRF guard and the accounts-configured check FIRST; protected
+        ones then resolve the session before touching any data, and
+        every service call is scoped by the session's user id."""
+        if route == "/api/auth/logout":
+            security.require_csrf(self)
+            token = self._session_token()
+            if token and accounts_available():
+                try:
+                    auth_service.logout(token)
+                except Exception:
+                    pass  # clearing the cookie matters more
+            return self._json(200, {"ok": True}, extra_headers=[
+                ("Set-Cookie", sessions_mod.clear_cookie_header())])
+
+        security.require_csrf(self)
+        self._require_accounts()
+
+        if route == "/api/auth/register":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            self._rate_limit_credentials(payload.get("email"))
+            user, token = self._call(
+                auth_service.register,
+                payload.get("email"), payload.get("password"))
+            return self._json(201, {"user": user}, extra_headers=[
+                ("Set-Cookie", sessions_mod.cookie_header(token))])
+
+        if route == "/api/auth/login":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            self._rate_limit_credentials(payload.get("email"))
+            result = self._call(
+                auth_service.login,
+                payload.get("email"), payload.get("password"),
+                payload.get("totp_code"))
+            if result.get("totp_required"):
+                return self._json(200, {"totp_required": True})
+            return self._json(200, {"user": result["user"]}, extra_headers=[
+                ("Set-Cookie", sessions_mod.cookie_header(result["token"]))])
+
+        user, token = self._require_user()
+
+        if route == "/api/auth/change-password":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            self._call(auth_service.change_password, user["id"],
+                       payload.get("current_password"),
+                       payload.get("new_password"), token)
+            return self._json(200, {"ok": True})
+        if route == "/api/auth/delete-account":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            self._call(auth_service.delete_account, user["id"],
+                       payload.get("password"))
+            return self._json(200, {"ok": True}, extra_headers=[
+                ("Set-Cookie", sessions_mod.clear_cookie_header())])
+        if route == "/api/auth/totp/enroll":
+            result = self._call(auth_service.totp_enroll, user["id"])
+            return self._json(200, result)
+        if route == "/api/auth/totp/activate":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            result = self._call(auth_service.totp_activate, user["id"],
+                                payload.get("code"))
+            return self._json(200, result)
+        if route == "/api/auth/totp/disable":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            result = self._call(auth_service.totp_disable, user["id"],
+                                payload.get("password"), payload.get("code"))
+            return self._json(200, result)
+        if route == "/api/consents":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            state = self._call(consents_service.set_consent, user["id"],
+                               payload.get("purpose"), payload.get("granted"))
+            return self._json(200, {"consents": state})
+        if route == "/api/identifiers":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            record = self._call(identifiers_service.add_identifier,
+                                user["id"], payload.get("kind"),
+                                payload.get("value"))
+            return self._json(201, {"identifier": record})
+        return self._fail(errors.not_found())
+
+    def do_DELETE(self):
+        return self._safe_dispatch(self._do_DELETE)
+
+    def _do_DELETE(self):
+        parsed = urllib.parse.urlparse(self.path)
+        prefix = "/api/identifiers/"
+        if parsed.path.startswith(prefix) and len(parsed.path) > len(prefix):
+            security.require_csrf(self)
+            self._require_accounts()
+            user, _token = self._require_user()
+            ident = parsed.path[len(prefix):]
+            try:
+                uuid.UUID(ident)
+            except (ValueError, AttributeError, TypeError):
+                return self._fail(errors.not_found("Identifier not found"))
+            result = self._call(identifiers_service.delete_identifier,
+                                user["id"], ident)
+            return self._json(200, result)
+        return self._fail(errors.not_found())
 
 
 def _startup_migrations():

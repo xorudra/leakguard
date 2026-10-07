@@ -139,6 +139,8 @@ function renderScan(d) {
   });
   if ($("lgEmail") && !$("lgEmail").value) $("lgEmail").value = d.email;
   if ($("agEmail") && !$("agEmail").value) $("agEmail").value = d.email;
+  lastScanEmail = d.email || "";
+  refreshSaveScanBox();
 }
 
 /* ---------------- Letter generator ---------------- */
@@ -667,6 +669,388 @@ function downloadText(name, text) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
+
+/* ---------------- Account & Privacy Center ----------------
+   Optional accounts: they exist to REMOVE effort (details entered
+   once, stored encrypted, shown only masked) — the anonymous scan
+   above never needs one. All state-changing calls send
+   X-Requested-With (the server's CSRF guard requires it). */
+const AH = { "Content-Type": "application/json", "X-Requested-With": "fetch" };
+let meUser = null;
+let lastScanEmail = "";
+
+async function apiJson(path, opts) {
+  const resp = await fetch(path, opts || {});
+  let data = null;
+  try { data = await resp.json(); } catch (e) { /* non-JSON response */ }
+  return { status: resp.status, ok: resp.ok, data };
+}
+
+function refreshSaveScanBox() {
+  const box = $("saveScanBox");
+  if (!box) return;
+  const show = !!(meUser && lastScanEmail && !$("scanResults").hidden);
+  box.hidden = !show;
+  if (show) {
+    $("saveScanBtn").disabled = false;
+    $("saveScanMsg").textContent = "";
+  }
+}
+
+function renderAccount() {
+  const signedIn = !!meUser;
+  $("acctBtn").textContent = signedIn ? "My Privacy Center" : "Sign in";
+  $("acctLabel").hidden = !signedIn;
+  if (signedIn) $("acctLabel").textContent = meUser.email_masked;
+  $("authForms").hidden = signedIn;
+  $("privacyCenter").hidden = !signedIn;
+  if (signedIn) {
+    $("pcEmail").textContent = meUser.email_masked;
+    $("pcSince").textContent = meUser.created_at
+      ? "· member since " + new Date(meUser.created_at).toLocaleDateString() : "";
+    renderTotp();
+    loadIdentifiers();
+    loadConsents();
+  }
+  refreshSaveScanBox();
+}
+
+async function loadMe() {
+  try {
+    const r = await apiJson("/api/auth/me");
+    meUser = r.ok ? r.data : null;
+  } catch (e) { meUser = null; }
+  renderAccount();
+}
+
+$("acctBtn").addEventListener("click", () => {
+  const panel = $("account");
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) {
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (meUser) renderAccount();
+  }
+});
+
+$("authForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = $("acEmail").value.trim();
+  const password = $("acPassword").value;
+  const code = $("acTotp").value.trim();
+  $("acStatus").textContent = "Signing in…";
+  try {
+    const payload = { email, password };
+    if (code) payload.totp_code = code;
+    const r = await apiJson("/api/auth/login", {
+      method: "POST", headers: AH, body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(errMsg(r.data, "Sign-in failed"));
+    if (r.data.totp_required) {
+      $("acTotpWrap").hidden = false;
+      $("acStatus").textContent = "Two-factor is on for this account — enter the 6-digit code from your authenticator app, then press Sign in again.";
+      $("acTotp").focus();
+      return;
+    }
+    meUser = r.data.user;
+    $("acPassword").value = "";
+    $("acTotp").value = "";
+    $("acTotpWrap").hidden = true;
+    $("acStatus").textContent = "";
+    renderAccount();
+  } catch (err) {
+    $("acStatus").textContent = err.message;
+  }
+});
+
+$("acRegisterBtn").addEventListener("click", async () => {
+  const email = $("acEmail").value.trim();
+  const password = $("acPassword").value;
+  if (!email || !password) {
+    $("acStatus").textContent = "Enter an email and a password (at least 10 characters) first.";
+    return;
+  }
+  $("acStatus").textContent = "Creating your account…";
+  try {
+    const r = await apiJson("/api/auth/register", {
+      method: "POST", headers: AH,
+      body: JSON.stringify({ email, password }),
+    });
+    if (!r.ok) throw new Error(errMsg(r.data, "Could not create the account"));
+    meUser = r.data.user;
+    $("acPassword").value = "";
+    $("acStatus").textContent = "";
+    renderAccount();
+  } catch (err) {
+    $("acStatus").textContent = err.message;
+  }
+});
+
+$("pcLogoutBtn").addEventListener("click", async () => {
+  try {
+    await apiJson("/api/auth/logout", { method: "POST", headers: AH, body: "{}" });
+  } catch (e) { /* cookie is cleared either way on next load */ }
+  meUser = null;
+  renderAccount();
+  $("acStatus").textContent = "Signed out.";
+});
+
+/* ----- saved details (identifiers) ----- */
+async function loadIdentifiers() {
+  if (!meUser) return;
+  const wrap = $("idList");
+  try {
+    const r = await apiJson("/api/identifiers");
+    wrap.innerHTML = "";
+    if (!r.ok) {
+      wrap.innerHTML = "<p class='hint'>" + errMsg(r.data, "Could not load your saved details") + "</p>";
+      return;
+    }
+    if (!r.data.identifiers.length) {
+      wrap.innerHTML = "<p class='hint'>Nothing saved yet.</p>";
+      return;
+    }
+    r.data.identifiers.forEach((rec) => {
+      const row = document.createElement("div");
+      row.className = "idRow";
+      const left = document.createElement("span");
+      const tag = document.createElement("span");
+      tag.className = "kindTag";
+      tag.textContent = rec.kind;
+      const val = document.createElement("span");
+      val.className = "idVal";
+      val.textContent = rec.masked;
+      left.appendChild(tag); left.appendChild(val);
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "btnGhost miniBtn";
+      rm.textContent = "Remove";
+      rm.addEventListener("click", async () => {
+        rm.disabled = true;
+        const d = await apiJson("/api/identifiers/" + rec.id, {
+          method: "DELETE", headers: { "X-Requested-With": "fetch" },
+        });
+        if (d.ok) { loadIdentifiers(); $("idStatus").textContent = "Removed."; }
+        else { $("idStatus").textContent = errMsg(d.data, "Remove failed"); rm.disabled = false; }
+      });
+      row.appendChild(left); row.appendChild(rm);
+      wrap.appendChild(row);
+    });
+  } catch (e) {
+    wrap.innerHTML = "<p class='hint'>Could not load your saved details.</p>";
+  }
+}
+
+$("idAddBtn").addEventListener("click", async () => {
+  const kind = $("idKind").value;
+  const value = $("idValue").value.trim();
+  if (!value) { $("idStatus").textContent = "Type the value first."; return; }
+  const r = await apiJson("/api/identifiers", {
+    method: "POST", headers: AH, body: JSON.stringify({ kind, value }),
+  });
+  if (r.ok) {
+    $("idValue").value = "";
+    $("idStatus").textContent = "Saved ✓ (stored encrypted, shown masked).";
+    loadIdentifiers();
+  } else {
+    $("idStatus").textContent = errMsg(r.data, "Could not save that detail");
+  }
+});
+
+$("saveScanBtn").addEventListener("click", async () => {
+  if (!lastScanEmail) return;
+  const btn = $("saveScanBtn");
+  btn.disabled = true;
+  const r = await apiJson("/api/identifiers", {
+    method: "POST", headers: AH,
+    body: JSON.stringify({ kind: "email", value: lastScanEmail }),
+  });
+  if (r.ok) {
+    $("saveScanMsg").textContent = "Saved ✓ — find it under My saved details in your Privacy Center.";
+    loadIdentifiers();
+  } else {
+    $("saveScanMsg").textContent = errMsg(r.data, "Could not save");
+    btn.disabled = false;
+  }
+});
+
+/* ----- consent ----- */
+const CONSENT_INFO = [
+  ["scanning", "Scanning", "Run breach scans for my saved details when I ask."],
+  ["monitoring", "Monitoring", "Re-check my saved details regularly and tell me when a new leak appears."],
+  ["automated_remediation", "Automatic removal", "Submit removal requests to data brokers for me, without asking me each time."],
+  ["notifications", "Notifications", "Email me when something important changes — a new leak found, a removal finished."],
+];
+
+function renderConsents(state) {
+  const wrap = $("consentList");
+  wrap.innerHTML = "";
+  const byPurpose = {};
+  (state || []).forEach((c) => { byPurpose[c.purpose] = c; });
+  CONSENT_INFO.forEach(([purpose, title, blurb]) => {
+    const current = byPurpose[purpose] || { granted: false, version: 0 };
+    const row = document.createElement("div");
+    row.className = "consentRow";
+    const text = document.createElement("div");
+    text.className = "cText";
+    const b = document.createElement("b");
+    b.textContent = title;
+    const s = document.createElement("span");
+    s.textContent = blurb;
+    text.appendChild(b); text.appendChild(s);
+    const toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.checked = !!current.granted;
+    toggle.setAttribute("aria-label", title);
+    toggle.addEventListener("change", async () => {
+      toggle.disabled = true;
+      const r = await apiJson("/api/consents", {
+        method: "POST", headers: AH,
+        body: JSON.stringify({ purpose, granted: toggle.checked }),
+      });
+      if (r.ok) {
+        $("consentStatus").textContent = "Saved — " + title + (toggle.checked ? " is ON." : " is OFF.");
+        renderConsents(r.data.consents);
+      } else {
+        toggle.checked = !toggle.checked;
+        toggle.disabled = false;
+        $("consentStatus").textContent = errMsg(r.data, "Could not save that change");
+      }
+    });
+    row.appendChild(text); row.appendChild(toggle);
+    wrap.appendChild(row);
+  });
+}
+
+async function loadConsents() {
+  if (!meUser) return;
+  const r = await apiJson("/api/consents");
+  if (r.ok) renderConsents(r.data.consents);
+  else $("consentList").innerHTML = "<p class='hint'>" + errMsg(r.data, "Could not load permissions") + "</p>";
+}
+
+/* ----- two-factor ----- */
+function renderTotp() {
+  const on = !!(meUser && meUser.totp_enabled);
+  $("totpStatus").textContent = on ? "On" : "Off";
+  $("totpEnrollBtn").style.display = on ? "none" : "";
+  if (on) $("totpEnrollBox").hidden = true;
+  $("totpDisableBox").hidden = !on;
+}
+
+$("totpEnrollBtn").addEventListener("click", async () => {
+  const r = await apiJson("/api/auth/totp/enroll", {
+    method: "POST", headers: AH, body: "{}",
+  });
+  if (r.ok) {
+    $("totpUri").value = r.data.otpauth_uri;
+    $("totpEnrollBox").hidden = false;
+    $("totpMsg").textContent = "Setup text ready — it is shown only this once, copy it into your app now.";
+  } else {
+    $("totpMsg").textContent = errMsg(r.data, "Could not start two-factor setup");
+  }
+});
+
+$("totpCopyBtn").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("totpUri").value); $("totpCopyBtn").textContent = "Copied ✓"; }
+  catch (e) { $("totpUri").select(); document.execCommand("copy"); }
+  setTimeout(() => { $("totpCopyBtn").textContent = "Copy setup text"; }, 1600);
+});
+
+$("totpActivateBtn").addEventListener("click", async () => {
+  const r = await apiJson("/api/auth/totp/activate", {
+    method: "POST", headers: AH,
+    body: JSON.stringify({ code: $("totpCode").value.trim() }),
+  });
+  if (r.ok) {
+    meUser.totp_enabled = true;
+    $("totpCode").value = "";
+    $("totpEnrollBox").hidden = true;
+    $("totpMsg").textContent = "Two-factor is ON ✓ — from now on, signing in needs a code too.";
+    renderTotp();
+  } else {
+    $("totpMsg").textContent = errMsg(r.data, "That code did not match");
+  }
+});
+
+$("totpDisableBtn").addEventListener("click", async () => {
+  const r = await apiJson("/api/auth/totp/disable", {
+    method: "POST", headers: AH,
+    body: JSON.stringify({
+      password: $("totpDisablePw").value,
+      code: $("totpDisableCode").value.trim(),
+    }),
+  });
+  if (r.ok) {
+    meUser.totp_enabled = false;
+    $("totpDisablePw").value = "";
+    $("totpDisableCode").value = "";
+    $("totpMsg").textContent = "Two-factor is OFF.";
+    renderTotp();
+  } else {
+    $("totpMsg").textContent = errMsg(r.data, "Could not switch two-factor off");
+  }
+});
+
+/* ----- export, password change, account deletion ----- */
+$("exportBtn").addEventListener("click", async () => {
+  try {
+    const resp = await fetch("/api/privacy/export");
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => null);
+      throw new Error(errMsg(d, "Export failed"));
+    }
+    const blob = await resp.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "leakguard-export.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  } catch (err) {
+    $("cpMsg").textContent = err.message;
+  }
+});
+
+$("cpBtn").addEventListener("click", async () => {
+  const r = await apiJson("/api/auth/change-password", {
+    method: "POST", headers: AH,
+    body: JSON.stringify({
+      current_password: $("cpCurrent").value,
+      new_password: $("cpNew").value,
+    }),
+  });
+  if (r.ok) {
+    $("cpCurrent").value = "";
+    $("cpNew").value = "";
+    $("cpMsg").textContent = "Password changed ✓ — every other device was signed out.";
+  } else {
+    $("cpMsg").textContent = errMsg(r.data, "Could not change the password");
+  }
+});
+
+$("delBtn").addEventListener("click", async () => {
+  if (!$("delConfirm").checked) {
+    $("delMsg").textContent = "Tick the “I understand” box first.";
+    return;
+  }
+  const r = await apiJson("/api/auth/delete-account", {
+    method: "POST", headers: AH,
+    body: JSON.stringify({ password: $("delPassword").value }),
+  });
+  if (r.ok) {
+    meUser = null;
+    $("delPassword").value = "";
+    $("delConfirm").checked = false;
+    renderAccount();
+    $("acStatus").textContent = "Your account and saved details were deleted.";
+    $("account").scrollIntoView({ behavior: "smooth" });
+  } else {
+    $("delMsg").textContent = errMsg(r.data, "Could not delete the account");
+  }
+});
+
+loadMe();
 
 /* ---------------- Reveal on scroll ---------------- */
 (function () {

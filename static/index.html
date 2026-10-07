@@ -16,11 +16,15 @@
     <a href="#google">Google</a>
     <a href="#honest">Honest limits</a>
   </nav>
+  <div class="acctArea">
+    <span id="acctLabel" class="acctLabel" hidden></span>
+    <button type="button" id="acctBtn" class="acctBtn">Sign in</button>
+  </div>
 </header>
 
 <main>
   <section class="hero">
-    <span class="pill">FREE · NO SIGN-UP · NOTHING STORED</span>
+    <span class="pill">FREE · NO SIGN-UP NEEDED · SCANS STORE NOTHING</span>
     <h1>Your data got leaked.<br>Find it. Remove it.</h1>
     <p class="sub">Free scan against real breach databases, then a guided removal centre for the
     data brokers and people-search sites that sell your name, phone and address.</p>
@@ -29,6 +33,116 @@
       <div class="stat"><b>0–100</b><span>exposure score</span></div>
       <div class="stat"><b>0</b><span>tokens burned — Agent Mode is pure scripts</span></div>
       <div class="stat"><b>₹0</b><span>free forever</span></div>
+    </div>
+  </section>
+
+  <section id="account" class="card" hidden>
+    <h2>Account</h2>
+    <div id="authForms">
+      <p class="hint">An account is optional — the scan above always works without one. An account just
+      saves your details <strong>encrypted</strong> so you never type them twice, and unlocks monitoring,
+      consent controls and a full data export. Free forever, like everything here.</p>
+      <form id="authForm">
+        <label>Email address
+          <input type="email" id="acEmail" required placeholder="you@example.com" autocomplete="email">
+        </label>
+        <label>Password
+          <input type="password" id="acPassword" required placeholder="At least 10 characters" autocomplete="current-password">
+        </label>
+        <div id="acTotpWrap" hidden>
+          <label>Authenticator code
+            <input type="text" id="acTotp" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code from your authenticator app">
+          </label>
+        </div>
+        <div class="rowBtns">
+          <button type="submit" id="acLoginBtn">Sign in</button>
+          <button type="button" id="acRegisterBtn" class="btnGhost">Create free account</button>
+        </div>
+        <p id="acStatus" class="hint"></p>
+      </form>
+    </div>
+
+    <div id="privacyCenter" hidden>
+      <p>Signed in as <b id="pcEmail"></b> <span class="hint" id="pcSince"></span></p>
+      <div class="rowBtns">
+        <button type="button" id="pcLogoutBtn" class="btnGhost">Sign out</button>
+      </div>
+
+      <h3>My saved details</h3>
+      <p class="hint">Stored encrypted — we can only ever show them masked here. These are the details
+      LeakGuard can watch and clean up for you, so you never type them again.</p>
+      <div id="idList"></div>
+      <label>Kind
+        <select id="idKind">
+          <option value="email">Email</option>
+          <option value="phone">Phone</option>
+          <option value="name">Full name</option>
+          <option value="address">Address</option>
+          <option value="username">Username</option>
+        </select>
+      </label>
+      <label>Value <input type="text" id="idValue" placeholder="The detail to save"></label>
+      <div class="rowBtns">
+        <button type="button" id="idAddBtn">Save detail</button>
+        <span id="idStatus" class="hint"></span>
+      </div>
+
+      <h3>My permissions (consent)</h3>
+      <p class="hint">Nothing here runs unless you switch it on. Switching off is instant and recorded.</p>
+      <div id="consentList"></div>
+      <p id="consentStatus" class="hint"></p>
+
+      <h3>Two-factor authentication</h3>
+      <p class="hint">Status: <b id="totpStatus">–</b>. Use any authenticator app (Google Authenticator,
+      Authy, your password manager). Codes are single-use — a code that worked once never works again.</p>
+      <div class="rowBtns">
+        <button type="button" id="totpEnrollBtn" class="btnGhost">Set up two-factor</button>
+      </div>
+      <div id="totpEnrollBox" hidden>
+        <p class="hint">Copy this setup text into your authenticator app (choose “enter a setup key” /
+        scan alternative), then type the 6-digit code it shows to switch two-factor on:</p>
+        <textarea id="totpUri" rows="3" readonly></textarea>
+        <div class="rowBtns">
+          <button type="button" id="totpCopyBtn" class="btnGhost">Copy setup text</button>
+        </div>
+        <label>Code from the app <input type="text" id="totpCode" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code"></label>
+        <div class="rowBtns">
+          <button type="button" id="totpActivateBtn">Switch on two-factor</button>
+        </div>
+      </div>
+      <div id="totpDisableBox" hidden>
+        <label>Password <input type="password" id="totpDisablePw" autocomplete="current-password"></label>
+        <label>Authenticator code <input type="text" id="totpDisableCode" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code"></label>
+        <div class="rowBtns">
+          <button type="button" id="totpDisableBtn" class="dangerBtn">Switch off two-factor</button>
+        </div>
+      </div>
+      <p id="totpMsg" class="hint"></p>
+
+      <h3>Download my data</h3>
+      <p class="hint">Everything LeakGuard holds about you — account, saved details (shown in full,
+      they are yours) and your complete permission history — as one JSON file.</p>
+      <div class="rowBtns">
+        <button type="button" id="exportBtn" class="btnGhost">Download my data (JSON)</button>
+      </div>
+
+      <h3>Change password</h3>
+      <label>Current password <input type="password" id="cpCurrent" autocomplete="current-password"></label>
+      <label>New password <input type="password" id="cpNew" placeholder="At least 10 characters" autocomplete="new-password"></label>
+      <div class="rowBtns">
+        <button type="button" id="cpBtn" class="btnGhost">Change password</button>
+        <span id="cpMsg" class="hint"></span>
+      </div>
+
+      <h3>Delete account</h3>
+      <p class="hint">This deletes your account, every saved detail and every session. It cannot be
+      undone — <strong>download your data first</strong> if you want a copy.</p>
+      <label>Password <input type="password" id="delPassword" autocomplete="current-password"></label>
+      <label class="confirmRow"><input type="checkbox" id="delConfirm"> I understand this is permanent</label>
+      <div class="rowBtns">
+        <button type="button" id="delBtn" class="dangerBtn">Delete my account</button>
+        <span id="delMsg" class="hint"></span>
+      </div>
     </div>
   </section>
 
@@ -73,6 +187,14 @@
       </div>
       <h3>What to do next</h3>
       <ol id="nextSteps"></ol>
+      <div id="saveScanBox" hidden>
+        <div class="rowBtns">
+          <button type="button" id="saveScanBtn">Save this email to my account</button>
+          <span id="saveScanMsg" class="hint"></span>
+        </div>
+        <p class="hint">Saved details are stored encrypted and make future scans one tap.
+        Nothing is saved unless you press this button.</p>
+      </div>
     </div>
   </section>
 

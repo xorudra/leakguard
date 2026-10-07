@@ -111,7 +111,7 @@ evidence, and gap). Summary counts:
 
 | Status | Count |
 |---|---|
-| DONE | 132 |
+| DONE | 133 |
 | PARTIAL | 33 |
 | NOT_DONE | 2 |
 | CUT (owner rule: AI phases + business model) | 11 |

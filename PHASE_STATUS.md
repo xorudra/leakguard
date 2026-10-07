@@ -124,7 +124,7 @@ NA = the surface the phase governs does not exist in this deployment.*
 | 106 — CI/CD | P2 | DONE | `.github/workflows/tests.yml` (Batch A): push + PR + weekly scheduled run — Python 3.12, `pip install -r requirements.txt pgserver`, `node --check static/app.js`, full unittest discovery; migrations auto-run at startup (`db/migrate.py`) | Deploys remain manual via the Render dashboard (deliberate — Render auto-deploy does not fire reliably); no dependency-scanning automation (see 107) |
 | 107 — Dependency security | P0 | DONE | `requirements.txt` — 3 runtime deps, version-ranged; stdlib-first minimizes surface; **`requirements.lock`** (Batch A): exact-version snapshot of requirements.txt + pgserver's resolution (12 packages), generated in a throwaway venv via `pip freeze`, with the regeneration procedure in its header and README's Supply chain note | The lock pins versions, not artifact hashes; automated vulnerability scanning is not wired (the weekly CI run surfaces resolution drift) |
 | 108 — Container security | P3 | NA | No Dockerfile or container usage anywhere; Render native Python runtime | Not applicable — no container surface |
-| 109 — Environments | P2 | NOT_DONE | One Render service + one Neon project (`render.yaml`) | No staging environment |
+| 109 — Environments | P2 | DONE | Staging live 2026-10-07: Render service `leakguard-staging` (srv-db34g7vlk1mc739dgp9g, public-repo path, manual deploys) on Neon branch `staging` (br-long-unit-az6wvyyw) via its DIRECT endpoint (branch pooler connections failed from Render — see AGENTS.md); own vault keys; no email lane by design; register/delete smoke passed | Staging shares the account's free instance hours; deploys are manual |
 | 110 — Mock providers | P2 | DONE | `providers/mock.py` behind `LEAKGUARD_PROVIDERS=mock`, always visibly flagged in health output; mock contract tests (`tests/test_providers.py`) | |
 | 111 — Fake broker | P2 | PARTIAL | `StubExecutor` test doubles (`tests/test_remediation.py`) exercise full case workflows | No standalone fake-broker server environment |
 | 112 — Testing | P1 | DONE | 302 tests in 16 files (unit/integration/API/worker/provider/remediation/security/privacy); auditor re-ran the suite 2026-10-07: OK (2 environment skips) | |
@@ -201,9 +201,9 @@ NA = the surface the phase governs does not exist in this deployment.*
 
 | Status | Count |
 |---|---|
-| DONE | 132 |
+| DONE | 133 |
 | PARTIAL | 33 |
-| NOT_DONE | 2 |
+| NOT_DONE | 1 |
 | CUT (owner rule) | 11 |
 | NA (surface does not exist) | 3 |
 | **Total** | **181** |

@@ -171,7 +171,8 @@ class Handler(BaseHTTPRequestHandler):
                          "default-src 'self'; style-src 'self'; script-src 'self'; "
                          "img-src 'self' data:; base-uri 'none'; form-action 'self'")
         self.end_headers()
-        self.wfile.write(data)
+        if not getattr(self, "_head_only", False):
+            self.wfile.write(data)
 
     def _json(self, code, obj):
         self._send(code, json.dumps(obj), "application/json")
@@ -184,6 +185,13 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, data, ctype)
 
     # ---------- routes ----------
+    def do_HEAD(self):
+        # UptimeRobot and other uptime probes use HEAD; without this the
+        # stdlib handler answers 501 and monitors report the site DOWN
+        # while GET is perfectly fine (same bug Nexus Local had).
+        self._head_only = True
+        self.do_GET()
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         route = parsed.path

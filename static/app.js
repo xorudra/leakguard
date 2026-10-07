@@ -9,6 +9,8 @@ $("scanForm").addEventListener("submit", async (e) => {
   const btn = $("scanBtn");
   const status = $("scanStatus");
   btn.disabled = true;
+  btn.dataset.label = btn.textContent;
+  btn.innerHTML = '<span class="spinner"></span>Scanning…';
   status.hidden = false;
   status.className = "status";
   status.textContent = "Scanning breach databases…";
@@ -28,6 +30,7 @@ $("scanForm").addEventListener("submit", async (e) => {
     status.textContent = err.message;
   } finally {
     btn.disabled = false;
+    btn.textContent = btn.dataset.label || "Scan my data";
     $("password").value = "";
   }
 });
@@ -42,7 +45,17 @@ function scoreLabel(score) {
 
 function renderScan(d) {
   $("scanResults").hidden = false;
-  $("scoreNum").textContent = d.exposure_score === null ? "–" : d.exposure_score;
+  if (d.exposure_score === null || d.exposure_score === undefined) {
+    $("scoreNum").textContent = "–";
+  } else {
+    const target = d.exposure_score, numEl = $("scoreNum"), t0 = performance.now();
+    const tick = (t) => {
+      const p = Math.min(1, (t - t0) / 900);
+      numEl.textContent = Math.round(target * (1 - Math.pow(1 - p, 3)));
+      if (p < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
   const ring = $("scoreRing");
   if (ring) {
     const s = d.exposure_score;
@@ -64,9 +77,10 @@ function renderScan(d) {
     const p = document.createElement("p");
     p.textContent = "Found in " + d.breach_count + " breach(es):";
     list.appendChild(p);
-    d.breaches.forEach((b) => {
+    d.breaches.forEach((b, i) => {
       const s = document.createElement("span");
       s.className = "breachChip";
+      s.style.animationDelay = Math.min(i * 35, 700) + "ms";
       s.textContent = b;
       list.appendChild(s);
     });
@@ -425,3 +439,15 @@ $("gSearchBtn").addEventListener("click", () => {
     box.appendChild(a);
   });
 });
+
+/* ---------------- Reveal on scroll ---------------- */
+(function () {
+  const cards = document.querySelectorAll(".card");
+  if (!("IntersectionObserver" in window)) return;
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((en) => {
+      if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
+    });
+  }, { threshold: 0.06 });
+  cards.forEach((c) => { c.classList.add("reveal"); io.observe(c); });
+})();

@@ -160,5 +160,49 @@ footer{text-align:center;color:#7785b3;font-size:13px;margin-top:34px;line-heigh
   .scoreRow{gap:16px}
 }
 @media (prefers-reduced-motion:reduce){
-  *{transition:none!important;scroll-behavior:auto!important}
+  *{transition:none!important;animation:none!important;scroll-behavior:auto!important}
 }
+
+/* ---------- round-2 polish ---------- */
+/* slow aurora orbs behind everything */
+body::before,body::after{
+  content:"";position:fixed;border-radius:50%;filter:blur(90px);z-index:-1;pointer-events:none;
+}
+body::before{width:420px;height:420px;top:-140px;right:-120px;background:rgba(154,107,255,.20);animation:drift 26s ease-in-out infinite alternate}
+body::after{width:380px;height:380px;bottom:-160px;left:-120px;background:rgba(56,225,255,.13);animation:drift 32s ease-in-out infinite alternate-reverse}
+@keyframes drift{from{transform:translate(0,0) scale(1)}to{transform:translate(-46px,34px) scale(1.12)}}
+
+.liveDot{width:9px;height:9px;border-radius:50%;background:var(--good);display:inline-block;margin-left:2px;
+  box-shadow:0 0 0 0 rgba(47,214,143,.5);animation:pulseDot 2.2s infinite}
+@keyframes pulseDot{0%{box-shadow:0 0 0 0 rgba(47,214,143,.45)}70%{box-shadow:0 0 0 8px rgba(47,214,143,0)}100%{box-shadow:0 0 0 0 rgba(47,214,143,0)}}
+
+/* gradient hairline on top of every card */
+.card{position:relative;overflow:hidden}
+.card::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,rgba(91,140,255,.65),rgba(154,107,255,.65),transparent)}
+.card.warn::before{background:linear-gradient(90deg,transparent,rgba(255,184,77,.7),transparent)}
+
+/* reveal-on-scroll (class added by JS only — no-JS still shows everything) */
+.reveal{opacity:0;transform:translateY(16px)}
+.reveal.in{opacity:1;transform:none;transition:opacity .65s ease,transform .65s cubic-bezier(.22,.8,.3,1)}
+
+/* loading spinner inside buttons */
+.spinner{display:inline-block;width:15px;height:15px;border-radius:50%;vertical-align:-2px;margin-right:8px;
+  border:2.5px solid rgba(255,255,255,.35);border-top-color:#fff;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.status{animation:statusIn .3s ease}
+@keyframes statusIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+/* breach chips pop in */
+.breachChip{animation:chipIn .35s cubic-bezier(.22,.8,.3,1) both}
+@keyframes chipIn{from{opacity:0;transform:scale(.85) translateY(4px)}to{opacity:1;transform:none}}
+
+/* form + focus niceties */
+input:-webkit-autofill{-webkit-box-shadow:0 0 0 60px var(--card2) inset;-webkit-text-fill-color:#fff;caret-color:#fff}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+::-webkit-scrollbar{width:10px}
+::-webkit-scrollbar-thumb{background:#26305c;border-radius:99px;border:2px solid var(--bg)}
+::-webkit-scrollbar-track{background:var(--bg)}
+h2 .step{animation:stepGlow 3.2s ease-in-out infinite}
+@keyframes stepGlow{0%,100%{box-shadow:0 5px 14px rgba(91,140,255,.35)}50%{box-shadow:0 5px 20px rgba(154,107,255,.6)}}
+.scoreBox .scoreCenter span{font-variant-numeric:tabular-nums}

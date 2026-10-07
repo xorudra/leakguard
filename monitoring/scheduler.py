@@ -125,6 +125,17 @@ def tick(now=None):
                          "scan_job", row["id"], {"source": "monitor"})
     if created:
         _log("monitoring_scheduler enqueued=%d" % len(created))
+    # Phase 77: engineering alerts ride the tick, after its real
+    # work and behind the same flag (the early return above already
+    # honored it). Guarded hard — an alerts failure must never
+    # break the tick that enqueues monitoring scans.
+    try:
+        from monitoring import alerts
+
+        alerts.evaluate()
+    except Exception as exc:
+        logging_setup.log_error(
+            None, "engineering alerts failed: " + type(exc).__name__)
     return created
 
 

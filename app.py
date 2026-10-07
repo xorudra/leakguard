@@ -518,6 +518,12 @@ class Handler(BaseHTTPRequestHandler):
                 "audit": self._call(
                     admin_service.list_audit, admin["id"], limit),
             })
+        if route == "/api/admin/metrics":
+            # Phase 76: the overview's metrics block, standalone —
+            # same owner-only 404 gate as every admin route.
+            admin = self._require_admin()
+            return self._json(200, self._call(
+                admin_service.metrics, admin["id"]))
         if route == "/api/tokens":
             # Token management is session-only: a token must never
             # be able to mint or list other tokens.

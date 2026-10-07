@@ -620,7 +620,7 @@ class TestLifecycleMigrationUpgrade(PgClassMixin, AccountMixin,
         # Apply 0001-0011 exactly as the runner would, leaving the
         # database one migration behind.
         legacy = [p for p in cls.migrate.migration_files()
-                  if not p.name.startswith("0012")]
+                  if p.name[:4] < "0012"]
         assert len(legacy) == 11, [p.name for p in legacy]
         with cls.pool.connection() as conn:
             cls.migrate.applied_migrations(conn)
@@ -682,7 +682,11 @@ class TestLifecycleMigrationUpgrade(PgClassMixin, AccountMixin,
         self.insert_finding(failed, uid, iid, "BreachF")
 
         applied = self.migrate.run_migrations()
-        self.assertEqual(applied, ["0012_finding_lifecycle.sql"])
+        # 0012 is the migration under test; 0013 (error ledger,
+        # Phase 76) is a later additive migration the runner also
+        # applies — it touches no findings state.
+        self.assertEqual(applied, ["0012_finding_lifecycle.sql",
+                                   "0013_error_events.sql"])
 
         self.assertEqual(self.identity_state(uid, iid, "BreachX"),
                          ("open", None))

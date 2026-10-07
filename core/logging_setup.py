@@ -11,6 +11,7 @@ exactly the personal data this product exists to protect.
 """
 
 import logging
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -57,13 +58,53 @@ def log_request(request_id, method, path, status, duration_ms=None):
     get_logger().info(" ".join(parts))
 
 
+_CLASS_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*\Z")
+
+
+def _ledger_fields(message):
+    """Derive the error ledger's (context, error_class) from a
+    log_error message. Call sites build messages as
+    "<context>: <ErrorClass>" (or "<context> <ErrorClass>"), so the
+    context is the text before the first colon — or before the
+    trailing class token — and the class is the trailing token when
+    it is shaped like one. A heuristic, by design: the ledger only
+    needs stable grouping, never the raw message."""
+    text = str(message or "").strip()
+    if not text:
+        return "error", "Error"
+    if ":" in text:
+        context = text.split(":", 1)[0].strip()
+        tail = text.rsplit(":", 1)[1].strip()
+        tokens = tail.split()
+    else:
+        tokens = text.split()
+        context = " ".join(tokens[:-1]).strip() if len(tokens) > 1 else text
+    candidate = tokens[-1] if tokens else ""
+    error_class = candidate if _CLASS_TOKEN.match(candidate or "") \
+        else "Error"
+    return (context or "error"), error_class
+
+
 def log_error(request_id, message):
     """Log a server-side failure. `message` must never contain user data —
-    exception class names and fixed strings only."""
+    exception class names and fixed strings only.
+
+    The line is ALSO mirrored into the error ledger (Phase 76,
+    core/error_ledger.py) so failures are countable in the admin
+    metrics. The ledger write is best-effort inside record() and
+    wrapped again here: tracking must never break the caller."""
     get_logger().error(
         "ts=%s level=ERROR request_id=%s error=%s"
         % (_ts(), str(request_id or "-"), str(message))
     )
+    try:
+        from core import error_ledger
+
+        context, error_class = _ledger_fields(message)
+        error_ledger.record(context, error_class, message,
+                            request_id=request_id)
+    except Exception:
+        pass
 
 
 class Timer:

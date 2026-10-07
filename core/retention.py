@@ -17,6 +17,9 @@ Rules (mirrored in README's Operations section):
 * Password-reset tokens: used (used_at) or expired (expires_at)
   more than 7 days ago. A pending, unexpired token survives.
 * Notifications: every kind, created more than 90 days ago.
+* Error events (Phase 76): rows whose first occurrence is more
+  than 30 days ago — the ledger is an operational signal, not an
+  archive; a month of failure history is plenty.
 * Soft-deleted accounts (users.deleted_at more than 30 days ago):
   HARD purge of the user and everything they own, in FK-safe order.
   audit_log is deliberately NOT touched: its actor_user_id carries
@@ -47,6 +50,7 @@ TICK_SECONDS = 24 * 3600.0
 SESSION_GRACE_DAYS = 7
 RESET_TOKEN_GRACE_DAYS = 7
 NOTIFICATION_TTL_DAYS = 90
+ERROR_EVENTS_TTL_DAYS = 30
 DELETED_USER_GRACE_DAYS = 30
 
 _thread = None
@@ -94,6 +98,13 @@ def _purge_notifications(conn, now):
         conn,
         "DELETE FROM notifications WHERE created_at < %s",
         (now - timedelta(days=NOTIFICATION_TTL_DAYS),))
+
+
+def _purge_error_events(conn, now):
+    return _delete(
+        conn,
+        "DELETE FROM error_events WHERE created_at < %s",
+        (now - timedelta(days=ERROR_EVENTS_TTL_DAYS),))
 
 
 # FK-safe order for one account: children before parents, the cases'
@@ -159,6 +170,7 @@ _CATEGORIES = (
     ("sessions", _purge_sessions),
     ("reset_tokens", _purge_reset_tokens),
     ("notifications", _purge_notifications),
+    ("error_events", _purge_error_events),
 )
 
 
@@ -186,7 +198,8 @@ def run_once(now=None):
             None, "retention users failed: " + type(exc).__name__)
     _log("retention_purge " + " ".join(
         "%s=%s" % (k, counts[k]) for k in (
-            "sessions", "reset_tokens", "notifications", "users_purged")))
+            "sessions", "reset_tokens", "notifications", "error_events",
+            "users_purged")))
     try:
         from accounts import audit
 

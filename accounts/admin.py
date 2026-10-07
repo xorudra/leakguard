@@ -58,6 +58,21 @@ def is_admin(user_id):
     return auth_service.normalize_email(email) in configured
 
 
+def admin_user_ids():
+    """The user ids of every live account whose email is in
+    ADMIN_EMAILS — the recipients of owner-only operational mail
+    (Phase 77 engineering alerts). Empty when ADMIN_EMAILS is
+    unset: with no owner configured there is nobody to alert."""
+    if not _admin_emails():
+        return []
+    with db_pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT id FROM users WHERE deleted_at IS NULL",
+        ).fetchall()
+    return [str(row["id"]) for row in rows
+            if is_admin(str(row["id"]))]
+
+
 # The security-events view (spec Phase 62): audit actions that are
 # about authentication and account security, matched by prefix so
 # the family stays complete as actions are added ('auth.login'
@@ -72,6 +87,10 @@ _SECURITY_ACTION_PATTERNS = (
     "account.deleted%",
     "api_token.%",
     "privacy_export",
+    # Phase 77 engineering alerts land in the same trail (written by
+    # monitoring/alerts.py via the audit writer) so the owner sees a
+    # fired rule next to the sign-in events it sits alongside.
+    "engineering_alert",
 )
 _SECURITY_EVENTS_LIMIT = 20
 
@@ -98,6 +117,135 @@ def _counts_by(conn, table, column, where=""):
     return {row["k"]: int(row["n"]) for row in rows}
 
 
+_DAY = "interval '24 hours'"
+
+
+def _metrics_block(conn):
+    """Operational metrics (spec Phase 76): live queue state plus
+    trailing-24h throughput/failure numbers, all computed from the
+    product's own tables — no external monitoring service. Every
+    windowed figure is labeled in its key; counts only, per the
+    module's privacy contract.
+
+    Window notes: a completed (done) or dead job is counted in the
+    24h window by finished_at (both terminal paths stamp it); a
+    'failed' job is mid-retry and has no finished_at yet, so it is
+    counted by created_at. Error-event figures aggregate the
+    ledger's hour-bucket rollups (error_events.bucket_start inside
+    the window), so occurrence totals carry at most one partial
+    bucket of edge at the window boundary."""
+    scan_by_status = _counts_by(conn, "scan_jobs", "status")
+    terminal = conn.execute(
+        "SELECT"
+        " COUNT(*) FILTER (WHERE status = 'done') AS completed,"
+        " COUNT(*) FILTER (WHERE status = 'dead') AS dead"
+        " FROM scan_jobs"
+        " WHERE finished_at >= now() - " + _DAY,
+    ).fetchone()
+    failed_24h = conn.execute(
+        "SELECT COUNT(*) AS n FROM scan_jobs WHERE status = 'failed'"
+        " AND created_at >= now() - " + _DAY,
+    ).fetchone()["n"]
+    median = conn.execute(
+        "SELECT percentile_cont(0.5) WITHIN GROUP"
+        " (ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at)))"
+        " AS med FROM scan_jobs"
+        " WHERE status = 'done' AND started_at IS NOT NULL"
+        " AND finished_at >= now() - " + _DAY,
+    ).fetchone()["med"]
+    queue = conn.execute(
+        "SELECT"
+        " COUNT(*) FILTER (WHERE status = 'queued') AS queued,"
+        " COUNT(*) FILTER (WHERE status = 'running') AS running,"
+        " EXTRACT(EPOCH FROM (now() - MIN(created_at)"
+        "   FILTER (WHERE status = 'queued'))) AS oldest_age"
+        " FROM scan_jobs WHERE status IN ('queued', 'running')",
+    ).fetchone()
+    cases_by_status = _counts_by(conn, "remediation_cases", "status")
+    notifications_24h = _counts_by(
+        conn, "notifications", "status",
+        " WHERE created_at >= now() - " + _DAY)
+    sources = conn.execute(
+        "SELECT COUNT(*) AS total,"
+        " COUNT(*) FILTER (WHERE checked_at >= now() - " + _DAY
+        + ") AS checked_24h,"
+        " COUNT(*) FILTER (WHERE state = 'unreachable')"
+        " AS unreachable"
+        " FROM broker_source_checks",
+    ).fetchone()
+    security_rows = conn.execute(
+        "SELECT action AS k, COUNT(*) AS n FROM audit_log"
+        " WHERE action LIKE ANY(%s)"
+        " AND created_at >= now() - " + _DAY
+        + " GROUP BY action",
+        (list(_SECURITY_ACTION_PATTERNS),),
+    ).fetchall()
+    security_by_kind = {row["k"]: int(row["n"]) for row in security_rows}
+    error_pairs = conn.execute(
+        "SELECT COUNT(*) AS pairs FROM"
+        " (SELECT 1 FROM error_events"
+        " WHERE bucket_start >= now() - " + _DAY
+        + " GROUP BY context, error_class) AS d",
+    ).fetchone()["pairs"]
+    error_total = conn.execute(
+        "SELECT COALESCE(SUM(occurrence_count), 0) AS total"
+        " FROM error_events WHERE bucket_start >= now() - " + _DAY,
+    ).fetchone()["total"]
+    top_rows = conn.execute(
+        "SELECT context, error_class,"
+        " SUM(occurrence_count) AS n FROM error_events"
+        " WHERE bucket_start >= now() - " + _DAY
+        + " GROUP BY context, error_class"
+        " ORDER BY n DESC, context, error_class LIMIT 5",
+    ).fetchall()
+    return {
+        "scan_jobs": {
+            "by_status": scan_by_status,
+            "last_24h": {
+                "completed": int(terminal["completed"]),
+                "failed": int(failed_24h),
+                "dead": int(terminal["dead"]),
+            },
+            "median_completed_duration_seconds_last_24h": (
+                float(median) if median is not None else None),
+        },
+        "queue": {
+            "queued": int(queue["queued"]),
+            "running": int(queue["running"]),
+            "active": int(queue["queued"]) + int(queue["running"]),
+            "oldest_queued_age_seconds": (
+                float(queue["oldest_age"])
+                if queue["oldest_age"] is not None else None),
+        },
+        "remediation_cases_by_status": cases_by_status,
+        "notifications_by_status_last_24h": notifications_24h,
+        "broker_sources": {
+            "total": int(sources["total"]),
+            "checked_last_24h": int(sources["checked_24h"]),
+            "unreachable": int(sources["unreachable"]),
+        },
+        "security_events_by_kind_last_24h": security_by_kind,
+        "errors_last_24h": {
+            "distinct_context_class_pairs": int(error_pairs),
+            "total_occurrences": int(error_total),
+            "top": [{
+                "context": row["context"],
+                "error_class": row["error_class"],
+                "occurrences": int(row["n"]),
+            } for row in top_rows],
+        },
+    }
+
+
+def metrics(admin_user_id):
+    """The metrics block on its own (GET /api/admin/metrics) —
+    the same object overview() embeds under "metrics"."""
+    with db_pool.connection() as conn:
+        block = _metrics_block(conn)
+    audit.record(admin_user_id, "admin", "admin.metrics_viewed")
+    return block
+
+
 def overview(admin_user_id):
     """Platform aggregates for the owner. Counts only — see the
     module docstring's privacy contract."""
@@ -121,6 +269,7 @@ def overview(admin_user_id):
             "SELECT COUNT(*) AS n FROM brokers WHERE active = true",
         ).fetchone()["n"]
         security_events = _security_events(conn)
+        metrics_block = _metrics_block(conn)
     from remediation import source_checks
 
     result = {
@@ -146,6 +295,10 @@ def overview(admin_user_id):
         # The security-events view (Phase 62): the latest auth /
         # account-security audit rows, meta only.
         "security_events": security_events,
+        # Operational metrics (Phase 76): live queue state +
+        # trailing-24h throughput and failure numbers. The same
+        # block is served standalone at GET /api/admin/metrics.
+        "metrics": metrics_block,
     }
     audit.record(admin_user_id, "admin", "admin.overview_viewed")
     return result

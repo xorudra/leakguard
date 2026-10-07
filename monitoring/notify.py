@@ -59,7 +59,8 @@ BREVO_API_URL = "https://api.brevo.com/v3/smtp/email"
 _LANE_TIMEOUT_SECONDS = 15
 DEDUPE_WINDOW_DAYS = 7
 KINDS = ("new_finding", "finding_resolved", "removal_verified",
-         "reappeared", "password_reset", "scan_summary")
+         "reappeared", "password_reset", "scan_summary",
+         "engineering_alert")
 
 # Injectable transport for tests: callable
 # (url, headers, body_bytes, timeout) -> (status_code, text).
@@ -221,6 +222,21 @@ def render_email(kind, payload):
             "was no longer there. That check is why this case counts "
             "as removed — a sent request alone never does." % broker
             + _FOOTER)
+    elif kind == "engineering_alert":
+        rule = payload.get("rule") or "unknown rule"
+        subject = "LeakGuard engineering alert: %s" % rule
+        body = (
+            "An engineering alert rule fired on LeakGuard.\n\n"
+            "Rule: %s\n"
+            "Observed: %s (%s)\n"
+            "Threshold: %s\n\n"
+            "Where to look: the Admin panel in LeakGuard, or "
+            "GET /api/admin/metrics, shows the current platform "
+            "numbers this rule is computed from. The alert fires "
+            "at most once per rule per day."
+            % (rule, payload.get("observed"),
+               payload.get("metric") or "value",
+               payload.get("threshold")) + _FOOTER)
     elif kind == "password_reset":
         subject = "Reset your LeakGuard password"
         body = (

@@ -1519,6 +1519,43 @@ async function loadAdmin() {
           + " (" + new Date(ev[0].created_at).toLocaleString() + ")"
           : "none yet"]);
     }
+    if (d.metrics) {
+      const m = d.metrics;
+      const q = m.queue || {};
+      let queueText = (q.active || 0) + " active (" + (q.queued || 0)
+        + " queued, " + (q.running || 0) + " running)";
+      if (q.oldest_queued_age_seconds != null) {
+        queueText += ", oldest queued "
+          + Math.round(q.oldest_queued_age_seconds / 60) + " min";
+      }
+      lines.push(["Queue", queueText]);
+      const s24 = (m.scan_jobs && m.scan_jobs.last_24h) || {};
+      let jobsText = (s24.completed || 0) + " completed, "
+        + (s24.failed || 0) + " failed, " + (s24.dead || 0) + " dead";
+      if (m.scan_jobs
+          && m.scan_jobs.median_completed_duration_seconds_last_24h != null) {
+        jobsText += ", median "
+          + Math.round(m.scan_jobs.median_completed_duration_seconds_last_24h)
+          + "s";
+      }
+      lines.push(["Scan jobs (24h)", jobsText]);
+      lines.push(["Notifications (24h)",
+        fmtCounts(m.notifications_by_status_last_24h)]);
+      const bs = m.broker_sources || {};
+      lines.push(["Broker sources",
+        (bs.checked_last_24h || 0) + " checked in 24h, "
+          + (bs.unreachable || 0) + " unreachable of " + (bs.total || 0)]);
+      const er = m.errors_last_24h || {};
+      let errText = (er.total_occurrences || 0) + " occurrences, "
+        + (er.distinct_context_class_pairs || 0) + " distinct kinds";
+      if (er.top && er.top.length) {
+        errText += " — top: " + er.top[0].context + " ("
+          + er.top[0].occurrences + ")";
+      }
+      lines.push(["Errors (24h)", errText]);
+      lines.push(["Security events (24h)",
+        fmtCounts(m.security_events_by_kind_last_24h)]);
+    }
     ov.innerHTML = "";
     lines.forEach(([label, value]) => {
       const row = document.createElement("div");

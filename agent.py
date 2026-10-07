@@ -195,7 +195,10 @@ def probe_broker(broker_name, profile=None):
         return result
     req = urllib.request.Request(url, headers=UA)
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        # Connection-pinned fetch (Phase 70): the guard resolves
+        # and validates inside the connection itself, so the
+        # pre-check above can never be raced by a DNS rebinding.
+        with _ssrf.pinned_urlopen(req, timeout=15) as resp:
             result["status"] = resp.status
             result["reachable"] = True
             html = resp.read(512 * 1024).decode("utf-8", "replace")
@@ -420,7 +423,8 @@ def submit_form(form_action, method, payload, timeout=15):
     else:
         req = urllib.request.Request(form_action, data=data, headers=UA, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        # Connection-pinned, like the probe fetch (Phase 70).
+        with _ssrf.pinned_urlopen(req, timeout=timeout) as resp:
             return {"ok": True, "status": resp.status}
     except urllib.error.HTTPError as e:
         return {"ok": False, "status": e.code}

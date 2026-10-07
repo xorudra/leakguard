@@ -81,10 +81,17 @@ def _default_fetcher(url):
     """GET `url` -> (status, text); status is None on transport
     failure. Never raises: verification treats every surprise as
     'unknown', so the fetch layer encodes surprises in the result
-    instead of throwing them."""
+    instead of throwing them.
+
+    The fetch is connection-pinned via core.ssrf (Phase 70): for
+    the 'direct' method, the assert_public_url pre-check in
+    _verify_direct can never be raced by a DNS rebinding, because
+    the pinned connection resolves and validates inside connect()
+    itself — and a pinning refusal lands in the same never-raises
+    contract as any other transport surprise."""
     req = urllib.request.Request(url, headers=agent_engine.UA)
     try:
-        with urllib.request.urlopen(req, timeout=_VERIFY_TIMEOUT) as resp:
+        with ssrf.pinned_urlopen(req, timeout=_VERIFY_TIMEOUT) as resp:
             body = resp.read(_VERIFY_MAX_BYTES)
             return resp.status, body.decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:

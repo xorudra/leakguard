@@ -236,17 +236,20 @@ class _GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
             req, fp, code, msg, headers, newurl)
 
 
-_FETCH_OPENER = urllib.request.build_opener(_GuardedRedirectHandler())
+_FETCH_OPENER = ssrf.pinned_opener(_GuardedRedirectHandler())
 
 
 def fetch_url(url):
     """Fetch `url` under the Phase 102 limits.
 
     Returns (status, decoded body). The SSRF guard runs before the
-    request and inside the redirect handler. HTTP error statuses are
-    returned to the caller, which turns them into one honest fetch
-    failure rather than analyzing an error page as if it were a
-    policy.
+    request and inside the redirect handler, and the opener's
+    connections are pinned (core.ssrf): every hop — initial and
+    redirect — is resolved and validated inside its own connect(),
+    so no check can be raced by a DNS rebinding. HTTP error
+    statuses are returned to the caller, which turns them into one
+    honest fetch failure rather than analyzing an error page as
+    if it were a policy.
     """
     ssrf.assert_public_url(url)
     req = urllib.request.Request(url, headers=_USER_AGENT)

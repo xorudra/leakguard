@@ -104,7 +104,7 @@ reconciled state; nothing in this file rests on UI copy alone.*
 - **Encryption:** identifiers and account emails envelope-encrypted (per-record DEK, AES-256-GCM, env-only master key); lookups via HMAC-SHA256 with a *separate* env-only key; display always masked (e.g. `r•••@domain`)
 - **Secrets:** Render env vars in production; mode-600 files locally; nothing secret in the repo; the GitHub PAT never appears in code or logs
 - **CSRF:** `core/security.require_csrf` on account mutations (X-Requested-With or same-host Origin/Referer)
-- **SSRF:** form-submit actions host-allowlisted against the broker registry; provider/broker fetches constrained to registry-defined endpoints; **DNS-resolution guard `core/ssrf.py`** on the data-driven fetch paths (submit, probe, direct verify) — hosts must resolve entirely to public addresses (Phase 70 DONE; resolve-then-fetch rebinding window documented in the module)
+- **SSRF:** form-submit actions host-allowlisted against the broker registry; provider/broker fetches constrained to registry-defined endpoints; **DNS-resolution guard + connection pinning `core/ssrf.py`** on every data-driven fetch path (agent submit + probe, remediation direct verify, broker source sweep, policy-analyzer fetch) — hosts must resolve entirely to public addresses, and the pinned connection resolves once inside `connect()` and connects to a validated IP (Host header + TLS SNI/cert checks keep the hostname), so the former resolve-then-fetch DNS-rebinding window is closed (Phase 70 DONE; regression suite `tests/test_ssrf_pinning.py`)
 - **Rate limiting:** `core/ratelimit.py` per route class (anon scan 30/h/IP, register 10/h/IP, forgot-password 5/h/IP, user scans 10/h, removal runs 6/h) + login limiter (10/15min per IP+email); keys use the **last** X-Forwarded-For hop (a first-hop spoofing bypass was caught in production and fixed, `56fb831`); 429s carry Retry-After; rejected attempts don't extend lockouts
 - **Enumeration:** forgot-password answers are byte-identical for known/unknown emails; login uses a dummy verify and one identical error; existence of identifiers/exposures is never revealed cross-account
 - **Audit logs:** `audit_log` (migration `0007`) — auth, consent, identifier, scan, remediation, admin events; detail passes a PII filter; best-effort (an audit failure can never break the user action); a test serializes the whole table and asserts no email/identifier/token appears
@@ -160,10 +160,10 @@ taxonomy (owner-ordered audit issue, 2026-10-07):
 
 | Status | Count |
 |---|---|
-| DONE | 124 |
+| DONE | 125 |
 | PARTIAL | 31 |
 | MISSING | 1 |
-| INSECURE | 1 |
+| INSECURE | 0 |
 | UNVERIFIED | 10 |
 | NOT APPLICABLE | 14 |
 | **Total** | **181** |
@@ -182,8 +182,9 @@ commit, full-suite pass at HEAD, and a fresh live verification pass.)*
 
 **No P0 production blocker is open.** Nothing in the open list exposes user
 data, weakens authentication, or breaks deletion/retention today. The
-one INSECURE finding (Phase 70, item 4 below) is a narrow, documented
-residual in a defense-in-depth control, not an open hole. The remaining
+audit's one INSECURE finding (Phase 70, item 4 below) was a narrow,
+documented residual in a defense-in-depth control; it was closed the
+same night (2026-10-07) and no INSECURE item remains open. The remaining
 P0-tier open items are depth and verification gaps, listed first per the
 spec:
 
@@ -206,14 +207,14 @@ spec:
    147/148 DONE), but nothing watches the view, and the Phase 107 lock
    file is pinned, not scanned (Phase 107 UNVERIFIED in the audit
    taxonomy — no scan run is on record).
-4. **SSRF guard has a documented DNS-rebinding residual (Phase 70 —
-   the audit's one INSECURE finding).** `core/ssrf.py` resolves and
-   validates a host, then the fetch re-resolves — a hostile DNS answer
-   swapped between the two lookups could reach a non-public address.
-   The exposed fetch paths are constrained to broker-registry hosts,
-   which bounds the practical risk, but the window is real: the fix
-   (fetch via the validated address) and a rebinding regression test
-   are recorded as the phase's required next action and required test.
+4. **SSRF DNS-rebinding residual — CLOSED 2026-10-07 (Phase 70).**
+   The audit's one INSECURE finding (resolve-then-fetch let a swapped
+   DNS answer reach a non-public address) was fixed the same night
+   with connection pinning in `core/ssrf.py`: resolution, validation,
+   and connection now happen once, inside `connect()`, and the socket
+   connects to a validated IP while TLS keeps the hostname. Covered
+   by `tests/test_ssrf_pinning.py` (rebinding, redirect-to-private,
+   fail-closed mixes). No residual is carried for this item.
 
 Platform risks (not code defects): most people-search brokers wall
 datacenter IPs — in the production acceptance run 27 of 40 cases

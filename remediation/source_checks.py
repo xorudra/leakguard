@@ -58,7 +58,11 @@ def _default_fetcher(url):
     ssrf.assert_public_url(url)
     req = urllib.request.Request(url, headers=agent_engine.UA)
     try:
-        with urllib.request.urlopen(
+        # Connection-pinned fetch (Phase 70): the pinned connection
+        # re-resolves and validates inside connect(), so the guard
+        # above cannot be raced by a DNS rebinding; a pinning
+        # refusal raises here exactly like a transport failure.
+        with ssrf.pinned_urlopen(
                 req, timeout=FETCH_TIMEOUT_SECONDS) as resp:
             return resp.status, resp.read(MAX_BODY_BYTES)
     except urllib.error.HTTPError as exc:

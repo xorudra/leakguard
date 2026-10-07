@@ -89,7 +89,11 @@ class TestCoreEndpoints(ApiTestCase):
     def test_health(self):
         status, headers, body = self.request_json("GET", "/api/health")
         self.assertEqual(status, 200)
-        self.assertEqual(body, {"ok": True, "service": "leakguard"})
+        self.assertEqual(body.get("ok"), True)
+        self.assertEqual(body.get("service"), "leakguard")
+        # Stage S2: coarse DB status only — "disabled" when no
+        # DATABASE_URL is configured (the default in tests).
+        self.assertIn(body.get("db"), ("ok", "disabled", "error"))
         rid = headers.get("X-Request-Id")
         self.assertTrue(rid)
         self.assertEqual(len(rid), 32)  # uuid4 hex

@@ -2,8 +2,13 @@
 """
 LeakGuard — find leaked personal data and help remove it.
 
-GUI-first (web UI, no CLI). Zero dependencies: Python standard library only,
-so it runs anywhere — local machine, Render free tier, any VPS.
+GUI-first (web UI, no CLI). Almost entirely Python standard library, so
+it runs anywhere — local machine, Render free tier, any VPS. Since Stage
+S2 there are exactly two third-party dependencies (see requirements.txt:
+a Postgres driver and AES-GCM cryptography) and both are optional at
+runtime: with no DATABASE_URL configured the app boots and serves every
+feature exactly as before — the database and the encrypted identifier
+vault (db/, vault/) simply stay dormant.
 
 What it does
   * Email breach scan      -> XposedOrNot free API (no key needed)
@@ -36,6 +41,7 @@ from pathlib import Path
 
 import agent as agent_engine
 from core import context, errors, logging_setup, security
+from db import pool as db_pool
 
 BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
@@ -251,7 +257,13 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/brokers":
             return self._json(200, {"brokers": load_brokers()})
         if route == "/api/health":
-            return self._json(200, {"ok": True, "service": "leakguard"})
+            # db is a coarse status only ("ok" / "disabled" / "error") —
+            # never connection details (spec Phase 76 observability).
+            return self._json(200, {
+                "ok": True,
+                "service": "leakguard",
+                "db": db_pool.db_status(),
+            })
         return self._fail(errors.not_found())
 
     def _read_json_body(self):
@@ -361,8 +373,25 @@ class Handler(BaseHTTPRequestHandler):
         })
 
 
+def _startup_migrations():
+    """Apply pending DB migrations at boot when a database is configured
+    (Stage S2). Guarded: any failure is logged (exception class only)
+    and boot continues — a broken database must never take down the
+    anonymous scan, which is storage-free by design."""
+    try:
+        from db import migrate
+
+        applied = migrate.run_migrations_if_configured()
+        for name in applied:
+            print("LeakGuard: applied DB migration %s" % name)
+    except Exception as exc:
+        logging_setup.log_error(None, "startup migrations failed: "
+                                + type(exc).__name__)
+
+
 def main():
     logging_setup.setup_logging()
+    _startup_migrations()
     port = int(os.environ.get("PORT", "8000"))
     host = os.environ.get("HOST", "0.0.0.0")
     server = ThreadingHTTPServer((host, port), Handler)

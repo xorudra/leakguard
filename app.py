@@ -52,6 +52,7 @@ from accounts import ratelimit
 from accounts import sessions as sessions_mod
 from core import context, errors, logging_setup, security
 from db import pool as db_pool
+from monitoring import service as monitoring_service
 from providers import registry as providers_registry
 from remediation import registry_seed as broker_registry
 from remediation import service as remediation_service
@@ -291,6 +292,10 @@ class Handler(BaseHTTPRequestHandler):
         route = parsed.path
         if route == "/" or route == "/index.html":
             return self._serve_file(STATIC / "index.html", "text/html; charset=utf-8")
+        if route == "/reset":
+            # Password-reset landing (Stage S8): the same SPA, which
+            # reads ?token= itself and shows the reset form.
+            return self._serve_file(STATIC / "index.html", "text/html; charset=utf-8")
         if route == "/static/style.css":
             return self._serve_file(STATIC / "style.css", "text/css; charset=utf-8")
         if route == "/static/app.js":
@@ -349,6 +354,25 @@ class Handler(BaseHTTPRequestHandler):
             user, _token = self._require_user()
             return self._json(200, {
                 "jobs": self._call(scan_jobs_service.list_jobs, user["id"]),
+            })
+        if route == "/api/monitoring/settings":
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._json(200, self._call(
+                monitoring_service.get_settings, user["id"]))
+        if route == "/api/monitoring/timeline":
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._json(200, {
+                "events": self._call(monitoring_service.timeline,
+                                     user["id"]),
+            })
+        if route == "/api/notifications":
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._json(200, {
+                "notifications": self._call(
+                    monitoring_service.list_notifications, user["id"]),
             })
         if route == "/api/remediation/cases":
             self._require_accounts()
@@ -543,6 +567,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"user": result["user"]}, extra_headers=[
                 ("Set-Cookie", sessions_mod.cookie_header(result["token"]))])
 
+        if route == "/api/auth/forgot-password":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            # Enumeration-safe: the service is silent about whether
+            # the email exists, and this answer NEVER varies.
+            self._call(auth_service.forgot_password,
+                       payload.get("email"))
+            return self._json(200, {"ok": True})
+
+        if route == "/api/auth/reset-password":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            self._call(auth_service.reset_password,
+                       payload.get("token"), payload.get("new_password"))
+            return self._json(200, {"ok": True})
+
         user, token = self._require_user()
 
         if route == "/api/auth/change-password":
@@ -641,6 +683,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._fail(errors.not_found())
         return self._fail(errors.not_found())
 
+    def do_PUT(self):
+        return self._safe_dispatch(self._do_PUT)
+
+    def _do_PUT(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/monitoring/settings":
+            security.require_csrf(self)
+            self._require_accounts()
+            user, _token = self._require_user()
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            result = self._call(monitoring_service.update_settings,
+                                user["id"], payload.get("cadence_days"))
+            return self._json(200, result)
+        return self._fail(errors.not_found())
+
     def do_DELETE(self):
         return self._safe_dispatch(self._do_DELETE)
 
@@ -731,12 +790,26 @@ def _startup_remediation_worker():
                                 + type(exc).__name__)
 
 
+def _startup_monitoring_scheduler():
+    """Start the hourly monitoring scheduler (Stage S8) when a
+    database is configured. Guarded exactly like the workers."""
+    try:
+        from monitoring import scheduler
+
+        if scheduler.start_scheduler_if_configured():
+            print("LeakGuard: monitoring scheduler started")
+    except Exception as exc:
+        logging_setup.log_error(None, "monitoring scheduler failed "
+                                "to start: " + type(exc).__name__)
+
+
 def main():
     logging_setup.setup_logging()
     _startup_migrations()
     _startup_worker()
     _startup_broker_seed()
     _startup_remediation_worker()
+    _startup_monitoring_scheduler()
     port = int(os.environ.get("PORT", "8000"))
     host = os.environ.get("HOST", "0.0.0.0")
     server = ThreadingHTTPServer((host, port), Handler)

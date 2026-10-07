@@ -678,6 +678,12 @@ function downloadText(name, text) {
 const AH = { "Content-Type": "application/json", "X-Requested-With": "fetch" };
 let meUser = null;
 let lastScanEmail = "";
+/* Password-reset landing (/reset?token=...): while this is on, the
+   account panel shows ONLY the reset form — never the sign-in form
+   or a previous session's Privacy Center. Set by the boot code at
+   the bottom of this file, before any async load can resolve. */
+let lgResetMode = false;
+let lgResetToken = null;
 
 async function apiJson(path, opts) {
   const resp = await fetch(path, opts || {});
@@ -698,6 +704,13 @@ function refreshSaveScanBox() {
 }
 
 function renderAccount() {
+  if (lgResetMode) {
+    $("acctBtn").textContent = "Sign in";
+    $("authForms").hidden = true;
+    $("privacyCenter").hidden = true;
+    $("resetBox").hidden = false;
+    return;
+  }
   const signedIn = !!meUser;
   $("acctBtn").textContent = signedIn ? "My Privacy Center" : "Sign in";
   $("acctLabel").hidden = !signedIn;
@@ -713,6 +726,7 @@ function renderAccount() {
     loadDomains();
     loadConsents();
     loadRemoval();
+    loadMonitoring();
     if (renderAccount._fsUser !== meUser.id) {
       // Fresh sign-in (or a different account): clear the last
       // full-scan view so nobody sees a previous session's results.
@@ -802,6 +816,72 @@ $("acRegisterBtn").addEventListener("click", async () => {
   } catch (err) {
     $("acStatus").textContent = err.message;
   }
+});
+
+/* ----- forgot / reset password ----- */
+$("acForgotLink").addEventListener("click", (e) => {
+  e.preventDefault();
+  const box = $("forgotBox");
+  box.hidden = !box.hidden;
+  if (!box.hidden) {
+    if (!$("fgEmail").value) $("fgEmail").value = $("acEmail").value.trim();
+    $("fgEmail").focus();
+  }
+});
+
+$("fgBtn").addEventListener("click", async () => {
+  const email = $("fgEmail").value.trim();
+  if (!email) { $("fgStatus").textContent = "Enter your email address first."; return; }
+  $("fgBtn").disabled = true;
+  $("fgStatus").textContent = "Sending…";
+  try {
+    const r = await apiJson("/api/auth/forgot-password", {
+      method: "POST", headers: AH, body: JSON.stringify({ email }),
+    });
+    if (!r.ok) throw new Error(errMsg(r.data, "Could not send the reset email"));
+    // Neutral on purpose: this exact sentence shows whether or not
+    // the address has an account — anything else would leak who is
+    // registered.
+    $("fgStatus").textContent = "If that email has an account, a reset link is on its way — check your inbox.";
+  } catch (err) {
+    $("fgStatus").textContent = err.message;
+  }
+  $("fgBtn").disabled = false;
+});
+
+$("resetForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const pw = $("rsPassword").value;
+  const pw2 = $("rsPassword2").value;
+  if (!lgResetToken) {
+    $("rsStatus").textContent = "This reset link is missing its token — request a new one from the sign-in form.";
+    return;
+  }
+  if (pw.length < 10) { $("rsStatus").textContent = "Password must be at least 10 characters."; return; }
+  if (pw !== pw2) { $("rsStatus").textContent = "The two passwords do not match."; return; }
+  $("rsBtn").disabled = true;
+  $("rsStatus").textContent = "Setting your new password…";
+  try {
+    const r = await apiJson("/api/auth/reset-password", {
+      method: "POST", headers: AH,
+      body: JSON.stringify({ token: lgResetToken, new_password: pw }),
+    });
+    if (!r.ok) throw new Error(errMsg(r.data, "Could not reset the password"));
+    // Done: leave reset mode, scrub the token from the address bar,
+    // and hand the user the normal sign-in form.
+    lgResetMode = false;
+    lgResetToken = null;
+    history.replaceState(null, "", "/");
+    $("resetBox").hidden = true;
+    $("rsPassword").value = "";
+    $("rsPassword2").value = "";
+    renderAccount();
+    $("acStatus").textContent = "Password changed — sign in with your new password.";
+    $("account").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (err) {
+    $("rsStatus").textContent = err.message;
+  }
+  $("rsBtn").disabled = false;
 });
 
 $("pcLogoutBtn").addEventListener("click", async () => {
@@ -1037,6 +1117,7 @@ function renderConsents(state) {
       if (r.ok) {
         $("consentStatus").textContent = "Saved — " + title + (toggle.checked ? " is ON." : " is OFF.");
         renderConsents(r.data.consents);
+        syncMonitoringConsent(r.data.consents);
       } else {
         toggle.checked = !toggle.checked;
         toggle.disabled = false;
@@ -1051,9 +1132,135 @@ function renderConsents(state) {
 async function loadConsents() {
   if (!meUser) return;
   const r = await apiJson("/api/consents");
-  if (r.ok) renderConsents(r.data.consents);
+  if (r.ok) { renderConsents(r.data.consents); syncMonitoringConsent(r.data.consents); }
   else $("consentList").innerHTML = "<p class='hint'>" + errMsg(r.data, "Could not load permissions") + "</p>";
 }
+
+/* ----- monitoring (Stage S8): cadence, timeline, notifications ----- */
+const NOTIF_KIND_LABELS = {
+  new_finding: "New exposure found",
+  finding_resolved: "Exposure no longer found",
+  removal_verified: "Removal verified",
+  reappeared: "Data reappeared",
+  password_reset: "Password reset",
+  scan_summary: "Scan summary",
+};
+const NOTIF_STATUS_WORDS = {
+  sent: "Emailed to you",
+  in_app_only: "In-app only (email alerts off)",
+  unsent_no_lane: "Not emailed — email delivery is not set up",
+  failed: "Email could not be sent",
+  pending: "Sending…",
+  suppressed: "Duplicate — not sent again",
+};
+
+function syncMonitoringConsent(state) {
+  const entry = (state || []).find((c) => c.purpose === "monitoring");
+  const on = !!(entry && entry.granted);
+  const off = $("monitorOff");
+  if (off) off.hidden = on;
+  const sel = $("monCadence");
+  if (sel) sel.disabled = !on;
+  const btn = $("monSaveBtn");
+  if (btn) btn.disabled = !on;
+}
+
+function _fmtWhen(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? "" : d.toLocaleString();
+}
+
+async function loadMonitoring() {
+  if (!meUser) return;
+  try {
+    const s = await apiJson("/api/monitoring/settings");
+    if (s.ok) {
+      $("monCadence").value = String(s.data.cadence_days || 7);
+      const bits = [];
+      bits.push(s.data.last_scan_at
+        ? "Last full check: " + _fmtWhen(s.data.last_scan_at)
+        : "No full check has completed yet");
+      bits.push(s.data.next_scan_at
+        ? "Next scheduled re-check: " + _fmtWhen(s.data.next_scan_at)
+        : "The next scheduled re-check is due on the next scheduler pass");
+      $("monLastNext").textContent = bits.join(" · ");
+    }
+  } catch (e) { /* the lists below still render what they can */ }
+  try {
+    const t = await apiJson("/api/monitoring/timeline");
+    const wrap = $("timelineList");
+    wrap.innerHTML = "";
+    if (!t.ok) {
+      wrap.innerHTML = "<p class='hint'>" + errMsg(t.data, "Could not load your timeline") + "</p>";
+    } else if (!t.data.events.length) {
+      wrap.innerHTML = "<p class='hint'>Nothing yet — your first scan will start the timeline.</p>";
+    } else {
+      t.data.events.slice(0, 20).forEach((ev) => {
+        const row = document.createElement("div");
+        row.className = "idRow";
+        const left = document.createElement("span");
+        left.textContent = ev.summary;
+        const when = document.createElement("span");
+        when.className = "hint";
+        when.textContent = _fmtWhen(ev.at);
+        row.appendChild(left); row.appendChild(when);
+        wrap.appendChild(row);
+      });
+    }
+  } catch (e) {
+    $("timelineList").innerHTML = "<p class='hint'>Could not load your timeline.</p>";
+  }
+  try {
+    const n = await apiJson("/api/notifications");
+    const wrap = $("notifList");
+    wrap.innerHTML = "";
+    if (!n.ok) {
+      wrap.innerHTML = "<p class='hint'>" + errMsg(n.data, "Could not load notifications") + "</p>";
+    } else if (!n.data.notifications.length) {
+      wrap.innerHTML = "<p class='hint'>No notifications yet.</p>";
+    } else {
+      n.data.notifications.slice(0, 20).forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "idRow";
+        const left = document.createElement("span");
+        const tag = document.createElement("span");
+        tag.className = "kindTag";
+        tag.textContent = NOTIF_KIND_LABELS[item.kind] || item.kind;
+        const detail = document.createElement("span");
+        const p = item.payload || {};
+        detail.textContent = p.source_name || p.broker_name || "";
+        left.appendChild(tag); left.appendChild(detail);
+        const right = document.createElement("span");
+        right.className = "hint";
+        right.textContent = (NOTIF_STATUS_WORDS[item.status] || item.status) +
+          " · " + _fmtWhen(item.created_at);
+        row.appendChild(left); row.appendChild(right);
+        wrap.appendChild(row);
+      });
+    }
+  } catch (e) {
+    $("notifList").innerHTML = "<p class='hint'>Could not load notifications.</p>";
+  }
+}
+
+$("monSaveBtn").addEventListener("click", async () => {
+  const days = parseInt($("monCadence").value, 10);
+  $("monSaveBtn").disabled = true;
+  $("monStatus").textContent = "Saving…";
+  try {
+    const r = await apiJson("/api/monitoring/settings", {
+      method: "PUT", headers: AH,
+      body: JSON.stringify({ cadence_days: days }),
+    });
+    if (!r.ok) throw new Error(errMsg(r.data, "Could not save the schedule"));
+    $("monStatus").textContent = "Saved — re-checks every " + r.data.cadence_days + " days.";
+    loadMonitoring();
+  } catch (err) {
+    $("monStatus").textContent = err.message;
+  }
+  $("monSaveBtn").disabled = false;
+});
 
 /* ----- full scan (Stage S5): one tap for the whole saved profile ----- */
 let fullScanTimer = null;
@@ -1581,6 +1788,26 @@ $("delBtn").addEventListener("click", async () => {
 });
 
 loadMe();
+
+/* ---------------- Password-reset landing (/reset?token=...) ----------------
+   Runs synchronously at script load — before loadMe()'s fetch can
+   resolve — so the reset form is the only thing the account panel
+   will show (renderAccount honours lgResetMode). */
+(function () {
+  if (location.pathname !== "/reset") return;
+  lgResetMode = true;
+  lgResetToken = new URLSearchParams(location.search).get("token");
+  const panel = $("account");
+  panel.hidden = false;
+  $("authForms").hidden = true;
+  $("privacyCenter").hidden = true;
+  $("resetBox").hidden = false;
+  if (!lgResetToken) {
+    $("rsStatus").textContent = "This reset link is missing its token — request a new one from the sign-in form.";
+    $("rsBtn").disabled = true;
+  }
+  panel.scrollIntoView();
+})();
 
 /* ---------------- Reveal on scroll ---------------- */
 (function () {

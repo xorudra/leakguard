@@ -115,6 +115,16 @@ def run_once():
     except Exception as exc:  # retry policy owns every failure
         _record_failure(job_id, attempts, exc)
         return True
+    # Stage S8: monitoring diff + notifications hook. Guarded hard —
+    # the job is already 'done'; a notification failure must never
+    # fail, retry or resurrect it.
+    try:
+        from monitoring import events as monitoring_events
+
+        monitoring_events.handle_scan_completed(job_id)
+    except Exception as exc:
+        logging_setup.log_error(None, "monitoring completion hook "
+                                "failed: " + type(exc).__name__)
     _log("scan_worker job=%s outcome=done" % job_id)
     return True
 

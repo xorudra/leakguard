@@ -11,7 +11,12 @@ except where a function's contract says so (the owner-only data
 export in accounts/privacy.py, and the one-time TOTP enroll URI).
 """
 
+import hashlib
+import hmac
+import os
 import re
+import secrets
+from datetime import datetime, timedelta, timezone
 
 from accounts import passwords, sessions, totp
 from core import errors
@@ -238,6 +243,111 @@ def delete_account(user_id, password):
             (user_id,),
         )
     sessions.revoke_all_sessions(user_id)
+
+
+# ---------------------------------------------------------------------------
+# Password reset (Stage S8 — the 0002 table finally gets its flow)
+# ---------------------------------------------------------------------------
+
+RESET_TOKEN_TTL = timedelta(hours=1)
+# Where reset links point. Overridable for local development; the
+# production default is the live site.
+RESET_URL_BASE = os.environ.get(
+    "PUBLIC_BASE_URL", "https://leakguard-hh8e.onrender.com")
+
+
+def forgot_password(email):
+    """Begin a password reset. ENUMERATION-SAFE BY CONSTRUCTION:
+    this function returns None in every case and the handler always
+    answers the same 200 {"ok": true} — unknown email, deleted
+    account, malformed address and a dead email lane are
+    indistinguishable from the outside.
+
+    For a real live user: a fresh token is minted (only its SHA-256
+    is stored; the raw value travels ONLY in the notification
+    payload and the email it produces), previous unused tokens are
+    superseded, and delivery is attempted immediately via the
+    monitoring lane. The reset is user-requested transactional
+    mail, so it does not wait for the 'notifications' consent —
+    and when the lane cannot deliver, the ledger row still records
+    the attempt honestly as unsent/failed (never as sent)."""
+    normalized = normalize_email(email)
+    if not EMAIL_RE.match(normalized):
+        return
+    row = _get_user_by_email(normalized)
+    if row is None:
+        return
+    raw_token = secrets.token_urlsafe(32)
+    digest = hashlib.sha256(raw_token.encode("utf-8")).digest()
+    now = datetime.now(timezone.utc)
+    with pool.connection() as conn:
+        conn.execute(
+            "UPDATE password_reset_tokens SET used_at = %s"
+            " WHERE user_id = %s AND used_at IS NULL",
+            (now, row["id"]),
+        )
+        conn.execute(
+            "INSERT INTO password_reset_tokens"
+            " (token_hash, user_id, expires_at) VALUES (%s, %s, %s)",
+            (digest, row["id"], now + RESET_TOKEN_TTL),
+        )
+    reset_url = (RESET_URL_BASE.rstrip("/")
+                 + "/reset?token=" + raw_token)
+    from monitoring import notify
+
+    notify.create_notification(
+        row["id"], "password_reset", {"reset_url": reset_url},
+        mode="always", email=normalized)
+
+
+def _invalid_token():
+    # One shape for unknown, expired, used and superseded tokens —
+    # the response must never say WHICH check failed.
+    return errors.bad_request(
+        "invalid_token",
+        "That reset link is not valid or has expired — "
+        "request a new one")
+
+
+def reset_password(raw_token, new_password):
+    """Complete a password reset: validate the token (digest match,
+    unused, unexpired, owner still live), set the new Argon2id hash,
+    consume the token, and revoke EVERY session — a reset is
+    exactly the moment other devices must lose access."""
+    if not isinstance(raw_token, str) or not raw_token:
+        raise _invalid_token()
+    digest = hashlib.sha256(raw_token.encode("utf-8")).digest()
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT id, user_id, token_hash, expires_at, used_at"
+            " FROM password_reset_tokens WHERE token_hash = %s",
+            (digest,),
+        ).fetchone()
+    if row is None or not hmac.compare_digest(
+            bytes(row["token_hash"]), digest):
+        raise _invalid_token()
+    if row["used_at"] is not None:
+        raise _invalid_token()
+    if row["expires_at"] <= datetime.now(timezone.utc):
+        raise _invalid_token()
+    if _get_user_by_id(row["user_id"]) is None:
+        raise _invalid_token()
+    _validate_password(new_password)
+    with pool.connection() as conn:
+        consumed = conn.execute(
+            "UPDATE password_reset_tokens SET used_at = now()"
+            " WHERE id = %s AND used_at IS NULL RETURNING id",
+            (row["id"],),
+        ).fetchone()
+        if consumed is None:  # a concurrent reset won the race
+            raise _invalid_token()
+        conn.execute(
+            "UPDATE users SET password_hash = %s, updated_at = now()"
+            " WHERE id = %s",
+            (passwords.hash_password(new_password), row["user_id"]),
+        )
+    sessions.revoke_all_sessions(row["user_id"])
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

@@ -5,3 +5,4 @@ __pycache__/
 .neon-database-url
 .vault-master-key
 .vault-lookup-key
+.brevo-password

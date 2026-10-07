@@ -53,7 +53,7 @@ from accounts import identifiers as identifiers_service
 from accounts import privacy as privacy_service
 from accounts import ratelimit
 from accounts import sessions as sessions_mod
-from core import context, errors, logging_setup, security
+from core import context, errors, flags, logging_setup, security
 from core import ratelimit as core_ratelimit
 from dashboard import graph as graph_service
 from dashboard import service as action_center_service
@@ -145,6 +145,23 @@ def load_brokers():
         return json.loads(BROKERS_FILE.read_text(encoding="utf-8"))
     except Exception:
         return []
+
+
+def _versioned_route(path):
+    """API versioning (spec Phase 88): /api/v1 is the canonical
+    version of the API. Every /api/* route also answers under
+    /api/v1/* — the SAME handler, reached by normalizing the prefix
+    away here, at the routing layer, before dispatch. The
+    unversioned /api/* spelling is a permanent alias of v1 (the
+    browser UI uses it), so nothing that works today can break;
+    a future breaking change ships as /api/v2 alongside, never as
+    a silent change to v1. No route begins with /api/v1 today, so
+    the prefix can never shadow a real route."""
+    if path == "/api/v1":
+        return "/api"
+    if path.startswith("/api/v1/"):
+        return "/api/" + path[len("/api/v1/"):]
+    return path
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -369,7 +386,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
-        route = parsed.path
+        route = _versioned_route(parsed.path)
         if route == "/" or route == "/index.html":
             return self._serve_file(STATIC / "index.html", "text/html; charset=utf-8")
         if route == "/reset":
@@ -559,15 +576,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._fail(errors.not_found("Scan not found"))
             return self._json(200, self._call(
                 scan_jobs_service.get_job, user["id"], job_id))
-        if route == "/api/privacy/export":
-            self._require_accounts()
-            user, _token = self._require_user()
-            document = self._call(privacy_service.build_export, user["id"])
-            return self._send(
-                200, json.dumps(document, indent=2), "application/json",
-                extra_headers=[(
-                    "Content-Disposition",
-                    'attachment; filename="leakguard-export.json"')])
         return self._fail(errors.not_found())
 
     def _read_json_body(self):
@@ -594,14 +602,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path.startswith("/api/auth/") or parsed.path in (
+        route = _versioned_route(parsed.path)
+        if route.startswith("/api/auth/") or route in (
                 "/api/consents", "/api/identifiers", "/api/scans",
                 "/api/domains", "/api/remediation/run",
-                "/api/household/members", "/api/tokens") \
-                or parsed.path.startswith("/api/domains/") \
-                or parsed.path.startswith("/api/remediation/cases/"):
-            return self._accounts_post(parsed.path)
-        if parsed.path == "/api/agent/plan":
+                "/api/household/members", "/api/tokens",
+                "/api/privacy/export") \
+                or route.startswith("/api/domains/") \
+                or route.startswith("/api/remediation/cases/"):
+            return self._accounts_post(route)
+        if route == "/api/agent/plan":
             payload = self._read_json_body()
             if payload is None:
                 return self._fail(errors.invalid_json())
@@ -619,7 +629,7 @@ class Handler(BaseHTTPRequestHandler):
                 "plan": agent_engine.build_plan(profile),
                 "engine": "zero-token deterministic scripts (playbooks + live form probe) — no AI involved",
             })
-        if parsed.path == "/api/agent/probe":
+        if route == "/api/agent/probe":
             self._enforce_rate_limit("agent_probe",
                                      "ip:" + self._client_ip())
             payload = self._read_json_body()
@@ -636,7 +646,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 result = agent_engine.probe_broker(broker, profile)
             return self._json(200, result)
-        if parsed.path == "/api/agent/submit":
+        if route == "/api/agent/submit":
             self._enforce_rate_limit("agent_submit",
                                      "ip:" + self._client_ip())
             payload = self._read_json_body()
@@ -664,7 +674,7 @@ class Handler(BaseHTTPRequestHandler):
                     "bad_submission", "Bad submission"))
             clean = {str(k)[:80]: str(v)[:500] for k, v in data.items()}
             return self._json(200, agent_engine.submit_form(action, method, clean))
-        if parsed.path != "/api/scan":
+        if route != "/api/scan":
             return self._fail(errors.not_found())
         self._enforce_rate_limit("anon_scan", "ip:" + self._client_ip())
         payload = self._read_json_body()
@@ -716,6 +726,12 @@ class Handler(BaseHTTPRequestHandler):
         self._require_accounts()
 
         if route == "/api/auth/register":
+            # Emergency control (core/flags.py): the owner can shut
+            # registration without touching the rest of the site.
+            if not flags.is_enabled("registration"):
+                return self._fail(errors.unavailable(
+                    "feature_disabled",
+                    "Creating an account is paused right now"))
             payload = self._read_json_body()
             if payload is None:
                 return self._fail(errors.invalid_json())
@@ -807,6 +823,22 @@ class Handler(BaseHTTPRequestHandler):
             result = self._call(auth_service.totp_disable, user["id"],
                                 payload.get("password"), payload.get("code"))
             return self._json(200, result)
+        if route == "/api/privacy/export":
+            # The only plaintext exit, now behind a password re-check
+            # (accounts/privacy.py): the body names the password and
+            # the format; the service counts the attempt against the
+            # credential rate limiter and verifies before building
+            # anything. There is no GET variant any more.
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            body, ctype, filename = self._call(
+                privacy_service.export_document, user["id"],
+                payload.get("password"), payload.get("format"),
+                self._client_ip())
+            return self._send(200, body, ctype, extra_headers=[(
+                "Content-Disposition",
+                'attachment; filename="%s"' % filename)])
         if route == "/api/consents":
             payload = self._read_json_body()
             if payload is None:
@@ -858,6 +890,12 @@ class Handler(BaseHTTPRequestHandler):
                                 user["id"], domain_id)
             return self._json(200, {"domain": record})
         if route == "/api/scans":
+            # Emergency control: account full scans only — the
+            # anonymous Quick Scan (/api/scan) is never flag-gated.
+            if not flags.is_enabled("account_scans"):
+                return self._fail(errors.unavailable(
+                    "feature_disabled",
+                    "Full scans are paused right now"))
             payload = self._read_json_body()
             if payload is None:
                 return self._fail(errors.invalid_json())
@@ -870,6 +908,10 @@ class Handler(BaseHTTPRequestHandler):
             # The one command: consent-gated inside the service (403
             # consent_required), then one idempotent case per broker.
             # The worker drains the queue asynchronously.
+            if not flags.is_enabled("removal_runs"):
+                return self._fail(errors.unavailable(
+                    "feature_disabled",
+                    "Automatic removal is paused right now"))
             self._enforce_rate_limit("user_remediation_run",
                                      "user:" + user["id"])
             return self._json(200, self._call(
@@ -896,15 +938,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_PUT(self):
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path == "/api/monitoring/settings":
+        route = _versioned_route(parsed.path)
+        if route == "/api/monitoring/settings":
             security.require_csrf(self)
             self._require_accounts()
             user, _token = self._require_user()
             payload = self._read_json_body()
             if payload is None:
                 return self._fail(errors.invalid_json())
-            result = self._call(monitoring_service.update_settings,
-                                user["id"], payload.get("cadence_days"))
+            result = self._call(
+                monitoring_service.update_settings, user["id"],
+                payload.get("cadence_days", monitoring_service.UNSET),
+                payload.get("monitoring_paused",
+                            monitoring_service.UNSET))
             return self._json(200, result)
         return self._fail(errors.not_found())
 
@@ -913,12 +959,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_PATCH(self):
         parsed = urllib.parse.urlparse(self.path)
+        route = _versioned_route(parsed.path)
         prefix = "/api/identifiers/"
-        if parsed.path.startswith(prefix) and len(parsed.path) > len(prefix):
+        if route.startswith(prefix) and len(route) > len(prefix):
             security.require_csrf(self)
             self._require_accounts()
             user, _token = self._require_user()
-            ident = parsed.path[len(prefix):]
+            ident = route[len(prefix):]
             try:
                 uuid.UUID(ident)
             except (ValueError, AttributeError, TypeError):
@@ -938,12 +985,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_DELETE(self):
         parsed = urllib.parse.urlparse(self.path)
+        route = _versioned_route(parsed.path)
         prefix = "/api/tokens/"
-        if parsed.path.startswith(prefix) and len(parsed.path) > len(prefix):
+        if route.startswith(prefix) and len(route) > len(prefix):
             security.require_csrf(self)
             self._require_accounts()
             user, _token = self._require_user()
-            token_id = parsed.path[len(prefix):]
+            token_id = route[len(prefix):]
             try:
                 uuid.UUID(token_id)
             except (ValueError, AttributeError, TypeError):
@@ -952,11 +1000,11 @@ class Handler(BaseHTTPRequestHandler):
                                 user["id"], token_id)
             return self._json(200, result)
         prefix = "/api/household/members/"
-        if parsed.path.startswith(prefix) and len(parsed.path) > len(prefix):
+        if route.startswith(prefix) and len(route) > len(prefix):
             security.require_csrf(self)
             self._require_accounts()
             user, _token = self._require_user()
-            member_id = parsed.path[len(prefix):]
+            member_id = route[len(prefix):]
             try:
                 uuid.UUID(member_id)
             except (ValueError, AttributeError, TypeError):
@@ -966,11 +1014,11 @@ class Handler(BaseHTTPRequestHandler):
                                 user["id"], member_id)
             return self._json(200, result)
         prefix = "/api/identifiers/"
-        if parsed.path.startswith(prefix) and len(parsed.path) > len(prefix):
+        if route.startswith(prefix) and len(route) > len(prefix):
             security.require_csrf(self)
             self._require_accounts()
             user, _token = self._require_user()
-            ident = parsed.path[len(prefix):]
+            ident = route[len(prefix):]
             try:
                 uuid.UUID(ident)
             except (ValueError, AttributeError, TypeError):
@@ -979,11 +1027,11 @@ class Handler(BaseHTTPRequestHandler):
                                 user["id"], ident)
             return self._json(200, result)
         prefix = "/api/domains/"
-        if parsed.path.startswith(prefix) and len(parsed.path) > len(prefix):
+        if route.startswith(prefix) and len(route) > len(prefix):
             security.require_csrf(self)
             self._require_accounts()
             user, _token = self._require_user()
-            domain_id = parsed.path[len(prefix):]
+            domain_id = route[len(prefix):]
             try:
                 uuid.UUID(domain_id)
             except (ValueError, AttributeError, TypeError):

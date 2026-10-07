@@ -266,14 +266,14 @@ class TestExtensionFiles(unittest.TestCase):
         self.assertIn("chrome.storage.local", shared)
         self.assertIn('"Bearer " + token', shared)
         popup = (EXT / "popup.js").read_text("utf-8")
-        self.assertIn('"/api/action-center"', popup)
+        self.assertIn('"/api/v1/action-center"', popup)
         self.assertIn("Open LeakGuard", (EXT / "popup.html")
                       .read_text("utf-8"))
         options_html = (EXT / "options.html").read_text("utf-8")
         self.assertIn("Privacy Center", options_html)
         self.assertIn("Test connection", options_html)
         options_js = (EXT / "options.js").read_text("utf-8")
-        self.assertIn('"/api/action-center"', options_js)
+        self.assertIn('"/api/v1/action-center"', options_js)
 
     def test_readme_is_honest_about_the_store(self):
         readme = (EXT / "README.md").read_text("utf-8")

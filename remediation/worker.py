@@ -25,6 +25,16 @@ re-queues them. An unexpected engine exception parks the case as
 failed/internal_error with the exception CLASS in the attempt log;
 stale 'running' cases (orphaned by a restart) are requeued on start.
 
+Priority (spec Phase 159): unlike scan jobs, this queue has exactly
+ONE class of work. Every queued case originates from a user action —
+the "Remove all" run (service.run_removal) or a case retry
+(service.retry_case) — and verification never queues at all
+(verify.verify_case runs synchronously inside the user's request).
+There is no scheduled/background class to deprioritize, so the
+FIFO claim below already IS the priority order; if a scheduler
+ever starts queueing cases, it must mark them and the claim gets
+the same two-class ordering as scanning/worker.py.
+
 Logs carry case ids and outcome words only — never identifier
 values, never user data.
 """

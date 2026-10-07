@@ -201,6 +201,12 @@
         <span id="monStatus" class="hint"></span>
       </div>
       <p class="hint" id="monLastNext"></p>
+      <p class="hint">Need a break without switching the permission off? Pause keeps your
+      Monitoring permission exactly as it is — scheduled re-checks simply wait until you resume.</p>
+      <div class="rowBtns">
+        <button type="button" id="monPauseBtn" class="btnGhost">Pause monitoring</button>
+        <span id="monPauseState" class="hint"></span>
+      </div>
 
       <h3>Timeline</h3>
       <p class="hint">Your scans, findings and removals, newest first — built from the actual records,
@@ -304,9 +310,18 @@
 
       <h3>Download my data</h3>
       <p class="hint">Everything LeakGuard holds about you — account, saved details (shown in full,
-      they are yours) and your complete permission history — as one JSON file.</p>
+      they are yours) and your complete permission history — as one file. Because the file shows
+      your details in full, downloading asks for your password once more.</p>
+      <label>Password <input type="password" id="exportPassword" autocomplete="current-password"></label>
+      <label>File format
+        <select id="exportFormat">
+          <option value="json">JSON — for backups and other software</option>
+          <option value="csv">CSV — opens in a spreadsheet</option>
+        </select>
+      </label>
       <div class="rowBtns">
-        <button type="button" id="exportBtn" class="btnGhost">Download my data (JSON)</button>
+        <button type="button" id="exportBtn" class="btnGhost">Download my data</button>
+        <span id="exportMsg" class="hint"></span>
       </div>
 
       <h3>Change password</h3>

@@ -1,6 +1,6 @@
 "use strict";
 /* LeakGuard extension options: store the API token locally, and
-   prove it works against GET /api/action-center before claiming
+   prove it works against GET /api/v1/action-center before claiming
    success. The token is the ONLY credential this extension holds. */
 
 const input = document.getElementById("tokenInput");
@@ -29,7 +29,7 @@ document.getElementById("testBtn").addEventListener("click", async () => {
   const token = input.value.trim();
   if (token) await lgSetToken(token);
   say("Testing…");
-  const r = await lgApi("/api/action-center");
+  const r = await lgApi("/api/v1/action-center");
   if (r.noToken) {
     say("No token saved yet — paste one above first.");
   } else if (r.status === 200) {

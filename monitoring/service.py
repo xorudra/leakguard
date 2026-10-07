@@ -5,9 +5,12 @@ GET /api/notifications.
 Authorization by construction (the Stage S3 pattern): every
 function takes the session's user id and scopes every query by it.
 
-* Settings are just the cadence: whether monitoring runs at all is
-  the 'monitoring' consent's answer, reported alongside so the UI
-  can show one honest state. last/next scan come from real job rows.
+* Settings are the cadence plus the pause switch (Batch B, spec
+  Phase 142): whether monitoring is ALLOWED at all is the
+  'monitoring' consent's answer, reported alongside so the UI can
+  show one honest state; `monitoring_paused` is the separate,
+  reversible "not right now" state that never touches the consent
+  record. last/next scan come from real job rows.
 * The timeline is a READ MODEL (spec Phases 46, 47): events derived
   from rows that already exist — completed scan jobs, findings'
   first appearances, and remediation case history (case rows plus
@@ -54,24 +57,29 @@ def _last_completed_scan(user_id):
 
 
 def get_settings(user_id):
-    """{cadence_days, monitoring_consent, last_scan_at,
-    next_scan_at, due_now}. next_scan_at is last + cadence; with no
-    completed scan yet it is null and due_now is true (the first
-    scheduled run happens on the next scheduler tick)."""
+    """{cadence_days, monitoring_paused, monitoring_consent,
+    last_scan_at, next_scan_at, due_now}. next_scan_at is
+    last + cadence; with no completed scan yet it is null and
+    due_now is true (the first scheduled run happens on the next
+    scheduler tick — unless the user has paused, in which case
+    due_now is false: the scheduler will skip them regardless)."""
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT monitor_cadence_days FROM user_settings"
-            " WHERE user_id = %s",
+            "SELECT monitor_cadence_days, monitoring_paused"
+            " FROM user_settings WHERE user_id = %s",
             (user_id,),
         ).fetchone()
     cadence = int(row["monitor_cadence_days"]) if row else 7
+    paused = bool(row["monitoring_paused"]) if row else False
     last = _last_completed_scan(user_id)
     next_due = last + timedelta(days=cadence) if last else None
     from datetime import datetime, timezone
 
-    due_now = last is None or next_due <= datetime.now(timezone.utc)
+    due_now = not paused and (
+        last is None or next_due <= datetime.now(timezone.utc))
     return {
         "cadence_days": cadence,
+        "monitoring_paused": paused,
         "monitoring_consent": _monitoring_consented(user_id),
         "last_scan_at": _iso(last),
         "next_scan_at": _iso(next_due),
@@ -79,24 +87,66 @@ def get_settings(user_id):
     }
 
 
-def update_settings(user_id, cadence_days):
-    """Set the cadence (7 | 14 | 30 — anything else is a 400) and
-    return the fresh settings."""
-    if isinstance(cadence_days, bool) \
-            or not isinstance(cadence_days, int) \
-            or cadence_days not in CADENCES:
+# Sentinel for "the caller did not send this field" — distinct
+# from an explicit JSON null, which is a VALUE (an invalid one:
+# it must fail validation exactly as it did before the pause field
+# existed, not be silently treated as "leave unchanged").
+UNSET = object()
+
+
+def update_settings(user_id, cadence_days=UNSET, monitoring_paused=UNSET):
+    """Update the cadence and/or the pause switch — each field is
+    optional, and the one not sent keeps its current value — and
+    return the fresh settings.
+
+    The cadence must be 7 | 14 | 30 (anything else, null included,
+    is a 400). Pausing is NOT consent withdrawal: this function
+    writes only user_settings; the append-only consent record is
+    never touched, so the permission history continues to show
+    monitoring granted while the scheduler simply skips the user."""
+    if cadence_days is UNSET and monitoring_paused is UNSET:
+        raise errors.bad_request(
+            "nothing_to_update",
+            "Send a schedule, a pause change, or both")
+    if cadence_days is not UNSET and (
+            isinstance(cadence_days, bool)
+            or not isinstance(cadence_days, int)
+            or cadence_days not in CADENCES):
         raise errors.bad_request(
             "invalid_cadence",
             "Pick a schedule of 7, 14 or 30 days")
+    if monitoring_paused is not UNSET \
+            and not isinstance(monitoring_paused, bool):
+        raise errors.bad_request(
+            "invalid_pause",
+            "monitoring_paused must be true or false")
+    if cadence_days is UNSET:
+        cadence_days = None
+    if monitoring_paused is UNSET:
+        monitoring_paused = None
+    # The upsert must carry the new values in the INSERT itself
+    # (a first-time user's row is born with them) AND in the
+    # conflict update (an existing row changes only the sent
+    # fields) — values ride in via EXCLUDED so both paths agree.
+    columns = ["user_id"]
+    values = [user_id]
+    assignments = ["updated_at = now()"]
+    if cadence_days is not None:
+        columns.append("monitor_cadence_days")
+        values.append(cadence_days)
+        assignments.append(
+            "monitor_cadence_days = EXCLUDED.monitor_cadence_days")
+    if monitoring_paused is not None:
+        columns.append("monitoring_paused")
+        values.append(monitoring_paused)
+        assignments.append("monitoring_paused = EXCLUDED.monitoring_paused")
+    sql = (
+        "INSERT INTO user_settings (" + ", ".join(columns) + ")"
+        " VALUES (" + ", ".join(["%s"] * len(values)) + ")"
+        " ON CONFLICT (user_id) DO UPDATE SET "
+        + ", ".join(assignments))
     with pool.connection() as conn:
-        conn.execute(
-            "INSERT INTO user_settings (user_id, monitor_cadence_days)"
-            " VALUES (%s, %s)"
-            " ON CONFLICT (user_id) DO UPDATE"
-            " SET monitor_cadence_days = EXCLUDED.monitor_cadence_days,"
-            " updated_at = now()",
-            (user_id, cadence_days),
-        )
+        conn.execute(sql, tuple(values))
     return get_settings(user_id)
 
 

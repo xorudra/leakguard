@@ -6,10 +6,17 @@ for every user who is due.
 A user is DUE when ALL of these hold:
 * their 'monitoring' consent is currently granted (the latest
   consent row decides — consent precedes capability);
+* they have not paused monitoring (user_settings.monitoring_paused
+  — Batch B, spec Phase 142; a pause is an operational hold, NOT a
+  consent withdrawal, and the consent record is never touched);
 * they have at least one live saved identifier;
 * their latest COMPLETED scan job is older than their cadence
   (user_settings.monitor_cadence_days, default 7) — or they have
   never completed one.
+
+The whole tick is also behind the owner's emergency switch
+(core/flags.py): with LEAKGUARD_FLAG_MONITORING_SCHEDULER off, a
+tick enqueues nothing at all.
 
 Enqueueing inserts a scan_jobs row directly with the idempotency
 key 'monitor-<user_id>-<period_start>', where period_start is the
@@ -28,7 +35,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 from accounts import audit
-from core import logging_setup
+from core import flags, logging_setup
 from db import pool
 
 TICK_SECONDS = 3600.0
@@ -69,6 +76,7 @@ def _candidates():
             " FROM users u"
             " LEFT JOIN user_settings s ON s.user_id = u.id"
             " WHERE u.deleted_at IS NULL"
+            " AND NOT COALESCE(s.monitoring_paused, false)"
             " AND EXISTS (SELECT 1 FROM consents c"
             "   WHERE c.user_id = u.id AND c.purpose = 'monitoring'"
             "   AND c.granted = true"
@@ -90,8 +98,12 @@ def _is_due(candidate, now):
 
 def tick(now=None):
     """One scheduler pass. Returns the ids of the jobs created
-    (empty when nobody was due, or when a same-period job already
-    existed for every due user)."""
+    (empty when nobody was due, when a same-period job already
+    existed for every due user, or when the monitoring_scheduler
+    feature flag is off — the owner's emergency stop for all
+    scheduled work)."""
+    if not flags.is_enabled("monitoring_scheduler"):
+        return []
     now = now or datetime.now(timezone.utc)
     created = []
     for candidate in _candidates():

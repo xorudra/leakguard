@@ -21,6 +21,7 @@ import os
 from accounts import audit
 from accounts import auth as auth_service
 from accounts.auth import _iso
+from core import flags
 from db import pool as db_pool
 from providers import registry as providers_registry
 
@@ -99,6 +100,10 @@ def overview(admin_user_id):
         "brokers": int(brokers),
         "providers": providers_registry.get_registry().summary(),
         "db": db_pool.db_status(),
+        # The emergency controls' current state (core/flags.py,
+        # spec Phases 120/122): booleans only, so the owner can see
+        # at a glance which capabilities a flag has switched off.
+        "flags": flags.snapshot(),
     }
     audit.record(admin_user_id, "admin", "admin.overview_viewed")
     return result

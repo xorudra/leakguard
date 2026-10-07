@@ -1724,6 +1724,23 @@ function syncMonitoringConsent(state) {
   if (sel) sel.disabled = !on;
   const btn = $("monSaveBtn");
   if (btn) btn.disabled = !on;
+  const pauseBtn = $("monPauseBtn");
+  if (pauseBtn) pauseBtn.disabled = !on;
+}
+
+/* The pause switch is a state of its own — NOT the consent. The
+   button's label always names the action it will take next. */
+let monPaused = false;
+
+function renderMonPause() {
+  const btn = $("monPauseBtn");
+  if (btn) btn.textContent = monPaused ? "Resume monitoring" : "Pause monitoring";
+  const state = $("monPauseState");
+  if (state) {
+    state.textContent = monPaused
+      ? "Monitoring is paused — your permission stays on, re-checks are on hold."
+      : "";
+  }
 }
 
 function _fmtWhen(iso) {
@@ -1738,6 +1755,8 @@ async function loadMonitoring() {
     const s = await apiJson("/api/monitoring/settings");
     if (s.ok) {
       $("monCadence").value = String(s.data.cadence_days || 7);
+      monPaused = !!s.data.monitoring_paused;
+      renderMonPause();
       const bits = [];
       bits.push(s.data.last_scan_at
         ? "Last full check: " + _fmtWhen(s.data.last_scan_at)
@@ -1821,6 +1840,24 @@ $("monSaveBtn").addEventListener("click", async () => {
     $("monStatus").textContent = err.message;
   }
   $("monSaveBtn").disabled = false;
+});
+
+$("monPauseBtn").addEventListener("click", async () => {
+  const btn = $("monPauseBtn");
+  btn.disabled = true;
+  try {
+    const r = await apiJson("/api/monitoring/settings", {
+      method: "PUT", headers: AH,
+      body: JSON.stringify({ monitoring_paused: !monPaused }),
+    });
+    if (!r.ok) throw new Error(errMsg(r.data, "Could not change the pause"));
+    monPaused = !!r.data.monitoring_paused;
+    renderMonPause();
+    loadMonitoring();
+  } catch (err) {
+    $("monPauseState").textContent = err.message;
+  }
+  btn.disabled = false;
 });
 
 /* ----- full scan (Stage S5): one tap for the whole saved profile ----- */
@@ -2293,8 +2330,18 @@ $("totpDisableBtn").addEventListener("click", async () => {
 
 /* ----- export, password change, account deletion ----- */
 $("exportBtn").addEventListener("click", async () => {
+  const password = $("exportPassword").value;
+  const format = $("exportFormat").value;
+  if (!password) {
+    $("exportMsg").textContent = "Type your password first — the download contains your details in full.";
+    return;
+  }
+  $("exportMsg").textContent = "Preparing your file…";
   try {
-    const resp = await fetch("/api/privacy/export");
+    const resp = await fetch("/api/privacy/export", {
+      method: "POST", headers: AH,
+      body: JSON.stringify({ password, format }),
+    });
     if (!resp.ok) {
       const d = await resp.json().catch(() => null);
       throw new Error(errMsg(d, "Export failed"));
@@ -2302,14 +2349,16 @@ $("exportBtn").addEventListener("click", async () => {
     const blob = await resp.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "leakguard-export.json";
+    a.download = format === "csv" ? "leakguard-export.csv" : "leakguard-export.json";
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    $("exportMsg").textContent = "Downloaded ✓ — keep the file somewhere private.";
   } catch (err) {
-    $("cpMsg").textContent = err.message;
+    $("exportMsg").textContent = err.message;
   }
+  $("exportPassword").value = "";
 });
 
 $("cpBtn").addEventListener("click", async () => {

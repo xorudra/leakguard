@@ -83,6 +83,17 @@ Environment: `PORT` (default 8000) · `HOST` (default 0.0.0.0)
 
 JSON request bodies over **256 KB** are rejected with `413 body_too_large`. Read (GET) endpoints are unlimited.
 
+**Feature flags & emergency controls** (environment variables; every flag defaults to ON, and a flag takes effect when the service restarts — on Render: set the variable under Environment, then **Save, rebuild, and deploy**):
+
+| Variable | When set to `off` |
+|---|---|
+| `LEAKGUARD_FLAG_REGISTRATION` | `POST /api/auth/register` answers `503 feature_disabled` — no new accounts; existing users are unaffected |
+| `LEAKGUARD_FLAG_ACCOUNT_SCANS` | `POST /api/scans` answers `503 feature_disabled` — account full scans pause; **the anonymous Quick Scan is never gated** |
+| `LEAKGUARD_FLAG_REMOVAL_RUNS` | `POST /api/remediation/run` answers `503 feature_disabled` — no new removal runs start (cases already queued are untouched) |
+| `LEAKGUARD_FLAG_MONITORING_SCHEDULER` | The hourly monitoring scheduler enqueues nothing |
+
+Accepted off values are `0`, `false`, `off`, `no` (case-insensitive); unset means on. The current state of every flag is visible to the owner in the Admin overview (`flags`) and lives in `core/flags.py`. Emergency procedure: set the one variable for the misbehaving capability, redeploy, confirm the gated route answers `503 feature_disabled`, fix the cause, then remove the variable (or set it back to `on`) and redeploy again. Nothing else needs to change — flags are read from the environment, never stored in the database.
+
 **Retention** (an in-process worker runs one pass daily; every purge is audit-logged with counts only):
 
 | Data | Kept for |
@@ -100,6 +111,8 @@ JSON request bodies over **256 KB** are rejected with `413 body_too_large`. Read
 
 ## 🔌 API
 
+**Versioning:** the current API version is **v1**. Every route answers under its canonical `/api/v1/...` spelling, and the unversioned `/api/...` spelling is a **permanent alias of v1** — both reach the same handler, so existing integrations (including the browser UI) cannot break. If a breaking change is ever needed, it ships as `/api/v2/...` alongside v1; v1 is not silently changed or removed.
+
 Accounts can mint a personal **API token** (Privacy Center → **API access**) for scripting reads of their own data. The raw token (`lg_…`) is shown **exactly once**, at creation — the server stores only its SHA-256 hash plus a short display prefix, so it cannot be recovered later; revoke it and mint a fresh one instead.
 
 Tokens are **read-only by construction**: they authenticate `GET` requests only, and never authorize any change — every create/update/delete route requires a browser session, token or not.
@@ -108,12 +121,12 @@ Tokens are **read-only by construction**: they authenticate `GET` requests only,
 TOKEN="lg_REPLACE_WITH_YOUR_TOKEN"
 BASE="https://leakguard-hh8e.onrender.com"
 
-curl -H "Authorization: Bearer $TOKEN" $BASE/api/action-center
-curl -H "Authorization: Bearer $TOKEN" $BASE/api/scans
-curl -H "Authorization: Bearer $TOKEN" $BASE/api/scans/<job-id>
-curl -H "Authorization: Bearer $TOKEN" $BASE/api/remediation/cases
-curl -H "Authorization: Bearer $TOKEN" $BASE/api/notifications
-curl -H "Authorization: Bearer $TOKEN" $BASE/api/monitoring/timeline
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/action-center
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/scans
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/scans/<job-id>
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/remediation/cases
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/notifications
+curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/monitoring/timeline
 ```
 
 Token management itself is session-only (`GET`/`POST /api/tokens`, `DELETE /api/tokens/<id>` from the Privacy Center). A revoked or unknown token answers the same `401` as being signed out. `GET /api/providers/health` stays public. What the platform stores, who processes data, and how long anything is kept: **[Trust & security](https://leakguard-hh8e.onrender.com/trust)**.

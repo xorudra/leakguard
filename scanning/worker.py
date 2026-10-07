@@ -14,6 +14,16 @@ failure, 120s after the second). After 3 failed attempts the job is
 start, stale 'running' jobs (started more than 10 minutes ago,
 i.e. orphaned by a restart) are requeued.
 
+Priority (spec Phase 159): within the runnable set, a job the user
+started by hand is claimed before a monitoring-scheduled job —
+someone waiting on a scan they just asked for outranks a background
+re-check nobody is watching. Scheduled jobs carry the scheduler's
+'monitor-' idempotency-key prefix (monitoring/scheduler.py), which
+is how the claim tells the two classes apart; within a class the
+order stays strictly FIFO (created_at, then id as a stable
+tiebreak). Failed jobs inside their backoff window are not runnable
+at all, so priority never resurrects a job early.
+
 Logs carry job ids and outcome words only — never identifier values,
 never user data.
 """
@@ -53,9 +63,18 @@ def requeue_stale():
     return len(rows)
 
 
+# The scheduler's idempotency-key prefix (monitoring/scheduler.py
+# monitor_key()): 'monitor-<user_id>-<period_start>'. It is the one
+# durable marker that separates scheduled jobs from hand-started
+# ones — jobs carry no source column.
+MONITOR_KEY_PREFIX = "monitor-"
+
+
 def claim_job():
-    """Atomically claim the oldest runnable job. Returns
-    (job_id, attempts) or None when the queue is empty."""
+    """Atomically claim the next runnable job: hand-started jobs
+    first (Phase 159 priority), then monitoring-scheduled ones,
+    FIFO within each class. Returns (job_id, attempts) or None
+    when the queue is empty."""
     with pool.connection() as conn:
         row = conn.execute(
             "UPDATE scan_jobs AS j SET status = 'running',"
@@ -65,8 +84,12 @@ def claim_job():
             "   WHERE status = 'queued'"
             "      OR (status = 'failed' AND next_attempt_at IS NOT NULL"
             "          AND next_attempt_at <= now())"
-            "   ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
+            "   ORDER BY CASE WHEN idempotency_key LIKE %s THEN 1"
+            "                 ELSE 0 END,"
+            "            created_at, id"
+            "   LIMIT 1 FOR UPDATE SKIP LOCKED)"
             " RETURNING j.id, j.attempts",
+            (MONITOR_KEY_PREFIX + "%",),
         ).fetchone()
     if row is None:
         return None

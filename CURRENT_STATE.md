@@ -38,9 +38,9 @@ at `e31e016`.*
 ## C. Architecture Inventory
 
 - **Entry points:** `app.py` (HTTP server, all routes), `agent.py` (deterministic broker agent — the remediation core), `local_agent.py` (residential-IP runner for the user's own device), `browser_probe.py` (local Playwright probe), `proxy_relay.py` (dev-only egress relay for this VM)
-- **Modules:** `core/` (errors, context/request-ids, security headers + CSRF, logging, rate limiter, retention), `accounts/` (auth, sessions, totp, consents, identifiers, households, domains, admin, audit, api_tokens, privacy export, passwords), `providers/` (base HTTP client, registry, xposedornot, hibp_passwords, ddg_discovery, username_platforms, domain_intel, mock), `scanning/` (orchestrator, jobs, worker, normalize, correlation, risk), `remediation/` (engine, service, worker, verify, verify_sources, registry_seed, letters), `monitoring/` (scheduler, diff, events, notify, service), `dashboard/` (service = Action Center, graph), `db/` (pool, migrate), `vault/` (crypto, store)
-- **Routes:** ~45 `/api/...` routes — anonymous (`/api/scan`, `/api/agent/*`, `/api/brokers`, `/api/providers/health`, `/api/health`), account (auth, consents, identifiers, domains, household, privacy export), scanning (`/api/scans`), remediation (`/api/remediation/run|cases|queue`), monitoring (`/api/monitoring/settings|timeline`, `/api/notifications`), dashboard (`/api/action-center`, `/api/graph`), tokens (`/api/tokens`), admin (`/api/admin/overview|audit`), plus `/trust`, `/reset`, `/.well-known/security.txt`, PWA assets (`/sw.js`, `/static/manifest.webmanifest`, icons)
-- **Services:** in-process workers — scan worker (SKIP LOCKED, backoff, dead after 3 attempts), remediation worker (5 concurrent, 40s probe budget), monitoring scheduler (hourly tick, period-bucketed idempotency), retention worker (daily)
+- **Modules:** `core/` (errors, context/request-ids, security headers + CSRF, logging, rate limiter, retention, feature flags / emergency switches), `accounts/` (auth, sessions, totp, consents, identifiers, households, domains, admin, audit, api_tokens, privacy export, passwords), `providers/` (base HTTP client, registry, xposedornot, hibp_passwords, ddg_discovery, username_platforms, domain_intel, mock), `scanning/` (orchestrator, jobs, worker, normalize, correlation, risk), `remediation/` (engine, service, worker, verify, verify_sources, registry_seed, letters), `monitoring/` (scheduler, diff, events, notify, service), `dashboard/` (service = Action Center, graph), `db/` (pool, migrate), `vault/` (crypto, store)
+- **Routes:** ~45 `/api/...` routes (every one also answering under the canonical `/api/v1/...` spelling — Phase 88) — anonymous (`/api/scan`, `/api/agent/*`, `/api/brokers`, `/api/providers/health`, `/api/health`), account (auth, consents, identifiers, domains, household, privacy export), scanning (`/api/scans`), remediation (`/api/remediation/run|cases|queue`), monitoring (`/api/monitoring/settings|timeline`, `/api/notifications`), dashboard (`/api/action-center`, `/api/graph`), tokens (`/api/tokens`), admin (`/api/admin/overview|audit`), plus `/trust`, `/reset`, `/.well-known/security.txt`, PWA assets (`/sw.js`, `/static/manifest.webmanifest`, icons)
+- **Services:** in-process workers — scan worker (SKIP LOCKED, hand-started jobs claimed before scheduled ones, backoff, dead after 3 attempts), remediation worker (5 concurrent, 40s probe budget), monitoring scheduler (hourly tick, period-bucketed idempotency, paused users skipped), retention worker (daily)
 - **Providers:** XposedOrNot (email breaches), HIBP Pwned Passwords (k-anonymity), DuckDuckGo discovery, username presence (13 platforms), domain intel (Cloudflare DoH + crt.sh); MockProvider behind `LEAKGUARD_PROVIDERS=mock`, always flagged
 - **Database models:** users, sessions, consents, password_reset_tokens, identifiers, domains, scan_jobs, findings, brokers, remediation_cases, remediation_attempts, verification_checks, user_settings, notifications, households, household_members, audit_log, api_tokens
 - **Migrations:** `db/migrations/0001_vault.sql` … `0008_api_tokens.sql`, applied by an idempotent runner at startup
@@ -108,9 +108,9 @@ evidence, and gap). Summary counts:
 
 | Status | Count |
 |---|---|
-| DONE | 104 |
-| PARTIAL | 48 |
-| NOT_DONE | 15 |
+| DONE | 110 |
+| PARTIAL | 45 |
+| NOT_DONE | 12 |
 | CUT (owner rule: AI phases + business model) | 11 |
 | NA (surface does not exist: file uploads, webhooks, containers) | 3 |
 | **Total** | **181** |
@@ -156,23 +156,22 @@ Only genuinely open items, P0 → P3 (full detail in `PHASE_STATUS.md` and in
   → WebAuthn/passkeys (4) → re-run the
   Phase 180 final gate. *(Batch A closed 69, 70, 106, 107; Batch A.1
   closed 73, 78, 170.)*
-- **P1:** API versioning + deprecation policy (88) → export re-auth +
-  CSV (49) → stored finding lifecycle states (25) → monitoring
-  pause/resume (142) → per-cycle report files in-repo (149).
+- **P1:** stored finding lifecycle states (25) → per-cycle report
+  files in-repo (149). *(Batch B closed 88, 49, 142.)*
 - **P2:** source change detection (32) → false-positive feedback (156) +
-  source disputes (157) → priority queue (159) → scan budget engine
-  (158) → workflow-version capture on attempts (31) → emergency kill
-  switches (120) → staging environment (109) →
+  source disputes (157) → scan budget engine
+  (158) → workflow-version capture on attempts (31) → staging
+  environment (109) →
   fake-broker harness (111, 162) → dead-letter replay (119) → standalone
   policy engine (153) → data-quality stage (160) → metrics + engineering
   alerts (76, 77) → per-broker source-health dashboard (125) → incident
   response plan (80) → search-exposure view (40) → cost/quota tracking
   (66, 124) → accessibility pass (96) → performance/load evidence
   (115, 116) → browser-probe allowlists (137, 166) → legacy-surface
-  cleanup decision (178).
+  cleanup decision (178). *(Batch B closed 159, 120.)*
 - **P3:** organizations or a documented permanent no (57–59) → formal
   privacy policy + terms documents (82, 83) → report documents (85) →
-  feature flags (122) → admin health depth (123) → support workflow
+  admin health depth (123) → support workflow
   (126) → bug-bounty page (128) → data-residency note/design (129) →
   localization preparation (98) → privacy-policy analyzer (102) →
   propagation analysis (104, 152) → regional policy rules (168) → legal

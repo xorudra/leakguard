@@ -209,11 +209,23 @@ class TestAccountsUnavailable(ServerMixin, unittest.TestCase):
         self.assertEqual(body["error"]["code"], "csrf_failed")
 
     def test_get_routes_503(self):
-        for path in ("/api/auth/me", "/api/consents", "/api/identifiers",
-                     "/api/privacy/export"):
+        for path in ("/api/auth/me", "/api/consents", "/api/identifiers"):
             status, _h, body = self.request_json("GET", path)
             self.assertEqual(status, 503, path)
             self.assertEqual(body["error"]["code"], "db_unavailable", path)
+
+    def test_export_post_503_without_db(self):
+        # The export is POST-only since Batch B (password re-auth);
+        # without a database it answers the same clean 503 as every
+        # other account route, CSRF first.
+        status, _h, body = self.request_json(
+            "POST", "/api/privacy/export",
+            body={"password": "x", "format": "json"}, headers=CSRF)
+        self.assertEqual(status, 503)
+        self.assertEqual(body["error"]["code"], "db_unavailable")
+        status, _h, body = self.request_json(
+            "GET", "/api/privacy/export")
+        self.assertEqual(status, 404)
 
     def test_delete_identifier_503(self):
         status, _h, body = self.request_json(
@@ -496,7 +508,9 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
                           body={"purpose": "monitoring", "granted": True},
                           headers=CSRF, cookie=cookie)
         status, headers, body = self.request_json(
-            "GET", "/api/privacy/export", cookie=cookie)
+            "POST", "/api/privacy/export",
+            body={"password": self.PASSWORD, "format": "json"},
+            headers=CSRF, cookie=cookie)
         self.assertEqual(status, 200)
         self.assertIn("attachment", headers.get("Content-Disposition") or "")
         self.assertEqual(body["account"]["email"], email)

@@ -1,7 +1,7 @@
 "use strict";
 /* LeakGuard popup: one glance — score, counts, the server's one
    next action — and one button to the full site. Read-only: it
-   GETs /api/action-center with the stored token and changes
+   GETs /api/v1/action-center with the stored token and changes
    nothing anywhere. */
 
 const STATES = ["stateLoading", "stateSetup", "stateMain",
@@ -40,7 +40,7 @@ async function main() {
   show("stateLoading");
   const token = await lgGetToken();
   if (!token) { show("stateSetup"); return; }
-  const r = await lgApi("/api/action-center");
+  const r = await lgApi("/api/v1/action-center");
   if (r.status === 401) { show("stateBadToken"); return; }
   if (r.status !== 200 || !r.data) { show("stateError"); return; }
   const d = r.data;

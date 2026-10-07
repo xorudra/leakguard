@@ -66,11 +66,23 @@ class Executor:
 
 
 def _probe_inconclusive(result):
-    """True when a fast (HTTP) probe result cannot settle the case:
-    the broker was unreachable, or a page loaded with no form and no
-    definitive blocker. CAPTCHA and login blockers are definitive —
-    human steps at every layer, never routed around — as are a found
-    form (interpret_probe can judge it) and a fillable form."""
+    """True when a fast (HTTP) probe result cannot settle the case
+    AND the relay reader might still see something the fast probe
+    could not. That is exactly the no-usable-page cases: a transport
+    failure (nothing arrived) or an HTTP error page (403/404/5xx —
+    the relay can sometimes un-wall those or fetch through a moved
+    page).
+
+    A fast probe that GOT a page (HTTP 200, reachable) is conclusive
+    even with no form on it: the page is JS-driven / manual-only, the
+    relay reader fetches the same markup, and escalating only burns
+    ~a minute of relay retries for no new signal (Stage 7.2 gate —
+    the dominant live case: most brokers answer 200 with a JS page).
+    Such pages classify immediately through the unchanged
+    interpret_probe transitions. CAPTCHA and login blockers are
+    definitive too — human steps at every layer, never routed
+    around — as are a found form (interpret_probe can judge it) and
+    a fillable form."""
     blockers = result.get("blockers") or []
     if any("CAPTCHA" in b for b in blockers):
         return False
@@ -80,25 +92,51 @@ def _probe_inconclusive(result):
         return False
     if result.get("forms"):
         return False
+    if result.get("reachable"):
+        return False
     return True
+
+
+def _relay_skip_reason(result):
+    """Why a conclusive fast probe skipped the relay escalation, for
+    the probe trail — or None when no skip needs recording. Only the
+    Stage 7.2 gate case is recorded: a page WAS received (HTTP 200)
+    but carried no form and no definitive blocker, so the relay would
+    have fetched the same JS-driven page. The other conclusive cases
+    (fillable, form found, CAPTCHA, login) settle the case on their
+    own evidence and keep the trail as it was."""
+    if not result.get("reachable"):
+        return None
+    if result.get("fillable") or result.get("forms"):
+        return None
+    blockers = result.get("blockers") or []
+    if any("CAPTCHA" in b for b in blockers):
+        return None
+    if any("account login" in b for b in blockers):
+        return None
+    return "page_received"
 
 
 class AgentExecutor(Executor):
     """Production executor over agent.py (the anonymous engine).
 
-    Probe strategy (Stage 7.1 — speed): the anonymous engine's full
-    chain (agent.probe_with_browser_fallback) always paid for the
-    relay layer plus a browser step that cannot run on the server at
-    all, so a walled broker burned ~2 minutes of relay retries per
-    case. Remediation probes are staged instead:
+    Probe strategy (Stage 7.1 — speed; Stage 7.2 — gate): the
+    anonymous engine's full chain (agent.probe_with_browser_fallback)
+    always paid for the relay layer plus a browser step that cannot
+    run on the server at all, so a walled broker burned ~2 minutes of
+    relay retries per case. Remediation probes are staged instead:
 
     1. fast probe (agent.probe_broker) — one HTTP fetch;
-    2. ONE relay-reader escalation, only when the fast probe is
-       inconclusive, merged with exactly the rules of the fallback
-       chain's layer 2 — but WITHOUT the browser step (Playwright
-       cannot run on Render; attempting it per case wastes time and
-       the skip is recorded in the trail);
-    3. a per-case SOFT budget (default ~50s of probing): if the
+    2. ONE relay-reader escalation, only when the fast probe got NO
+       usable page (transport failure or HTTP error page — see
+       _probe_inconclusive), merged with exactly the rules of the
+       fallback chain's layer 2 — but WITHOUT the browser step
+       (Playwright cannot run on Render; attempting it per case
+       wastes time and the skip is recorded in the trail). A fast
+       probe that received a page is conclusive even without a form
+       (Stage 7.2): the gate decision is recorded in the trail as
+       relay skipped / page_received;
+    3. a per-case SOFT budget (default ~40s of probing): if the
        relay outruns the remaining budget it is abandoned and the
        best evidence so far is classified by the unchanged
        interpret_probe — a 403 seen at any point still lands
@@ -110,7 +148,7 @@ class AgentExecutor(Executor):
     exactly what was tried. Statuses and reasons are unchanged —
     only the route to the probe result got faster."""
 
-    def __init__(self, probe_budget_seconds=50.0):
+    def __init__(self, probe_budget_seconds=40.0):
         self.probe_budget_seconds = float(probe_budget_seconds)
 
     def probe(self, profile, broker):
@@ -127,6 +165,11 @@ class AgentExecutor(Executor):
         }]
         result["probe_trail"] = trail
         if not _probe_inconclusive(result):
+            skip = _relay_skip_reason(result)
+            if skip:
+                # The audit trail must explain why no relay was
+                # tried for a formless page (Stage 7.2 gate).
+                trail.append({"step": "relay", "skipped": skip})
             return result
         remaining = self.probe_budget_seconds - (time.monotonic() - started)
         if remaining <= 0:

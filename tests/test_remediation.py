@@ -301,7 +301,10 @@ class TestAgentExecutorProbeStrategy(unittest.TestCase):
     relay escalation only when the fast probe is inconclusive, the
     browser step never attempted from the server, and a soft budget
     that abandons a hung relay and classifies from the best evidence
-    via the unchanged interpret_probe."""
+    via the unchanged interpret_probe. Stage 7.2 gate: a fast probe
+    that received a page (HTTP 200) is conclusive even with no form —
+    only no-page results (transport failure, HTTP error page) still
+    escalate, exactly once."""
 
     def setUp(self):
         self.agent = engine_mod.agent_engine
@@ -370,6 +373,52 @@ class TestAgentExecutorProbeStrategy(unittest.TestCase):
         self.assertEqual(calls["relay"], [])
         self.assertEqual(engine_mod.interpret_probe(result, PROFILE),
                          ("blocked", "form_not_fillable"))
+
+    def test_page_received_without_form_never_escalates(self):
+        # Stage 7.2 gate: most brokers answer HTTP 200 with a
+        # JS-driven page and no plain HTML form. That result is
+        # conclusive — the relay reader fetches the same markup — so
+        # even a relay that WOULD have found a form is never called,
+        # the case classifies through the existing transitions, and
+        # the trail records why no relay was tried.
+        executor, calls = self._executor(
+            _fast_probe(reachable=True, status=200,
+                        blockers=["No plain HTML form found — the form "
+                                  "is built by JavaScript; use a real "
+                                  "browser for this one"]),
+            relay=_FILLABLE_RELAY)
+        result = executor.probe(PROFILE, {"name": "Spokeo"})
+        self.assertEqual(calls["relay"], [])
+        self.assertEqual(engine_mod.interpret_probe(result, PROFILE),
+                         ("needs_human", "browser_required"))
+        trail = {t["step"]: t for t in result["probe_trail"]}
+        self.assertEqual(trail["relay"]["skipped"], "page_received")
+        self.assertEqual(self.browser_calls, [])
+
+    def test_error_page_still_escalates_once(self):
+        # The gate closes only on a RECEIVED page: an HTTP error
+        # page (403 wall) still gets its one relay escalation, which
+        # can un-wall it via the reader and reach a fillable form.
+        executor, calls = self._executor(
+            _fast_probe(status=403,
+                        blockers=["Site answered HTTP 403 to a script "
+                                  "(bot protection or moved page)"]),
+            relay=_FILLABLE_RELAY)
+        result = executor.probe(PROFILE, {"name": "Spokeo"})
+        self.assertEqual(calls["relay"],
+                         ["https://www.spokeo.com/optout"])
+        self.assertEqual(result["via"], "http+relay")
+        self.assertEqual(engine_mod.interpret_probe(result, PROFILE),
+                         ("submit", None))
+        self.assertEqual(self.browser_calls, [])
+
+    def test_stage72_defaults(self):
+        # Probe budget lowered 50s -> 40s; the worker drains 5-wide
+        # (probes are I/O-bound; SKIP LOCKED claims still guarantee
+        # no case executes twice).
+        self.assertEqual(
+            engine_mod.AgentExecutor().probe_budget_seconds, 40.0)
+        self.assertEqual(worker_mod.MAX_CONCURRENT, 5)
 
     def test_hung_relay_is_abandoned_at_budget_unreachable(self):
         def hang(url, profile=None):
@@ -1076,7 +1125,7 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
                 thread.join(timeout=15)
         self.assertEqual(settled, 9)
         # Sequential draining would spend 9 x 0.3s in probe sleeps
-        # alone; three concurrent drainers must beat 60% of that.
+        # alone; the concurrent drainers must beat 60% of that.
         self.assertLess(wall, 9 * 0.3 * 0.6)
         self.assertGreaterEqual(stub.max_concurrent, 2)
         self.assertEqual(len(stub.submits_for(email)), 9)

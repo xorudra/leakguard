@@ -14,6 +14,10 @@ inside the engine), so a 40-case run no longer pays the slowest
 broker's probe latency forty times in a row. Claims, stale-running
 recovery, and failure parking are unchanged.
 
+Stage 7.2: MAX_CONCURRENT raised 3 -> 5 — probes are I/O-bound (the
+drain spends its time waiting on broker pages, not on CPU), and the
+SKIP LOCKED claim still guarantees no case executes twice.
+
 There is no retry backoff for cases (unlike scan jobs): a broker
 outcome is a state, not a failure — walls park the case at blocked,
 human steps at needs_human, and only the user (or a new run)
@@ -34,7 +38,7 @@ from remediation import engine
 
 POLL_SECONDS = 2.0
 STALE_RUNNING_MINUTES = 10
-MAX_CONCURRENT = 3
+MAX_CONCURRENT = 5
 
 _thread = None
 _thread_lock = threading.Lock()

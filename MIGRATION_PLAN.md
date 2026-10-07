@@ -33,21 +33,21 @@ Upgrade Master Prompt", Phases 0–180 (owner-supplied PDF, 2026-10-07).*
 | Stage | Spec phases | Deliverable |
 |---|---|---|
 | **S0 — Audit** ✅ | 0 | CURRENT_STATE.md + this plan |
-| **S1 — Foundations** | 1, 86–89, 69–70, 75 | Modular restructure (api/domain/providers/remediation packages), structured errors, request IDs, security headers, SSRF hardening, secure logging — same behaviour, new skeleton |
-| **S2 — Data** | 2, 73, 3 | Postgres (free host) + migrations; encrypted identifier vault (envelope encryption, HMAC lookup, masking) |
-| **S3 — Accounts** | 4, 5, 6, 48–50 | Auth (Argon2id, sessions, reset, TOTP), authorization/IDOR guards, consent records, privacy center, export + account deletion |
-| **S4 — Providers** | 8, 9, 10, 110, 118 | Provider adapters + registry + health/circuit breaking; XposedOrNot & HIBP become the first two adapters; mock providers for tests |
-| **S5 — Scanning** | 11, 12, 13, 14, 21–27 | Scan orchestrator + in-process job queue (retries, idempotency, DLQ), normalized findings, correlation, reliability, evidence, risk engine v2 |
-| **S6 — Identifiers** | 15–20 | Phone, username, name, address, domain (ownership-verified) monitoring + public-web discovery within terms/robots |
-| **S7 — Remediation v2** | 30–39, 153–157, 162, 167 | Broker registry + workflow versioning, remediation engine with idempotent attempts, **verification & reappearance** (never claim removal without evidence), human-review queue, CAPTCHA → HUMAN_ACTION_REQUIRED |
-| **S8 — Monitoring** | 41–47, 158–160 | Continuous monitoring, scheduler, change detection, notifications with dedupe, history/timeline |
-| **S9 — Dashboard** | 28, 29, 90–99, 138–143 | Full Protection dashboard + action center, final Quick Scan / Full Protection UX (Spotify theme language preserved), accessibility, mobile |
+| **S1 — Foundations** ✅ `c1845b5`| 1, 86–89, 69–70, 75 | Modular restructure (api/domain/providers/remediation packages), structured errors, request IDs, security headers, SSRF hardening, secure logging — same behaviour, new skeleton |
+| **S2 — Data** ✅ `28e4a0f`| 2, 73, 3 | Postgres (free host) + migrations; encrypted identifier vault (envelope encryption, HMAC lookup, masking) |
+| **S3 — Accounts** ✅ `ef2aa47`| 4, 5, 6, 48–50 | Auth (Argon2id, sessions, reset, TOTP), authorization/IDOR guards, consent records, privacy center, export + account deletion |
+| **S4 — Providers** ✅ `938a9a2`| 8, 9, 10, 110, 118 | Provider adapters + registry + health/circuit breaking; XposedOrNot & HIBP become the first two adapters; mock providers for tests |
+| **S5 — Scanning** ✅ `70735ff`| 11, 12, 13, 14, 21–27 | Scan orchestrator + in-process job queue (retries, idempotency, DLQ), normalized findings, correlation, reliability, evidence, risk engine v2 |
+| **S6 — Identifiers** ✅ `6f70a63`| 15–20 | Phone, username, name, address, domain (ownership-verified) monitoring + public-web discovery within terms/robots |
+| **S7 — Remediation v2** ✅ `c8a9718` + perf `b54a167`/`adb9136`| 30–39, 153–157, 162, 167 | Broker registry + workflow versioning, remediation engine with idempotent attempts, **verification & reappearance** (never claim removal without evidence), human-review queue, CAPTCHA → HUMAN_ACTION_REQUIRED |
+| **S8 — Monitoring** ✅ `72d4b77` (email lane proven live via Brevo)| 41–47, 158–160 | Continuous monitoring, scheduler, change detection, notifications with dedupe, history/timeline |
+| **S9 — Dashboard** ✅ `3a10b0f`| 28, 29, 90–99, 138–143 | Full Protection dashboard + action center, final Quick Scan / Full Protection UX (Spotify theme language preserved), accessibility, mobile |
 | **S10 — AI** | 51–56, 121, 163–165 | **CUT by the owner's AI rule** (free + unlimited tokens don't exist). Revisit only if that changes; prompt-injection defense principles still apply to all external content handling in S4–S8 |
-| **S11 — Orgs & Admin** | 57–62 | Organizations, domain verification, family profiles, admin panel, audit logging, security events |
-| **S12 — Hardening** | 63–68, 71, 72, 74, 76–80, 106–109, 115–120, 122–125 | Rate limiting, abuse/enumeration protection, cost control, caching, retention worker, observability, backups/DR, incident response, feature flags, emergency controls |
-| **S13 — Trust & API** | 81–85, 126–132 | Legal/privacy architecture, policy/terms/trust center, reports, support, subprocessors, data residency, documentation |
-| **S14 — Extensions** | 100–104 | Browser-extension foundation, mobile foundation, privacy-policy analyzer, exposure graph + propagation |
-| **S15 — Acceptance** | 105, 112–114, 145–152, 161, 166, 168–180 | Business model, full test matrices (functional/security/privacy/performance), contract + broker-workflow tests, final acceptance, readiness, rollback plan, limitations register, capability-claim review, cleanup + architecture review |
+| **S11 — Orgs & Admin** ✅ `798d9b7`| 57–62 | Organizations, domain verification, family profiles, admin panel, audit logging, security events |
+| **S12 — Hardening** ✅ `69ea6a0` + `56fb831`| 63–68, 71, 72, 74, 76–80, 106–109, 115–120, 122–125 | Rate limiting, abuse/enumeration protection, cost control, caching, retention worker, observability, backups/DR, incident response, feature flags, emergency controls |
+| **S13 — Trust & API** ✅ `7237780`| 81–85, 126–132 | Legal/privacy architecture, policy/terms/trust center, reports, support, subprocessors, data residency, documentation |
+| **S14 — Extensions** ✅ `8c2ba6e`| 100–104 | Browser-extension foundation, mobile foundation, privacy-policy analyzer, exposure graph + propagation |
+| **S15 — Acceptance** ✅ this commit| 105, 112–114, 145–152, 161, 166, 168–180 | Business model, full test matrices (functional/security/privacy/performance), contract + broker-workflow tests, final acceptance, readiness, rollback plan, limitations register, capability-claim review, cleanup + architecture review |
 
 ## Sequencing rules
 
@@ -73,3 +73,27 @@ Upgrade Master Prompt", Phases 0–180 (owner-supplied PDF, 2026-10-07).*
    flow; accounts and monitoring exist to make that flow automatic
    (saved details → automatic re-scans → same one-command remediation),
    never to make the user operate the product.
+
+## Outcome (2026-10-07)
+
+All stages shipped and verified live on https://leakguard-hh8e.onrender.com
+(Render free + Neon free + Brevo free; running cost ₹0). Every stage was
+verified by the parent agent independently — own test-suite run plus a
+production end-to-end check — never on the builder's word alone. Final
+suite: 275 tests. Production baselines unchanged from the pre-upgrade
+product: test@example.com → 214 breaches, exposure score 100; password
+"password" → pwned 52,372,427×.
+
+Known gaps (honest register):
+1. Per-broker verification search sources are not mapped yet, so the
+   case-level Verify action answers "unknown" in production (never a
+   guess). Monitoring diffs already report findings appearing and
+   disappearing across scans, and reappearance detection is wired.
+2. Most people-search brokers wall datacenter IPs (27 of 40 cases in
+   the production acceptance run classified blocked with reasons);
+   those cases carry next steps, and the older local-agent path
+   (user's own device/IP) remains the practical route for them.
+3. Brevo free tier caps email at 300/day — ample now; the first
+   scaling ceiling if the user base grows.
+4. Render free sleeps when idle (~50s wake) and shares free hours
+   across the owner's services.

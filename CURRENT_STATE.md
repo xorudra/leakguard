@@ -1,82 +1,73 @@
-# LeakGuard — Current State (Phase 0 Audit)
+# LeakGuard — Current State
 
-*Audit date: 2026-10-07 · Repo: github.com/xorudra/leakguard · Live: https://leakguard-hh8e.onrender.com (Render free, commit 6aae0f6, v2.5 Zero-touch) · Monitored by UptimeRobot (5-min, HEAD-safe).*
+*Refreshed: 2026-10-07 (post-Sentinel acceptance) · Repo: github.com/xorudra/leakguard · Live: https://leakguard-hh8e.onrender.com (Render free) · Database: Neon free (Postgres) · Email: Brevo free (300/day) · Monitored by UptimeRobot (5-min, HEAD-safe). Running cost: ₹0.*
 
-## 1. What the product is today
+> The original Phase 0 audit (pre-upgrade state, v2.5) is preserved in git
+> history at commit `76565e0`. This file describes the product as it stands
+> after the Sentinel upgrade (stages S0–S15; see MIGRATION_PLAN.md).
 
-A single-file-stack, zero-dependency Python web app that (a) scans an email against
-breach data and scores exposure 0–100, (b) checks passwords via k-anonymity, and
-(c) runs a deterministic removal agent over 40 data brokers — probing their live
-opt-out forms and, since v2.5, submitting automatically behind one user press.
+## 1. What the product is
 
-## 2. Architecture inventory
+LeakGuard finds leaked personal data and removes what can honestly be
+removed. Two modes:
 
-| Component | File(s) | Lines | Notes |
-|---|---|---|---|
-| HTTP server + API | `app.py` | 327 | Python 3.12 stdlib `http.server` only; `do_GET/do_POST/do_HEAD`; JSON body parsing; SSRF guard on submit |
-| Removal agent engine | `agent.py` | 458 | Playbook plan builder, HTTP probe, relay-reader probe, browser-fallback orchestration, submit, optional free-lane field classification |
-| Browser probe | `browser_probe.py` | 142 | Playwright + system Chromium, subprocess-isolated; NOT available on Render (no Playwright there) |
-| Local runner | `local_agent.py` | 80 | Zero-dep script for the user's own device/IP (residential-IP brokers); never auto-submits |
-| Proxy relay (dev) | `proxy_relay.py` | 95 | Local CONNECT relay for this VM's egress quirk; dev-only |
-| Broker registry data | `brokers.json` | 286 | 40 brokers: name, category, region, opt-out URL, search URL, method notes, contact emails (3) |
-| Playbooks | `playbooks.json` | 213 | 16 hand-mapped broker flows + generic flow |
-| Frontend | `static/index.html` / `app.js` / `style.css` | 193 / 676 / 178 | Vanilla JS, no build step; Spotify-style theme; progress in browser localStorage only |
-| Deploy | `render.yaml` | 10 | Render free web service, `python3 app.py`, no build |
+- **Quick Scan** (anonymous, nothing stored): email breach scan
+  (XposedOrNot), password check via HIBP k-anonymity (the password is never
+  sent or stored), exposure score 0–100, plus the deterministic broker
+  agent (probe/submit over 40 brokers) and erasure-letter generator.
+- **Full Protection** (free account): saved details in an encrypted vault,
+  one-click scans, one-command removal runs with a human queue, continuous
+  monitoring with change alerts (in-app + email), a household grouping,
+  an Action Center whose single button is the next right action, a public
+  /trust page, read-only API tokens, an exposure map, a browser extension
+  (sideload), and an installable PWA.
 
-**Routes:** `GET /` (SPA), `GET /static/*`, `GET /api/health`, `GET /api/brokers`,
-`POST /api/scan` (XposedOrNot email breaches + HIBP Pwned Passwords k-anonymity +
-exposure score), `POST /api/agent/plan`, `POST /api/agent/probe` (fast + deep),
-`POST /api/agent/submit` (explicit `confirm:true` + known-broker-host SSRF guard).
+Honest limit, unchanged since v1 and stated on the site: brokers,
+people-search sites and Google results CAN be removed; breach dumps
+already copied to Telegram/dark web/torrents CANNOT.
 
-## 3. Feature map (verified live, 2026-10-07)
+## 2. Architecture
 
-- Anonymous quick scan: email breaches, data-types exposed, exposure score + label,
-  password pwned count, next-step guidance, scan-to-scan delta (browser-local).
-- Agent Mode zero-touch run: batch probe (fast pass ~12 s; deep pass via relay +
-  alternate URLs), auto-submit of fillable forms, erasure-letter generation
-  (DPDP §12 / GDPR Art. 17 / CCPA), mailto drafts for email-channel brokers,
-  downloadable letters pack + run report.
-- Removal Centre (Advanced): 40-broker manual list, status tracker (localStorage),
-  per-broker letters; Google exposure searches + "Results about you" link.
-- Verified live run (test profile): 3 auto-submitted (Spokeo, PeopleLooker,
-  Data Axle — HTTP 200), 2 email drafts (BeenVerified, Nuwber), 35 blocked with
-  exact reasons (403 bot walls, JS-only forms, CAPTCHA).
+Modular Python (stdlib HTTP server; only three pip deps: `psycopg[binary]`,
+`cryptography`, `argon2-cffi`):
 
-## 4. What does NOT exist (vs the Sentinel specification)
+| Area | Package | Notes |
+|---|---|---|
+| Core | `core/` | Structured errors + request ids, security headers/CSP, PII-free logging, sliding-window rate limiter, retention worker |
+| Data | `db/`, `vault/` | Migration runner (0001–0008); envelope encryption (per-record DEK, AES-256-GCM), HMAC lookup with a separate key, masking |
+| Accounts | `accounts/` | Argon2id, 30-day sliding sessions (SHA-256 at rest), TOTP 2FA, versioned consents, households, API tokens, PII-filtered audit log, owner admin (counts only) |
+| Providers | `providers/` | One HTTP client (timeouts, ≤2 retries, circuit breakers), adapters: XposedOrNot, HIBP, DuckDuckGo discovery, username presence (13 platforms), domain intel (DoH + crt.sh, TXT-verified ownership) |
+| Scanning | `scanning/` | Postgres job queue (SKIP LOCKED, idempotency, backoff, dead-letter), findings with confidence/evidence hashes, risk engine v2 (byte-parity with the legacy scorer) |
+| Remediation | `remediation/` | Broker registry in DB, one-command runs, 5-wide worker with a 40s probe budget (relay only when no page was fetched), verification + reappearance, human queue with ready-to-send letters |
+| Monitoring | `monitoring/` | Cadence scheduler (consent-gated), scan diffing, notification ledger with dedupe (Brevo lane; statuses honest — `sent` only on provider 2xx), timeline |
+| Dashboard | `dashboard/` | Action Center aggregate + next-action engine, exposure graph read model |
+| Legacy agent | `agent.py`, `playbooks.json` | The v2 deterministic engine, wrapped by the remediation executor |
 
-No persistence of any kind (no database, no accounts) · no auth/authz · no consent
-records · no provider abstraction/registry/health layer (integrations are direct
-calls in `app.py`/`agent.py`) · no job queue or scheduler (runs are synchronous
-in-request) · no continuous monitoring, notifications, history or timeline ·
-no phone/username/name/address/domain monitoring · no identity correlation,
-evidence engine or removal verification/reappearance detection · no admin,
-organizations, family profiles · no API versioning, request IDs, structured
-errors · no tests in-repo · no CI/CD · no backups/DR · no privacy/trust center
-beyond honest-limits copy.
+Workers run in-process (Render free has no paid workers): scan worker,
+remediation worker, monitoring scheduler, retention worker — all guarded
+so a database failure can never take the anonymous site down (health
+reports `db: ok|disabled|error` honestly).
 
-## 5. Constraints that shape the migration
+## 3. Verified state (acceptance, 2026-10-07)
 
-- **₹0 budget (owner rule):** free tiers only. Render free web = no persistent
-  disk, no free background workers, Postgres on Render is trial-only → durable
-  Postgres must come from a free external host (Neon or Supabase free tier).
-- **Zero-token rule:** product runs must never consume Claude tokens; any AI
-  features must route through the owner's free-lane gateway (FreeLLMAPI), off by
-  default, with kill switch (spec Phases 51–56, 121, 163–165 align).
-- **Honesty rules already in product copy** match spec rules 6–9: never fabricate
-  results, never claim removal from submission alone, never bypass CAPTCHA/auth.
-- **Working assets to preserve (spec rule 15):** brokers.json, playbooks,
-  probe layers, scoring, letter generator, zero-touch UX, Spotify theme.
-- **Known platform gaps:** Playwright unavailable on Render (browser probe is
-  VM/local-only); Render free sleeps when idle (~50 s wake); free relay
-  (allorigins) is intermittent.
+- Test suite: **275 tests**, all passing (2 environment skips).
+- Production baselines identical to the pre-upgrade product:
+  test@example.com → 214 breaches, exposure 100; "password" → 52,372,427.
+- Every stage S1–S14 has a parent-run production end-to-end check on
+  record (accounts/TOTP, scanning, remediation 40-case run, monitoring,
+  Brevo password-reset email round-trip, Action Center, households,
+  admin counts-only, rate limits + the X-Forwarded-For fix, API tokens,
+  graph/PWA).
 
-## 6. Top risks
+## 4. Known gaps
 
-1. Scope: 181 phases is a multi-week program — needs phased value delivery, not
-   a big-bang rewrite (spec rule 3/5 agree).
-2. Free-tier ceilings: external Postgres free limits, Render sleep, no workers →
-   scheduler/workers must run in-process in the modular monolith (spec rule 13).
-3. Storing identifiers (Phase 3 vault) raises the security bar sharply: envelope
-   encryption + HMAC lookups must land before any monitoring feature stores data.
-4. Legal surface grows with monitoring/orgs/family — consent (Phase 6) must
-   precede those features, not follow them.
+1. Per-broker verification search sources unmapped → case-level Verify
+   answers "unknown" in production (never guessed); monitoring diffs
+   cover appearance/disappearance, reappearance wiring is live.
+2. Datacenter-IP walls: 27/40 production cases classify blocked with
+   reasons + next steps; the residential-IP local agent remains the
+   practical route for those brokers.
+3. Brevo free cap 300 emails/day; Render free sleeps when idle (~50s
+   wake) and shares free hours across the owner's services.
+4. Browser extension is sideload-only (Web Store publishing needs a
+   paid developer account — against the free rule).

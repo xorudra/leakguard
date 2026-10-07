@@ -1,6 +1,6 @@
 # Cycle report — Final-spec Batch B: API v1, export re-auth, priority queue, flags, monitoring pause
 
-Commit: `d2c2030`. Date: 2026-10-07.
+Commit: `55f0a1c`. Date: 2026-10-07.
 
 ## CURRENT PHASE
 

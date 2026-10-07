@@ -1,6 +1,6 @@
 # Cycle report — Owner-ordered audit re-issue
 
-Commit: `44f3c4c` (documents only). Date: 2026-10-07.
+Commit: `8c3b063` (documents only). Date: 2026-10-07.
 
 ## CURRENT PHASE
 
@@ -116,7 +116,7 @@ None changed.
 
 ## DEPLOYMENT STATUS
 
-No deployment. Production remained on `b0a7a8f` throughout;
+No deployment. Production remained on `56c14e5` throughout;
 this commit is documentation.
 
 ## KNOWN LIMITATIONS

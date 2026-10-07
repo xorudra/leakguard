@@ -1,6 +1,6 @@
 # Cycle report — Final-spec Batch D1: passkeys
 
-Commit: `febf360`. Date: 2026-10-07.
+Commit: `9c01b08`. Date: 2026-10-07.
 
 ## CURRENT PHASE
 

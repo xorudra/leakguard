@@ -68,7 +68,7 @@ writer, and invisible to the API.
 
 ## DATABASE MIGRATIONS
 `0012_finding_lifecycle.sql` — applied at startup on staging and
-production deploys of `ab05ab0`; verified behaviorally on both
+production deploys of `d86afa7`; verified behaviorally on both
 (see RESULTS).
 
 ## API ROUTES
@@ -91,13 +91,13 @@ pytest import blocked, CI's dependency set): 440 tests, OK — the
 first cycle verified green in both environments before deploy.
 
 ## RESULTS
-- Staging (`dep-db37eoc9v7es73b7c6qg` on `ab05ab0`): live
+- Staging (`dep-db37eoc9v7es73b7c6qg` on `d86afa7`): live
   two-cycle proof with real providers — cycle 1 over
   test@example.com stored 214 findings, all 'open', all stamped;
   the identifier was then removed and cycle 2 ran over a clean
   identifier; the first cycle's 214 rows flipped to 'resolved'
   with stamps intact.
-- Production (`dep-db37vonavr4c73a35t2g` on `ab05ab0`): deploy
+- Production (`dep-db37vonavr4c73a35t2g` on `d86afa7`): deploy
   clean, health `db: "ok"`, baselines unchanged (214 / 100 /
   52,372,427), throwaway-account scan stored lifecycle state the
   same way.
@@ -116,7 +116,7 @@ authenticated, user-scoped scan-detail response.
 ## DEPLOYMENT STATUS
 Deployed to staging first (smoke: health, account E2E, two-cycle
 lifecycle proof), then production (deploy above; live-verified).
-Both services run `ab05ab0`.
+Both services run `d86afa7`.
 
 ## KNOWN LIMITATIONS
 Convergence latency: the writer issues one UPDATE per identity

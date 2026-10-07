@@ -1,6 +1,6 @@
 # Cycle report — Final-spec Batch A.1: migration-credential split
 
-Commit: `595b453`. Date: 2026-10-07.
+Commit: `2f3ec30`. Date: 2026-10-07.
 
 ## CURRENT PHASE
 

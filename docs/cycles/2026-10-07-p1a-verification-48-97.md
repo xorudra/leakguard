@@ -1,6 +1,6 @@
 # Cycle report — P1-A verification batch: Privacy Center walk + mobile viewport check
 
-Commit: `fffc41a`. Date: 2026-10-07. The first P1 cycle after
+Commit: `5c2dabb`. Date: 2026-10-07. The first P1 cycle after
 the P0 program closed, run under the owner's "continue with
 the P1 work" direction.
 
@@ -146,8 +146,8 @@ covered by the per-deploy throwaway E2E instead.
 ## RISKS
 
 The CI-red discovery mechanism deserves naming: GitHub CI had
-gone red on the two P0 docs/fix commits (`bc39b2f`,
-`55c3039`) because the hygiene guard flagged the walk test's
+gone red on the two P0 docs/fix commits (`0489cf8`,
+`b72a072`) because the hygiene guard flagged the walk test's
 own fixture strings once they became tracked — and nobody
 was watching CI, so the red sat unnoticed until this cycle.
 The fix landed here; *watching* CI after each push is the

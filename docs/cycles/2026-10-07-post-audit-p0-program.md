@@ -1,7 +1,7 @@
 # Cycle report — Post-audit P0 program: SSRF pinning, evidence batch, cryptography remediation, rollback rehearsal
 
-Commits: `83b9acc` (Phase 70 fix), `bc39b2f` (Phases 1/74/107
-evidence + cryptography remediation), `55c3039` (Phase 174
+Commits: `7d391c1` (Phase 70 fix), `0489cf8` (Phases 1/74/107
+evidence + cryptography remediation), `b72a072` (Phase 174
 record). Date: 2026-10-07. Executed after the owner approved
 the audit re-issue and ordered: P0 first, Phase 70 first, no
 AI, do not touch DONE phases unnecessarily.
@@ -45,7 +45,7 @@ production.
 
 ## WHAT WAS IMPLEMENTED
 
-**Phase 70 — connection pinning** (`83b9acc`). `core/ssrf.py`
+**Phase 70 — connection pinning** (`7d391c1`). `core/ssrf.py`
 gained pinned connection classes whose `connect()` resolves
 the host once, validates *every* returned address as public
 (any non-public answer fails closed before a socket opens),
@@ -62,7 +62,7 @@ decisive second layer. (One fetch deliberately not migrated:
 the agent's relay probe targets a fixed, codebase-chosen
 host.)
 
-**Phase 1 — boundary verification** (`bc39b2f`).
+**Phase 1 — boundary verification** (`0489cf8`).
 `tests/test_architecture.py` pins the import graph's real
 invariants (fresh-subprocess import of every package;
 `db`/`providers` import no project code; `vault` reaches only
@@ -72,7 +72,7 @@ irregularities recorded, not hidden: a `scanning` ↔
 `monitoring` package-level cycle that never loops during
 init, and `accounts` acting as a mid-layer hub.
 
-**Phase 74 — secret-hygiene audit + guard** (`bc39b2f`).
+**Phase 74 — secret-hygiene audit + guard** (`0489cf8`).
 Recorded audit: 146 tracked files and the full 52-commit
 history — zero credential-shaped findings; every known secret
 filename verified ignored and never tracked. One hygiene gap
@@ -85,7 +85,7 @@ un-ignored secret filename ever lands in tracked files or
 history.
 
 **Phase 107 — vulnerability scan + remediation**
-(`bc39b2f`). The first recorded scan (pip-audit 2.10.1)
+(`0489cf8`). The first recorded scan (pip-audit 2.10.1)
 found **7 advisories, all in the pinned cryptography
 library, version 45.0.7** (PYSEC-2026-2141, PYSEC-2026-35,
 PYSEC-2026-36, GHSA-537c-gmf6-5ccf, PYSEC-2026-3552,
@@ -98,10 +98,10 @@ vulnerabilities. `tests/test_dependency_pins.py` guards the
 invariant the scan depends on: the lock holds exact pins
 only, and every ranged package appears in it.
 
-**Phase 174 — rollback rehearsal** (`55c3039`). On staging:
-deploy the previous commit (`83b9acc`, deploy
+**Phase 174 — rollback rehearsal** (`b72a072`). On staging:
+deploy the previous commit (`7d391c1`, deploy
 `dep-db36d91srm7s73c0v8j0`, Live, health ok), then redeploy
-the current commit (`bc39b2f`, deploy
+the current commit (`0489cf8`, deploy
 `dep-db36dqm7bikc73bqooeg`, Live, health ok). The rehearsal
 record was appended to `docs/ROLLBACK.md`, alongside the
 existing database-side drill (Phase 170).
@@ -159,8 +159,8 @@ stubbed), `test_architecture.py` (8), `test_secrets_hygiene.py`
 ## TESTS RUN
 
 Full suite re-run by the parent agent at each step: 423
-passed / 19 skipped after `83b9acc`; **438 passed /
-19 skipped** at `bc39b2f`.
+passed / 19 skipped after `7d391c1`; **438 passed /
+19 skipped** at `0489cf8`.
 
 ## RESULTS
 
@@ -192,17 +192,17 @@ this report.
 
 ## DEPLOYMENT STATUS
 
-Staging first, per the §9 sequence. `83b9acc`: staging deploy
+Staging first, per the §9 sequence. `7d391c1`: staging deploy
 `dep-db365v8m7kps73d5t040` (smoke incl. the pinned-fetch probe
-against a live broker page). `bc39b2f`: staging deploy
+against a live broker page). `0489cf8`: staging deploy
 `dep-db36akvavr4c739u3s10` (build log confirms the 50.0.2
 library installed; register/login/identifier/delete smoke
 passed), then production deploy `dep-db36bvad0e5s73f97ta0`.
-`55c3039` is documentation-only and was not deployed.
+`b72a072` is documentation-only and was not deployed.
 One incident in the pipeline, recorded honestly: GitHub
 rejected all ref updates for the repo (server-side error,
 including for an already-hosted known-good commit) for part
-of the evening; production kept running `b0a7a8f` — with the
+of the evening; production kept running `56c14e5` — with the
 rebinding window still open — until the push landed via an
 automatic retry and the deploys completed.
 

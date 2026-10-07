@@ -138,7 +138,7 @@ before being declared done. Keep the rule: no stage is "done" until the
 deployed commit matches the repo and a production check passes.
 *(Review annotation, 2026-10-07: the `8271c17` pin was the state at the
 Phase 0 re-audit. Production has since advanced through the Final-spec
-batches and the post-audit P0/P1 programs — most recently `ab05ab0`
+batches and the post-audit P0/P1 programs — most recently `d86afa7`
 (Phase 25), with the repo HEAD beyond it in documentation only. The
 rule itself stands and is how every later closeout was run; current
 pins live in `docs/cycles/` and `CURRENT_STATE.md`.)*
@@ -221,8 +221,8 @@ closed Phases 173/180.)*
    cycle's completion report under `docs/cycles/` going forward.
 
 *(Review annotation, 2026-10-07: **all five P1 items are closed** —
-items 1, 2 and 4 in Final Batch B (`d2c2030`), item 3 in the P1-B
-cycle (`ab05ab0`, migration `0012_finding_lifecycle.sql`), item 5
+items 1, 2 and 4 in Final Batch B (`55f0a1c`), item 3 in the P1-B
+cycle (`d86afa7`, migration `0012_finding_lifecycle.sql`), item 5
 in the P1-C cycle (`docs/cycles/`, 13 reports + format guard test).
 See `docs/cycles/2026-10-07-p1b-phase-25-lifecycle.md` for item 3's
 one recorded wart: lifecycle writes converge asynchronously, up to
@@ -460,7 +460,7 @@ priority; it added one non-negotiable to Phase 0: a live/repository
 reconciliation with the exact production commit identified from the
 deployment platform. Executed the same day:
 
-- Production commit pinned from the Render dashboard: `b0a7a8f`
+- Production commit pinned from the Render dashboard: `56c14e5`
   (deploy `dep-db34ec9srm7s73e32480`, live 18:50 IST); staging runs the
   same commit (deploy `dep-db34n9d9fdbs739vetc0`, 19:09 IST). Repository
   HEAD beyond production is documentation-only — production code and

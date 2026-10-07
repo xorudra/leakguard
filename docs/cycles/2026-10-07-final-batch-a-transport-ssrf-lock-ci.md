@@ -1,6 +1,6 @@
 # Cycle report — Final-spec Batch A: transport security, SSRF guard, dependency lock, CI
 
-Commits: `5b14b08` (code), `e4fcb45` (CI workflow, via the GitHub
+Commits: `5b14b08` (code), `77086ad` (CI workflow, via the GitHub
 web editor). Date: 2026-10-07.
 
 ## CURRENT PHASE
@@ -63,7 +63,7 @@ lock file; and there was no CI — the suite ran only by hand.
 - `core/ssrf.py`
 - `requirements.lock`
 - `tests/test_batch_a.py`
-- `.github/workflows/tests.yml` (commit `e4fcb45`, created through
+- `.github/workflows/tests.yml` (commit `77086ad`, created through
   the GitHub web editor — the repo push credential lacks the
   workflow scope, so workflow files cannot be pushed from here)
 
@@ -116,7 +116,7 @@ None changed in this batch.
 
 Deployed to production through the Final-spec deploy sequence
 (manual Render deploys, latest commit only, per
-`MIGRATION_PLAN.md` §9); the sequence ended on commit `b0a7a8f`
+`MIGRATION_PLAN.md` §9); the sequence ended on commit `56c14e5`
 (production deploy `dep-db34ec9srm7s73e32480`). Per-batch deploy
 ids were not recorded.
 

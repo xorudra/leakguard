@@ -1,7 +1,7 @@
 # Cycle report — Staging environment creation
 
 Platform work on Render + Neon; the repository record is docs
-commit `520a692`. Date: 2026-10-07.
+commit `830a644`. Date: 2026-10-07.
 
 ## CURRENT PHASE
 
@@ -43,9 +43,9 @@ Results.
   **direct** endpoint (see Results for why).
 - Staging has its **own vault keys** (separate master and
   lookup key files, mode 600, git-ignored — the ignore rule
-  was completed in the v2.1 reconciliation commit `8803686`
+  was completed in the v2.1 reconciliation commit `08a6d44`
   after the audit caught the gap).
-- First staging deploy: commit `b0a7a8f` (deploy
+- First staging deploy: commit `56c14e5` (deploy
   `dep-db34n9d9fdbs739vetc0`, live 19:09 IST) — the same
   commit production was running, so staging started as a true
   mirror.
@@ -63,14 +63,14 @@ Results.
 ## FILES CREATED
 
 None in the repository — the environment lives on Render and
-Neon. (Documents updated in `520a692`: `CURRENT_STATE.md`,
+Neon. (Documents updated in `830a644`: `CURRENT_STATE.md`,
 `PHASE_STATUS.md`.)
 
 ## FILES MODIFIED
 
-- `CURRENT_STATE.md`, `PHASE_STATUS.md` (commit `520a692`)
+- `CURRENT_STATE.md`, `PHASE_STATUS.md` (commit `830a644`)
 - `.gitignore` gained the staging key-file pattern in commit
-  `8803686` (reconciliation cycle).
+  `08a6d44` (reconciliation cycle).
 
 ## DATABASE MIGRATIONS
 
@@ -127,7 +127,7 @@ notifications, and the branch is deletable in one action.
 
 ## DEPLOYMENT STATUS
 
-Staging live on `b0a7a8f` at cycle close. Staging has since
+Staging live on `56c14e5` at cycle close. Staging has since
 become the mandatory first stop of the deploy sequence
 (staging deploy → smoke → promote the same commit), first
 exercised end-to-end by the post-audit P0 program.

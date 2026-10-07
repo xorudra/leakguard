@@ -32,9 +32,9 @@ reconciled state; nothing in this file rests on UI copy alone.*
 
 - **Audit date:** 2026-10-07 (v2.1 reconciliation refresh, evening)
 - **Auditor:** Muse (Phase 0 auditor, Final Remaining Implementation program)
-- **Repository commit:** `520a692` (main, github.com/xorudra/leakguard) — docs-only on top of the production code commit
+- **Repository commit:** `830a644` (main, github.com/xorudra/leakguard) — docs-only on top of the production code commit
 - **Production deployment:** https://leakguard-hh8e.onrender.com — Render free web service `srv-db2rm6142hec73flnl90` (Oregon), manual deploy
-- **Production commit/version:** `b0a7a8f713004335b22fe47dc35f65f3708e858f` — read from the Render dashboard on 2026-10-07 (deploy `dep-db34ec9srm7s73e32480`, "Deploy succeeded | Live", deployed 18:50 IST; full SHA verified via the dashboard's GitHub commit link). The only repository commits beyond it (`520a692`) change documentation files only (`git diff b0a7a8f..520a692` touches `CURRENT_STATE.md` + `PHASE_STATUS.md`, no executable code), so production code and repository code are identical. Staging (`leakguard-staging`, `srv-db34g7vlk1mc739dgp9g`) runs the same commit `b0a7a8f` (deploy `dep-db34n9d9fdbs739vetc0`, live 19:09 IST) on its own Neon branch
+- **Production commit/version:** `56c14e53bda472d6eb1d8a6c9391d626442ac655` — read from the Render dashboard on 2026-10-07 (deploy `dep-db34ec9srm7s73e32480`, "Deploy succeeded | Live", deployed 18:50 IST; full SHA verified via the dashboard's GitHub commit link). The only repository commits beyond it (`830a644`) change documentation files only (`git diff 56c14e5..830a644` touches `CURRENT_STATE.md` + `PHASE_STATUS.md`, no executable code), so production code and repository code are identical. Staging (`leakguard-staging`, `srv-db34g7vlk1mc739dgp9g`) runs the same commit `56c14e5` (deploy `dep-db34n9d9fdbs739vetc0`, live 19:09 IST) on its own Neon branch
 - **Runtime:** Python 3.12, stdlib `http.server`; only three pip dependencies (`psycopg[binary]`, `cryptography`, `argon2-cffi`)
 - **Deployment platform:** Render (free) + UptimeRobot free monitor (5-min, HEAD-safe)
 - **Database:** Neon free PostgreSQL (project "leakguard", AWS ap-southeast-1 Singapore), pooled connection via `DATABASE_URL`
@@ -57,7 +57,7 @@ reconciled state; nothing in this file rests on UI copy alone.*
 | API | `/api/v1/*` canonical + unversioned v1 alias; read-only Bearer tokens on six read endpoints (`accounts/api_tokens.py`) | Live; v1/unversioned parity verified for health + providers; token read/mutation-wall/revoke drill passed | YES | Stage S13 production check (10/10) + Batch B and v2.1 reconciliation live parity checks | None |
 | Security | Rate limits, retention, headers, audit (`core/`, `accounts/audit.py`) | Live; 429 + Retry-After observed; X-Forwarded-For spoof bypass caught live and fixed (`56fb831`); HSTS `max-age=31536000; includeSubDomains`, CSP, X-Frame-Options DENY, X-Request-Id on responses (v2.1 sweep) | YES | Stage S12/S12.1 production checks + v2.1 reconciliation header sweep | None |
 | Pages | `/privacy`, `/terms`, `/support`, `/trust`, `/reset`, `/.well-known/security.txt` (`static/`) | Live; all return 200 (v2.1 sweep) | YES | Batch D2 live check + v2.1 reconciliation sweep | None |
-| Environments | Production + staging services, staging on its own Neon branch with its own vault keys, no email lane on staging | Live; both services on commit `b0a7a8f` (dashboard-verified); staging health `db: "ok"` | YES | Phase 109 build + v2.1 reconciliation (dashboard + health, 2026-10-07) | None |
+| Environments | Production + staging services, staging on its own Neon branch with its own vault keys, no email lane on staging | Live; both services on commit `56c14e5` (dashboard-verified); staging health `db: "ok"` | YES | Phase 109 build + v2.1 reconciliation (dashboard + health, 2026-10-07) | None |
 
 **Discrepancies found by the v2.1 reconciliation (all resolved):**
 
@@ -77,7 +77,7 @@ reconciled state; nothing in this file rests on UI copy alone.*
    behavior probed in the reconciliation (health, v1 parity, provider
    health, baselines, passkey options, export re-auth, account E2E,
    headers, page availability, 40-broker registry) traces to source at
-   production commit `b0a7a8f` and to the test suite at HEAD (410
+   production commit `56c14e5` and to the test suite at HEAD (410
    passed, 19 skipped). No feature exists in production that is absent
    from the repository, and no repository feature is missing from
    production.

@@ -1,6 +1,6 @@
 # Cycle report — Spec v2.1 live/repository reconciliation
 
-Commit: `8803686` (documentation + `.gitignore` only; no code).
+Commit: `08a6d44` (documentation + `.gitignore` only; no code).
 Date: 2026-10-07.
 
 ## CURRENT PHASE
@@ -40,7 +40,7 @@ production commit, and the full test suite at HEAD.
 This cycle is an audit; its deliverables are findings and the
 corrections they forced:
 
-- **Production commit pinned**: `b0a7a8f` (deploy
+- **Production commit pinned**: `56c14e5` (deploy
   `dep-db34ec9srm7s73e32480`, live 18:50 IST; full hash read
   from the dashboard's own commit link). Staging pinned to the
   same commit (deploy `dep-db34n9d9fdbs739vetc0`, 19:09 IST).
@@ -133,7 +133,7 @@ and its session died with it.
 
 ## DEPLOYMENT STATUS
 
-No deployment in this cycle. Production stayed on `b0a7a8f`;
+No deployment in this cycle. Production stayed on `56c14e5`;
 this docs-only commit shipped in the repository only.
 
 ## KNOWN LIMITATIONS

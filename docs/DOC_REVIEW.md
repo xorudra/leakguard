@@ -204,7 +204,7 @@ and were left as-is.
 
 - **§1 Production/repository synchronization — STALE pin,
   annotated.** `8271c17` was the re-audit-time pin; production
-  has since advanced (most recently `ab05ab0`). The section's
+  has since advanced (most recently `d86afa7`). The section's
   *rule* remains the operating rule and was annotated, not
   rewritten.
 - **§2 P0 blockers — all ten SHIPPED, annotated as a block,**

@@ -111,19 +111,19 @@ Copy this skeleton for a new report and fill every field:
 
 | Date | Cycle | Commits | Outcome |
 |---|---|---|---|
-| 2026-10-07 | [Final-spec Batch A — transport security, SSRF guard, dependency lock, CI](2026-10-07-final-batch-a-transport-ssrf-lock-ci.md) | `5b14b08`, `e4fcb45` | HSTS, DNS-resolution SSRF guard, exact-pin lock, CI workflow; Phases 69/107 closed, 70 guarded with a documented rebinding residual |
-| 2026-10-07 | [Final-spec Batch A.1 — migration-credential split](2026-10-07-final-batch-a1-migration-credential-split.md) | `595b453` | Migrations moved to the owner-level connection; the app role serves DML-only; restore drill executed (Phases 73/78/170) |
-| 2026-10-07 | [Final-spec Batch B — API v1, export re-auth, priority queue, flags, monitoring pause](2026-10-07-final-batch-b-api-v1-export-queue-flags.md) | `d2c2030` | Phases 49/88/120/122/142/159 closed; migration 0009 |
-| 2026-10-07 | [Final-spec Batch C — finding feedback, disputes, source sweep, security events, runbooks](2026-10-07-final-batch-c-feedback-sweep-runbooks.md) | `4ceccff` | Phases 32/62/79/147/148/156/157 closed, 125 deepened; migration 0010; three runbooks + acceptance index written |
-| 2026-10-07 | [Final-spec Batch D1 — passkeys](2026-10-07-final-batch-d1-passkeys.md) | `febf360` | Optional WebAuthn passkeys live (Phase 4); migration 0011 |
-| 2026-10-07 | [Final-spec Batch D2 — policy analyzer, propagation, trust pages](2026-10-07-final-batch-d2-policy-propagation-pages.md) | `b0a7a8f` | Phases 82/83/102/104/126/128/129/152 closed; final code commit of the Final-spec program |
-| 2026-10-07 | [Staging environment creation](2026-10-07-staging-environment.md) | platform work; docs `520a692` | `leakguard-staging` on its own Neon branch, manual deploys, own vault keys, no email lane (Phase 109) |
-| 2026-10-07 | [Spec v2.1 live/repository reconciliation](2026-10-07-spec-v21-reconciliation.md) | `8803686` | Production commit pinned from the platform (`b0a7a8f`); no functional live↔repo discrepancy; Phases 173/180 closed |
-| 2026-10-07 | [Owner-ordered audit re-issue](2026-10-07-audit-reissue.md) | `44f3c4c` | Audit only, no implementation; PHASE_STATUS re-issued in the owner's 6-status taxonomy; approval gate recorded |
-| 2026-10-07 | [Post-audit P0 program — SSRF pinning, evidence batch, cryptography remediation, rollback rehearsal](2026-10-07-post-audit-p0-program.md) | `83b9acc`, `bc39b2f`, `55c3039` | Phases 70/1/74/107/174 closed; cryptography 45.0.7 → 50.0.2; all P0 phases closed (129 DONE) |
-| 2026-10-07 | [P1-A verification batch — Privacy Center walk + mobile viewport check](2026-10-07-p1a-verification-48-97.md) | `fffc41a` | Phases 48/97 verified and closed; CI-red hygiene self-flag found and fixed |
+| 2026-10-07 | [Final-spec Batch A — transport security, SSRF guard, dependency lock, CI](2026-10-07-final-batch-a-transport-ssrf-lock-ci.md) | `5b14b08`, `77086ad` | HSTS, DNS-resolution SSRF guard, exact-pin lock, CI workflow; Phases 69/107 closed, 70 guarded with a documented rebinding residual |
+| 2026-10-07 | [Final-spec Batch A.1 — migration-credential split](2026-10-07-final-batch-a1-migration-credential-split.md) | `2f3ec30` | Migrations moved to the owner-level connection; the app role serves DML-only; restore drill executed (Phases 73/78/170) |
+| 2026-10-07 | [Final-spec Batch B — API v1, export re-auth, priority queue, flags, monitoring pause](2026-10-07-final-batch-b-api-v1-export-queue-flags.md) | `55f0a1c` | Phases 49/88/120/122/142/159 closed; migration 0009 |
+| 2026-10-07 | [Final-spec Batch C — finding feedback, disputes, source sweep, security events, runbooks](2026-10-07-final-batch-c-feedback-sweep-runbooks.md) | `ece5f7c` | Phases 32/62/79/147/148/156/157 closed, 125 deepened; migration 0010; three runbooks + acceptance index written |
+| 2026-10-07 | [Final-spec Batch D1 — passkeys](2026-10-07-final-batch-d1-passkeys.md) | `9c01b08` | Optional WebAuthn passkeys live (Phase 4); migration 0011 |
+| 2026-10-07 | [Final-spec Batch D2 — policy analyzer, propagation, trust pages](2026-10-07-final-batch-d2-policy-propagation-pages.md) | `56c14e5` | Phases 82/83/102/104/126/128/129/152 closed; final code commit of the Final-spec program |
+| 2026-10-07 | [Staging environment creation](2026-10-07-staging-environment.md) | platform work; docs `830a644` | `leakguard-staging` on its own Neon branch, manual deploys, own vault keys, no email lane (Phase 109) |
+| 2026-10-07 | [Spec v2.1 live/repository reconciliation](2026-10-07-spec-v21-reconciliation.md) | `08a6d44` | Production commit pinned from the platform (`56c14e5`); no functional live↔repo discrepancy; Phases 173/180 closed |
+| 2026-10-07 | [Owner-ordered audit re-issue](2026-10-07-audit-reissue.md) | `8c3b063` | Audit only, no implementation; PHASE_STATUS re-issued in the owner's 6-status taxonomy; approval gate recorded |
+| 2026-10-07 | [Post-audit P0 program — SSRF pinning, evidence batch, cryptography remediation, rollback rehearsal](2026-10-07-post-audit-p0-program.md) | `7d391c1`, `0489cf8`, `b72a072` | Phases 70/1/74/107/174 closed; cryptography 45.0.7 → 50.0.2; all P0 phases closed (129 DONE) |
+| 2026-10-07 | [P1-A verification batch — Privacy Center walk + mobile viewport check](2026-10-07-p1a-verification-48-97.md) | `5c2dabb` | Phases 48/97 verified and closed; CI-red hygiene self-flag found and fixed |
 | 2026-10-07 | [Phase 149 — per-cycle development reporting system](2026-10-07-p149-cycle-reports.md) | (this closeout) | docs/cycles/ created: index, §6 template, 11 backfilled cycle reports, format guard test |
-| 2026-10-07 | [P1-B — Phase 25 stored finding lifecycle state](2026-10-07-p1b-phase-25-lifecycle.md) | `ab05ab0` | Migration 0012; single lifecycle writer; live two-cycle proof on staging (214 open → 214 resolved) |
+| 2026-10-07 | [P1-B — Phase 25 stored finding lifecycle state](2026-10-07-p1b-phase-25-lifecycle.md) | `d86afa7` | Migration 0012; single lifecycle writer; live two-cycle proof on staging (214 open → 214 resolved) |
 | 2026-10-07 | [P2-A — verification records (Phases 80, 131, 132)](2026-10-07-p2a-records-80-131-132.md) | (docs closeout) | IR tabletop drill + runbook fixes; README 8 inaccuracies fixed; MIGRATION_PLAN annotated to shipped truth |
 
 All cycles through the P1 closeout are linked above.

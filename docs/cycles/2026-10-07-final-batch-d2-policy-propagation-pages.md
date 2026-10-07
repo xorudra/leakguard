@@ -1,6 +1,6 @@
 # Cycle report — Final-spec Batch D2: policy analyzer, propagation, trust pages
 
-Commit: `b0a7a8f`. Date: 2026-10-07. This was the final code
+Commit: `56c14e5`. Date: 2026-10-07. This was the final code
 commit of the Final-spec program — the commit production ran
 until the post-audit P0 program.
 

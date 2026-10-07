@@ -81,13 +81,13 @@ the staging service (`leakguard-staging`), the same mechanism
 production uses:
 
 1. **Roll back:** Manual Deploy → "Deploy a specific commit" →
-   `83b9acc` (the Phase 70 commit). Deploy `dep-db36d91srm7s73c0v8j0`
+   `7d391c1` (the Phase 70 commit). Deploy `dep-db36d91srm7s73c0v8j0`
    — **Live / Deploy succeeded**; the service header confirmed
-   "Last successfully deployed commit 83b9acc".
+   "Last successfully deployed commit 7d391c1".
 2. **Verify:** staging health returned `{"ok": true, "db": "ok"}`
    on the rolled-back commit.
 3. **Roll forward:** Manual Deploy → "Deploy latest commit" →
-   `bc39b2f`. Deploy `dep-db36dqm7bikc73bqooeg` — **Live / Deploy
+   `0489cf8`. Deploy `dep-db36dqm7bikc73bqooeg` — **Live / Deploy
    succeeded**; staging ends the rehearsal on the same commit it
    started on, health `db: "ok"`.
 

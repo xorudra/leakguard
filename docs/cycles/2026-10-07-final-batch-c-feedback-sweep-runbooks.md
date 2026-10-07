@@ -1,6 +1,6 @@
 # Cycle report — Final-spec Batch C: finding feedback, disputes, source sweep, security events, runbooks
 
-Commit: `4ceccff`. Date: 2026-10-07.
+Commit: `ece5f7c`. Date: 2026-10-07.
 
 ## CURRENT PHASE
 

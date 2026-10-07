@@ -8,3 +8,10 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.0
+      # Owner-level DB connection used ONLY by the boot-time migration
+      # step; the app serves via DATABASE_URL (least-privilege role).
+      # Value is set in the Render dashboard — never in the repo.
+      - key: MIGRATION_DATABASE_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false

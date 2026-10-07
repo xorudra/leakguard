@@ -7,3 +7,4 @@ __pycache__/
 .vault-lookup-key
 .brevo-password
 .brevo-api-key
+.neon-app-*

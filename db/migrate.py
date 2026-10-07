@@ -5,12 +5,15 @@ tracked in a schema_migrations table. Idempotent: running it twice (or
 at every boot) is a no-op after the first success.
 
 Runnable standalone:   python3 -m db.migrate
-Also invoked from app.main() at startup when DATABASE_URL is set —
-guarded there so a migration failure is logged and the site still
+Also invoked from app.main() at startup when a database is configured
+— guarded there so a migration failure is logged and the site still
 boots (a broken database must not take the anonymous scan down).
 
-Connection details come from the DATABASE_URL environment variable
-only. Nothing about the connection string is printed or logged.
+Connection details come from the environment only, resolved by
+db.pool.migration_dsn(): MIGRATION_DATABASE_URL when set (production:
+an owner-level connection, because migrations run DDL), otherwise
+DATABASE_URL (local/dev/tests — the serving role there can DDL).
+Nothing about the connection string is printed or logged.
 """
 
 import sys
@@ -41,18 +44,25 @@ def applied_migrations(conn):
     return {row["name"] for row in rows}
 
 
-def run_migrations():
+def run_migrations(url=None):
     """Apply every unapplied migration. Returns the list of names that
     were applied by this call (empty when already up to date).
 
-    Raises if no DATABASE_URL is configured or the database is
+    ``url`` is the migration connection string. Callers pass it
+    explicitly (app boot resolves db.pool.migration_dsn()); the
+    default None resolves the same way, so tests and importers that
+    set only DATABASE_URL keep working unchanged.
+
+    Raises if no database URL is configured or the database is
     unreachable — callers at app startup must guard (see
     run_migrations_if_configured).
     """
-    if not pool.configured():
+    if url is None:
+        url = pool.migration_dsn()
+    if not url:
         raise RuntimeError("DATABASE_URL is not configured")
     done = []
-    with pool.connection() as conn:
+    with pool.connection(url) as conn:
         already = applied_migrations(conn)
         for path in migration_files():
             if path.name in already:
@@ -66,24 +76,28 @@ def run_migrations():
     return done
 
 
-def run_migrations_if_configured():
+def run_migrations_if_configured(url=None):
     """Startup helper: migrate when configured, stay silent otherwise.
 
     Returns the list of applied migration names, or [] when no database
-    is configured. Exceptions from a configured-but-broken database
-    propagate so the caller can log them (app.main catches them so the
-    site still boots).
+    is configured. "Configured" means a migration URL resolves
+    (MIGRATION_DATABASE_URL, falling back to DATABASE_URL). Exceptions
+    from a configured-but-broken database propagate so the caller can
+    log them (app.main catches them so the site still boots).
     """
-    if not pool.configured():
+    if url is None:
+        url = pool.migration_dsn()
+    if not url:
         return []
-    return run_migrations()
+    return run_migrations(url)
 
 
 def main(argv=None):
     try:
         applied = run_migrations()
     except RuntimeError:
-        print("db.migrate: DATABASE_URL is not configured", file=sys.stderr)
+        print("db.migrate: no database URL configured "
+              "(MIGRATION_DATABASE_URL / DATABASE_URL)", file=sys.stderr)
         return 2
     except Exception as exc:  # never print connection details
         print("db.migrate: failed (%s)" % type(exc).__name__, file=sys.stderr)

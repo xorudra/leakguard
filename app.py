@@ -1002,7 +1002,7 @@ def _startup_migrations():
     try:
         from db import migrate
 
-        applied = migrate.run_migrations_if_configured()
+        applied = migrate.run_migrations_if_configured(db_pool.migration_dsn())
         for name in applied:
             print("LeakGuard: applied DB migration %s" % name)
     except Exception as exc:

@@ -63,7 +63,7 @@ at `e31e016`.*
 - **Audit logs:** `audit_log` (migration `0007`) — auth, consent, identifier, scan, remediation, admin events; detail passes a PII filter; best-effort (an audit failure can never break the user action); a test serializes the whole table and asserts no email/identifier/token appears
 - **Security headers:** CSP `default-src 'self'`, X-Frame-Options DENY, Referrer-Policy no-referrer, X-Request-Id on every response; **HSTS `max-age=31536000; includeSubDomains`** on every response (Phase 69 DONE; no `preload` — an owner decision not yet made)
 - **Dependencies:** 3 runtime deps with version ranges in `requirements.txt` + **`requirements.lock`** exact-version snapshot (Phase 107 DONE); CI (`.github/workflows/tests.yml`, Phase 106 DONE) runs the full suite on push/PR and weekly; vulnerability scanning is not automated
-- **Backups:** Neon platform point-in-time restore (owner-run from the Neon console; free-plan history limited); **restoration has never been tested** (Phase 170 NOT_DONE)
+- **Backups:** Neon platform point-in-time restore (owner-run from the Neon console; free-plan history limited); **restoration tested 2026-10-07** — PITR branch drill verified 19 public tables, 40 brokers, 8 migrations, 15 users (Phases 78, 170 DONE)
 
 ## E. Data Inventory
 
@@ -108,9 +108,9 @@ evidence, and gap). Summary counts:
 
 | Status | Count |
 |---|---|
-| DONE | 101 |
-| PARTIAL | 50 |
-| NOT_DONE | 16 |
+| DONE | 104 |
+| PARTIAL | 48 |
+| NOT_DONE | 15 |
 | CUT (owner rule: AI phases + business model) | 11 |
 | NA (surface does not exist: file uploads, webhooks, containers) | 3 |
 | **Total** | **181** |
@@ -122,17 +122,15 @@ data, weakens authentication, or breaks deletion/retention today. The
 P0-tier open items are depth and verification gaps, listed first per the
 spec:
 
-1. **Backups have never been restore-tested** (Phase 170 NOT_DONE; 78/79
-   PARTIAL) — Neon's point-in-time restore is a platform promise the
-   product has not yet exercised. Highest-value open item in the audit.
+1. **Backup/DR procedure is not yet written down** (Phase 79 PARTIAL) —
+   restores themselves are **tested** (drill 2026-10-07, Phases 78/170
+   DONE); what remains is the written RPO/RTO procedure.
 2. **Rollback is practised but not documented or rehearsed for the
    database** (Phases 174, 173 PARTIAL) — app rollback = redeploy a prior
    commit; configuration/DB rollback has no written plan.
-3. **Single Neon database role** (Phase 73 PARTIAL) — no least-privilege
-   separation between the app's read/write needs and schema ownership.
-4. **WebAuthn/passkeys absent** (Phase 4 PARTIAL) — TOTP is the strongest
+3. **WebAuthn/passkeys absent** (Phase 4 PARTIAL) — TOTP is the strongest
    available factor.
-5. **No distinct security-events view or anomaly alerting** (Phase 62
+4. **No distinct security-events view or anomaly alerting** (Phase 62
    PARTIAL); **no automated dependency vulnerability scanning**
    (the Phase 107 lock file exists; scanning does not);
    security/privacy acceptance evidence is per-stage rather than one
@@ -151,12 +149,13 @@ means "no longer indexed as of the check".
 Only genuinely open items, P0 → P3 (full detail in `PHASE_STATUS.md` and in
 `MIGRATION_PLAN.md` → "Final Remaining Implementation — order of work"):
 
-- **P0:** restore test + written backup/DR procedure (170, 78, 79) →
+- **P0:** written backup/DR procedure (79) →
   written rollback plan incl. database/config (174, 173) → security-
   events view over the existing audit log (62) → consolidated security
   + privacy acceptance runbooks (147, 148)
-  → WebAuthn/passkeys (4) → least-privilege DB role (73) → re-run the
-  Phase 180 final gate. *(Batch A closed 69, 70, 106, 107.)*
+  → WebAuthn/passkeys (4) → re-run the
+  Phase 180 final gate. *(Batch A closed 69, 70, 106, 107; Batch A.1
+  closed 73, 78, 170.)*
 - **P1:** API versioning + deprecation policy (88) → export re-auth +
   CSV (49) → stored finding lifecycle states (25) → monitoring
   pause/resume (142) → per-cycle report files in-repo (149).

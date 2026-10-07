@@ -2,9 +2,11 @@
 
 Design notes
 ------------
-* Configuration comes from the DATABASE_URL environment variable only.
-  Nothing about the connection string is ever logged or returned to
-  callers — the health probe reports only "ok" / "disabled" / "error".
+* Configuration comes from environment variables only: DATABASE_URL
+  for serving, MIGRATION_DATABASE_URL (optional, owner-level) for the
+  boot-time migration step — see migration_dsn(). Nothing about any
+  connection string is ever logged or returned to callers — the health
+  probe reports only "ok" / "disabled" / "error".
 * Connections are opened on first use and closed per operation. The
   production endpoint is Neon's pooler (PgBouncer), which is built for
   exactly this pattern; a client-side pool would add state without
@@ -39,15 +41,33 @@ def _dsn():
     return os.environ.get("DATABASE_URL") or ""
 
 
+def migration_dsn():
+    """DSN for the boot-time migration step ONLY (spec Phase 73).
+
+    Migrations run DDL, so in production they use MIGRATION_DATABASE_URL
+    — an owner-level connection — while the serving pool runs as a
+    least-privilege role (DATABASE_URL: DML only, cannot CREATE/ALTER).
+    When MIGRATION_DATABASE_URL is unset (local dev, tests), this falls
+    back to DATABASE_URL and the single connection does both jobs,
+    exactly as before the split. The serving pool never uses this.
+    """
+    return os.environ.get("MIGRATION_DATABASE_URL") or _dsn()
+
+
 @contextmanager
-def connection():
+def connection(dsn=None):
     """Yield a psycopg connection with dict rows; commit/rollback + close.
+
+    With no argument the connection uses DATABASE_URL (the serving
+    pool). An explicit ``dsn`` is accepted for the migration step,
+    which resolves its own URL via migration_dsn().
 
     Raises RuntimeError if no DATABASE_URL is configured, and whatever
     psycopg raises if the database is unreachable. Callers that must not
     fail (health probes) should use db_status() instead.
     """
-    dsn = _dsn()
+    if dsn is None:
+        dsn = _dsn()
     if not dsn:
         raise RuntimeError("DATABASE_URL is not configured")
     import psycopg

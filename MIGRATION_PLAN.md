@@ -5,12 +5,23 @@ Upgrade Master Prompt", Phases 0–180 (owner-supplied PDF, 2026-10-07).*
 
 ## Guiding adaptations (owner constraints override spec where they conflict)
 
+*Owner additions, 2026-10-07 (not in the PDF — these outrank it):*
+- **Free for the owner AND free for users.** No running costs, no paywalls, no
+  pricing tiers anywhere until the owner explicitly says "make it paid".
+  Spec Phase 105 (business model) is deferred until that order.
+- **AI rule:** AI may be involved only if its token usage is free **and**
+  unlimited. No such source exists (every free lane has quotas), so **AI is
+  NOT involved**: spec Phases 51–56, 163–165 and the Phase 121 kill switch are
+  cut, and the existing optional free-lane hook in the agent is removed in
+  Stage 1. The platform is 100% deterministic scripts.
+- **Standing go (2026-10-07):** owner ordered the whole upgrade — stages run
+  back-to-back (DSRclone pattern), verified + pushed + reported per stage.
+
 1. **₹0 forever:** Render free web service + **Neon or Supabase free Postgres**
    (owner picks; both have real free tiers, unlike Render's trial Postgres).
    Workers/scheduler run **in-process** in the modular monolith (spec rule 13
    allows this) — no paid worker services.
-2. **Zero Claude tokens per run, ever.** AI phases (51–56) use only the owner's
-   FreeLLMAPI free-lane gateway, off by default, behind the Phase 121 kill switch.
+2. **Zero Claude tokens per run, ever** (see AI rule above).
 3. **Incremental, always-live:** every stage ships to the same Render service and
    is verified on the live site before the next begins. Existing routes keep
    working until their replacement is proven (spec Phases 133–137).
@@ -31,7 +42,7 @@ Upgrade Master Prompt", Phases 0–180 (owner-supplied PDF, 2026-10-07).*
 | **S7 — Remediation v2** | 30–39, 153–157, 162, 167 | Broker registry + workflow versioning, remediation engine with idempotent attempts, **verification & reappearance** (never claim removal without evidence), human-review queue, CAPTCHA → HUMAN_ACTION_REQUIRED |
 | **S8 — Monitoring** | 41–47, 158–160 | Continuous monitoring, scheduler, change detection, notifications with dedupe, history/timeline |
 | **S9 — Dashboard** | 28, 29, 90–99, 138–143 | Full Protection dashboard + action center, final Quick Scan / Full Protection UX (Spotify theme language preserved), accessibility, mobile |
-| **S10 — AI (free-lane)** | 51–56, 121, 163–165 | Assistant + remediation agent on FreeLLMAPI only, confirmation gates, prompt-injection defense, audit, kill switch |
+| **S10 — AI** | 51–56, 121, 163–165 | **CUT by the owner's AI rule** (free + unlimited tokens don't exist). Revisit only if that changes; prompt-injection defense principles still apply to all external content handling in S4–S8 |
 | **S11 — Orgs & Admin** | 57–62 | Organizations, domain verification, family profiles, admin panel, audit logging, security events |
 | **S12 — Hardening** | 63–68, 71, 72, 74, 76–80, 106–109, 115–120, 122–125 | Rate limiting, abuse/enumeration protection, cost control, caching, retention worker, observability, backups/DR, incident response, feature flags, emergency controls |
 | **S13 — Trust & API** | 81–85, 126–132 | Legal/privacy architecture, policy/terms/trust center, reports, support, subprocessors, data residency, documentation |

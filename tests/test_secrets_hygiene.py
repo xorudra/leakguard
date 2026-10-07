@@ -133,6 +133,11 @@ ALLOWLISTED_LITERALS = {
     # tests/test_orgs_admin.py — same kind of fixture identifier for
     # the audit-log tests.
     "audit-me-%s@example.com",
+    # tests/test_secrets_hygiene.py — this module's own docstring
+    # names the shape it hunts (``scheme://user:pass@host``); the
+    # host is the literal word "host", not a resolvable name, and
+    # the userinfo is the generic placeholder "user:pass".
+    "user:pass@host",
 }
 
 

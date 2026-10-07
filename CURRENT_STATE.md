@@ -160,11 +160,11 @@ taxonomy (owner-ordered audit issue, 2026-10-07):
 
 | Status | Count |
 |---|---|
-| DONE | 129 |
+| DONE | 131 |
 | PARTIAL | 31 |
 | MISSING | 1 |
 | INSECURE | 0 |
-| UNVERIFIED | 6 |
+| UNVERIFIED | 4 |
 | NOT APPLICABLE | 14 |
 | **Total** | **181** |
 

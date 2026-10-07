@@ -8,6 +8,8 @@ download. It contains:
 * the account (email REVEALED — it is the owner's own data — plus the
   masked form and creation date),
 * every live identifier (kind, value REVEALED, masked, created_at),
+* every live domain row (domain, verification state — domains are
+  public, never secret),
 * the FULL consent history (every version ever recorded),
 * generated_at.
 
@@ -45,6 +47,19 @@ def build_export(user_id):
             "masked": id_row["masked"],
             "created_at": auth._iso(id_row["created_at"]),
         })
+    with pool.connection() as conn:
+        domain_rows = conn.execute(
+            "SELECT domain, verified, verified_at, created_at"
+            " FROM domains WHERE user_id = %s AND deleted_at IS NULL"
+            " ORDER BY created_at, id",
+            (user_id,),
+        ).fetchall()
+    exported_domains = [{
+        "domain": d_row["domain"],
+        "verified": bool(d_row["verified"]),
+        "verified_at": auth._iso(d_row["verified_at"]),
+        "created_at": auth._iso(d_row["created_at"]),
+    } for d_row in domain_rows]
     return {
         "account": {
             "email": auth.reveal_email(row),
@@ -52,6 +67,7 @@ def build_export(user_id):
             "created_at": auth._iso(row["created_at"]),
         },
         "identifiers": exported_identifiers,
+        "domains": exported_domains,
         "consents": consents.history(user_id),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }

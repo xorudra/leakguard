@@ -7,12 +7,25 @@ run_scan_job(job_id) executes ONE queued full-profile scan:
    side for the account owner, who granted the 'scanning' consent
    before the job could be created. Values are used in memory only:
    never logged, never persisted outside the vault.
-2. Per identifier:
+2. Per identifier (Stage S6 added the non-email kinds):
    * email — the email_breach + breach_analytics providers run and
      results normalize into findings.
-   * phone / name / address / username — NO provider exists yet
-     (Stage S6). The outcome is recorded honestly as
-     'no_provider_yet' — never as "clean", never with fake findings.
+   * phone / name / address — ONE quoted public-web discovery query
+     each; hits are 'weak' candidate mentions, never confirmations.
+   * username — public platform presence checks (a registered exact
+     handle is 'probable', never proof of identity) + one discovery
+     query.
+   * domain — ONLY when the domains table says this user verified
+     it: a public DNS snapshot + certificate-transparency names
+     ('exact' — factual records). Unverified domains are never
+     scanned; their outcome is 'domain_unverified'.
+   * any other kind — no provider: outcome 'no_provider_yet',
+     never "clean", never with fake findings.
+   * Discovery politeness budget: at most DISCOVERY_BUDGET web
+     discovery queries per job across ALL identifiers (platform and
+     DNS checks do not consume it). Identifiers past the budget are
+     reported scanned-but-incomplete ('budget_exhausted'), never
+     silently treated as fully checked.
    * passwords are NEVER part of a job: nothing about a password is
      stored anywhere, so there is nothing to check with. Password
      findings exist only in the interactive anonymous scan.
@@ -43,11 +56,17 @@ Failure semantics (the worker owns retries):
 
 import json
 
+from accounts import domains as domains_service
 from accounts import identifiers as identifiers_service
 from db import pool
 from providers import registry as providers_registry
 from scanning import correlation, normalize, risk
 from vault import store as vault_store
+
+# Maximum public-web discovery queries per scan job (Stage S6
+# politeness + cost control, spec Phases 20, 66). Platform presence
+# checks and DNS lookups do not consume this budget.
+DISCOVERY_BUDGET = 6
 
 
 class JobNotFoundError(Exception):
@@ -115,6 +134,163 @@ def _scan_email(record, value):
     return findings, outcome, analytics
 
 
+def _base_outcome(record, outcome):
+    return {
+        "identifier_id": record["id"],
+        "kind": record["kind"],
+        "masked": record["masked"],
+        "outcome": outcome,
+        "findings": 0,
+        "error_kind": None,
+    }
+
+
+class _DiscoveryBudget:
+    """Counts web-discovery queries for one job; take() answers
+    whether one more query is allowed."""
+
+    def __init__(self, limit=DISCOVERY_BUDGET):
+        self.limit = limit
+        self.used = 0
+
+    def take(self):
+        if self.used >= self.limit:
+            return False
+        self.used += 1
+        return True
+
+
+def _discovery_query(kind, value):
+    """The one quoted query a discovery-checked identifier gets.
+    Phones are searched by their normalized digits (the canonical
+    form listings are indexed by); names, addresses and handles are
+    searched as saved."""
+    if kind == "phone":
+        return '"%s"' % vault_store.normalize("phone", value)
+    return '"%s"' % str(value).strip().lstrip("@")
+
+
+def _scan_discovery(record, value, budget):
+    """phone / name / address: one quoted public-web query.
+    Returns (findings, outcome)."""
+    outcome = _base_outcome(record, "scanned")
+    provider = _provider("web_discovery")
+    if provider is None:
+        outcome["outcome"] = "no_provider_yet"
+        return [], outcome
+    if not budget.take():
+        outcome["error_kind"] = "budget_exhausted"
+        return [], outcome
+    result = provider.search(_discovery_query(record["kind"], value))
+    if result.status != "ok":
+        outcome["outcome"] = "provider_error"
+        outcome["error_kind"] = (
+            getattr(result, "error_kind", None) or "provider_unavailable")
+        return [], outcome
+    findings = normalize.discovery_findings(
+        provider.info.name, record["id"], record["kind"], value,
+        result.data)
+    for finding in findings:
+        finding["identifier_masked"] = record["masked"]
+    outcome["findings"] = len(findings)
+    return findings, outcome
+
+
+def _scan_username(record, value, budget):
+    """username: platform presence checks + one discovery query.
+    Either source answering makes the outcome 'scanned'; a failed
+    sibling source is reported via error_kind (degraded), exactly
+    like a failed analytics call on the email path."""
+    outcome = _base_outcome(record, "scanned")
+    findings = []
+    errors = []
+    answered = False
+
+    provider = _provider("username_presence")
+    if provider is not None:
+        result = provider.check_username(value)
+        if result.status == "ok":
+            answered = True
+            findings.extend(normalize.username_presence_findings(
+                provider.info.name, record["id"], value, result.data))
+        else:
+            errors.append(getattr(result, "error_kind", None)
+                          or "provider_unavailable")
+
+    discovery = _provider("web_discovery")
+    if discovery is not None:
+        if budget.take():
+            result = discovery.search(
+                _discovery_query("username", value))
+            if result.status == "ok":
+                answered = True
+                findings.extend(normalize.discovery_findings(
+                    discovery.info.name, record["id"], "username",
+                    value, result.data))
+            else:
+                errors.append(getattr(result, "error_kind", None)
+                              or "provider_unavailable")
+        else:
+            errors.append("budget_exhausted")
+
+    if not answered and provider is None and discovery is None:
+        outcome["outcome"] = "no_provider_yet"
+        return [], outcome
+    if not answered:
+        outcome["outcome"] = "provider_error"
+        outcome["error_kind"] = errors[0] if errors else "provider_unavailable"
+        return [], outcome
+    for finding in findings:
+        finding["identifier_masked"] = record["masked"]
+    outcome["findings"] = len(findings)
+    if errors:
+        outcome["error_kind"] = errors[0]
+    return findings, outcome
+
+
+def _scan_domain(record, value, verified_names):
+    """domain: public DNS + certificate facts, ONLY for domains the
+    owner has verified (the domains table is the gate). An
+    unverified domain is never queried — its outcome says why."""
+    outcome = _base_outcome(record, "scanned")
+    normalized = vault_store.normalize("domain", value)
+    if normalized not in verified_names:
+        outcome["outcome"] = "domain_unverified"
+        return [], outcome
+    provider = _provider("domain_dns")
+    cert_provider = _provider("domain_certs") or provider
+    if provider is None:
+        outcome["outcome"] = "no_provider_yet"
+        return [], outcome
+    snapshot = certs = None
+    errors = []
+    result = provider.dns_snapshot(normalized)
+    if result.status == "ok":
+        snapshot = result.data
+    else:
+        errors.append(getattr(result, "error_kind", None)
+                      or "provider_unavailable")
+    if cert_provider is not None:
+        result = cert_provider.cert_names(normalized)
+        if result.status == "ok":
+            certs = result.data
+        else:
+            errors.append(getattr(result, "error_kind", None)
+                          or "provider_unavailable")
+    if snapshot is None and certs is None:
+        outcome["outcome"] = "provider_error"
+        outcome["error_kind"] = errors[0] if errors else "provider_unavailable"
+        return [], outcome
+    findings = normalize.domain_findings(
+        provider.info.name, record["id"], normalized, snapshot, certs)
+    for finding in findings:
+        finding["identifier_masked"] = record["masked"]
+    outcome["findings"] = len(findings)
+    if errors:
+        outcome["error_kind"] = errors[0]
+    return findings, outcome
+
+
 def _insert_findings(conn, job_id, user_id, findings):
     for f in findings:
         conn.execute(
@@ -147,21 +323,29 @@ def run_scan_job(job_id):
     definitive = False
     degraded = False
 
-    for record in records:
-        if record["kind"] != "email":
-            outcomes.append({
-                "identifier_id": record["id"],
-                "kind": record["kind"],
-                "masked": record["masked"],
-                "outcome": "no_provider_yet",
-                "findings": 0,
-                "error_kind": None,
-            })
+    budget = _DiscoveryBudget()
+    verified_names = None  # loaded lazily, only if a domain appears
+
+    def absorb(findings, outcome):
+        """Fold one identifier's result into the job tallies.
+        'scanned', 'no_provider_yet' and 'domain_unverified' are
+        definitive outcomes (the identifier was dealt with honestly);
+        'provider_error' is not, and degrades the job."""
+        nonlocal definitive, degraded
+        outcomes.append(outcome)
+        if outcome["outcome"] in ("scanned", "no_provider_yet",
+                                  "domain_unverified"):
             definitive = True
-            continue
+            all_findings.extend(findings)
+            if outcome["error_kind"]:
+                degraded = True  # partial data; findings still real
+        else:
+            degraded = True
+
+    for record in records:
         value = vault_store.reveal_by_id(record["id"], user_id)
         if value is None:
-            outcomes.append({
+            absorb([], {
                 "identifier_id": record["id"],
                 "kind": record["kind"],
                 "masked": record["masked"],
@@ -169,19 +353,28 @@ def run_scan_job(job_id):
                 "findings": 0,
                 "error_kind": "identifier_unreadable",
             })
-            degraded = True
             continue
-        findings, outcome, analytics = _scan_email(record, value)
-        outcomes.append(outcome)
-        if outcome["outcome"] == "scanned":
-            definitive = True
-            all_findings.extend(findings)
+        kind = record["kind"]
+        if kind == "email":
+            findings, outcome, analytics = _scan_email(record, value)
+            absorb(findings, outcome)
             if analytics is not None:
                 analytics_by_email.append(analytics)
-            if outcome["error_kind"]:
-                degraded = True  # analytics failed; findings still real
+        elif kind in ("phone", "name", "address"):
+            findings, outcome = _scan_discovery(record, value, budget)
+            absorb(findings, outcome)
+        elif kind == "username":
+            findings, outcome = _scan_username(record, value, budget)
+            absorb(findings, outcome)
+        elif kind == "domain":
+            if verified_names is None:
+                verified_names = domains_service.verified_domain_names(
+                    user_id)
+            findings, outcome = _scan_domain(record, value,
+                                             verified_names)
+            absorb(findings, outcome)
         else:
-            degraded = True
+            absorb([], _base_outcome(record, "no_provider_yet"))
 
     if not definitive:
         raise ScanFailedError("provider_unavailable")
@@ -208,6 +401,7 @@ def run_scan_job(job_id):
         "correlations": corr["correlations"],
         "degraded": degraded,
         "findings_total": len(all_findings),
+        "discovery_queries_used": budget.used,
     }
 
     with pool.connection() as conn:

@@ -710,6 +710,7 @@ function renderAccount() {
       ? "· member since " + new Date(meUser.created_at).toLocaleDateString() : "";
     renderTotp();
     loadIdentifiers();
+    loadDomains();
     loadConsents();
     if (renderAccount._fsUser !== meUser.id) {
       // Fresh sign-in (or a different account): clear the last
@@ -865,6 +866,112 @@ $("idAddBtn").addEventListener("click", async () => {
     loadIdentifiers();
   } else {
     $("idStatus").textContent = errMsg(r.data, "Could not save that detail");
+  }
+});
+
+/* ----- my domains (verification-gated monitoring) ----- */
+async function loadDomains() {
+  if (!meUser) return;
+  const wrap = $("domainList");
+  try {
+    const r = await apiJson("/api/domains");
+    wrap.innerHTML = "";
+    if (!r.ok) {
+      wrap.innerHTML = "<p class='hint'>" + errMsg(r.data, "Could not load your domains") + "</p>";
+      return;
+    }
+    if (!r.data.domains.length) {
+      wrap.innerHTML = "<p class='hint'>No domains added yet.</p>";
+      return;
+    }
+    r.data.domains.forEach((rec) => {
+      const row = document.createElement("div");
+      row.className = "idRow";
+      const left = document.createElement("span");
+      const val = document.createElement("span");
+      val.className = "idVal";
+      val.textContent = rec.domain;
+      const badge = document.createElement("span");
+      badge.className = "kindTag";
+      badge.textContent = rec.verified ? "Verified" : "Pending";
+      left.appendChild(val); left.appendChild(badge);
+      row.appendChild(left);
+      const btns = document.createElement("span");
+      btns.className = "rowBtns";
+      if (!rec.verified) {
+        const verify = document.createElement("button");
+        verify.type = "button";
+        verify.className = "btnGhost miniBtn";
+        verify.textContent = "Verify";
+        verify.addEventListener("click", async () => {
+          verify.disabled = true;
+          $("domainStatus").textContent = "Checking your DNS record…";
+          const v = await apiJson("/api/domains/" + rec.id + "/verify", {
+            method: "POST", headers: AH, body: "{}",
+          });
+          if (v.ok && v.data.domain.verified) {
+            $("domainStatus").textContent = "Verified ✓ — full scans now watch this domain.";
+          } else if (v.ok) {
+            $("domainStatus").textContent = "Record not found yet — double-check the TXT record below; DNS changes can take a while to spread.";
+          } else {
+            $("domainStatus").textContent = errMsg(v.data, "Verification check failed");
+          }
+          loadDomains();
+        });
+        btns.appendChild(verify);
+      }
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "btnGhost miniBtn";
+      rm.textContent = "Remove";
+      rm.addEventListener("click", async () => {
+        rm.disabled = true;
+        const d = await apiJson("/api/domains/" + rec.id, {
+          method: "DELETE", headers: { "X-Requested-With": "fetch" },
+        });
+        if (d.ok) { loadDomains(); $("domainStatus").textContent = "Removed."; }
+        else { $("domainStatus").textContent = errMsg(d.data, "Remove failed"); rm.disabled = false; }
+      });
+      btns.appendChild(rm);
+      row.appendChild(btns);
+      wrap.appendChild(row);
+      if (!rec.verified) {
+        const help = document.createElement("p");
+        help.className = "hint";
+        help.textContent = "Add this TXT record to " + rec.domain + "'s DNS, then press Verify:  " +
+          rec.txt_name + "  →  " + rec.txt_value;
+        const copy = document.createElement("button");
+        copy.type = "button";
+        copy.className = "btnGhost miniBtn";
+        copy.textContent = "Copy record value";
+        copy.addEventListener("click", () => {
+          if (navigator.clipboard) navigator.clipboard.writeText(rec.txt_value);
+          $("domainStatus").textContent = "Copied — paste it as the TXT record value.";
+        });
+        help.appendChild(copy);
+        wrap.appendChild(help);
+      }
+    });
+  } catch (e) {
+    wrap.innerHTML = "<p class='hint'>Could not load your domains.</p>";
+  }
+}
+
+$("domainAddBtn").addEventListener("click", async () => {
+  const value = $("domainValue").value.trim();
+  if (!value) { $("domainStatus").textContent = "Type the domain first."; return; }
+  const r = await apiJson("/api/domains", {
+    method: "POST", headers: AH, body: JSON.stringify({ domain: value }),
+  });
+  if (r.ok) {
+    $("domainValue").value = "";
+    $("domainStatus").textContent = r.data.domain.verified
+      ? "Added — already verified."
+      : "Added. Now add the TXT record shown next to it and press Verify.";
+    loadDomains();
+    loadIdentifiers();
+  } else {
+    $("domainStatus").textContent = errMsg(r.data, "Could not add that domain");
   }
 });
 
@@ -1048,6 +1155,8 @@ function renderFullScan(data) {
       text += o.findings === 1 ? "1 finding" : o.findings + " findings";
     } else if (o.outcome === "no_provider_yet") {
       text += "no checks available for this kind of detail yet";
+    } else if (o.outcome === "domain_unverified") {
+      text += "not checked — verify this domain under My domains to start monitoring it";
     } else {
       text += "could not be checked this time (source unreachable)";
     }

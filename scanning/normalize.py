@@ -25,6 +25,12 @@ Password findings (from the interactive k-anonymity check only —
 scan jobs never see passwords) contain a pwned COUNT in details and
 nothing else about the password: no password, no hash prefix, no
 hash suffix, ever.
+
+Stage S6 finding types follow the same evidence rules, with the
+confidence ladder the stage's honesty contract demands: public-web
+mentions are "weak", a registered exact handle is "probable" (with a
+not-proof note on the finding), public DNS/certificate facts for a
+verified domain are "exact". None of them is remediation-eligible.
 """
 
 import hashlib
@@ -38,6 +44,9 @@ RELIABILITY = {
     "XposedOrNot": "high",
     "Have I Been Pwned Pwned Passwords": "high",
     "HIBP": "high",
+    "Domain Intel": "high",
+    "Username Platforms": "medium",
+    "DuckDuckGo Discovery": "low",
     "MockProvider": "low",
 }
 DEFAULT_RELIABILITY = "low"
@@ -114,6 +123,145 @@ def email_findings(provider_name, identifier_id, identifier_kind,
                 else "none",
             },
         })
+    return findings
+
+
+def _finding(provider_name, identifier_id, identifier_kind, hmac_hex,
+             source_name, source_url, exposed_fields, confidence,
+             excerpt, details):
+    """Shared skeleton for the Stage S6 finding types. Every S6 type
+    is remediation_eligible=False: a public mention, a registered
+    handle or a DNS record is never something a broker removal
+    request deletes — the eligible kind arrives with Stage S7."""
+    return {
+        "identifier_id": identifier_id,
+        "identifier_kind": identifier_kind,
+        "identifier_hmac": hmac_hex,
+        "provider": provider_name,
+        "source_name": source_name,
+        "source_url": source_url,
+        "source_date": None,
+        "exposed_fields": list(exposed_fields),
+        "confidence": confidence,
+        "reliability": reliability_for(provider_name),
+        "evidence_ref": canonical_evidence_ref(evidence_payload(
+            provider_name, source_name, identifier_kind, hmac_hex,
+            excerpt)),
+        "remediation_eligible": False,
+        "details": details,
+    }
+
+
+def discovery_findings(provider_name, identifier_id, identifier_kind,
+                       identifier_value, results, lookup_key=None):
+    """Public-web mentions of a phone / name / address / username
+    (Stage S6, spec Phases 15, 17, 18, 20).
+
+    Confidence is "weak" BY CONSTRUCTION: a search engine returning a
+    page that contains the same digits or words proves nothing about
+    whose page it is. Neither the excerpt nor details carry the
+    result's title or snippet — both routinely embed the searched
+    text itself, and the raw identifier never enters a finding (see
+    module docstring). The source URL is kept: it is the public page,
+    the thing the owner needs in order to review the lead."""
+    hmac_hex = _identifier_hmac_hex(identifier_kind, identifier_value,
+                                    lookup_key)
+    findings = []
+    for result in results or []:
+        domain = str(result.get("domain") or "unknown source")
+        findings.append(_finding(
+            provider_name, identifier_id, identifier_kind, hmac_hex,
+            source_name=domain,
+            source_url=result.get("url"),
+            exposed_fields=[identifier_kind],
+            confidence="weak",
+            excerpt={"source_domain": domain},
+            details={
+                "match_kind": "public_web_mention",
+                "note": ("A public web page mentions this detail. A "
+                         "mention is a lead to review — not proof the "
+                         "page is about you."),
+            }))
+    return findings
+
+
+def username_presence_findings(provider_name, identifier_id,
+                               identifier_value, checks,
+                               lookup_key=None):
+    """One finding per platform where the exact handle is registered
+    (Stage S6, spec Phase 16). Confidence "probable" — the middle
+    grade, on purpose: the handle EXISTS, but a handle match is not
+    proof the account belongs to the person who saved it, and the
+    note on every finding says so."""
+    hmac_hex = _identifier_hmac_hex("username", identifier_value,
+                                    lookup_key)
+    findings = []
+    for check in checks or []:
+        if check.get("state") != "in_use":
+            continue
+        platform = str(check.get("platform") or "Unknown platform")
+        findings.append(_finding(
+            provider_name, identifier_id, "username", hmac_hex,
+            source_name=platform,
+            source_url=check.get("url"),
+            exposed_fields=["username"],
+            confidence="probable",
+            excerpt={"platform": platform},
+            details={
+                "match_kind": "handle_registered",
+                "note": ("An account with this exact handle exists on "
+                         "%s. A handle match is not proof it belongs "
+                         "to you — handles are not unique to a "
+                         "person." % platform),
+            }))
+    return findings
+
+
+def domain_findings(provider_name, identifier_id, identifier_value,
+                    snapshot, cert_names, lookup_key=None):
+    """Public DNS + certificate facts for a VERIFIED domain (Stage
+    S6, spec Phase 19). Confidence "exact": these are the domain's
+    own public records, reported neutrally — a certificate name or
+    an MX record is footprint, not a verdict. The snapshot finding
+    carries the A/MX/NS summary in details; certificates get one
+    finding per distinct name beyond the apex."""
+    hmac_hex = _identifier_hmac_hex("domain", identifier_value,
+                                    lookup_key)
+    domain = vault_store.normalize("domain", identifier_value)
+    findings = []
+    if snapshot:
+        summary = {rtype: list(snapshot.get(rtype) or [])
+                   for rtype in ("A", "MX", "NS")}
+        findings.append(_finding(
+            provider_name, identifier_id, "domain", hmac_hex,
+            source_name=domain,
+            source_url=None,
+            exposed_fields=["domain"],
+            confidence="exact",
+            excerpt={"record": "dns_snapshot"},
+            details={
+                "match_kind": "dns_snapshot",
+                "dns": summary,
+                "note": ("Public DNS records for your verified "
+                         "domain, exactly as resolvers see them."),
+            }))
+    for name in cert_names or []:
+        name = str(name).strip().lower().rstrip(".")
+        if not name or name == domain:
+            continue
+        findings.append(_finding(
+            provider_name, identifier_id, "domain", hmac_hex,
+            source_name=name,
+            source_url="https://crt.sh/?q=" + name,
+            exposed_fields=["domain"],
+            confidence="exact",
+            excerpt={"cert_name": name},
+            details={
+                "match_kind": "certificate_name",
+                "note": ("This hostname appears on a public "
+                         "certificate issued for your verified "
+                         "domain (certificate transparency logs)."),
+            }))
     return findings
 
 

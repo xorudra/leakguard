@@ -552,7 +552,12 @@ class TestScanningDb(ServerMixin, unittest.TestCase):
         outcomes = {o["kind"]: o for o in job["summary"]["identifiers"]}
         self.assertEqual(outcomes["email"]["outcome"], "scanned")
         self.assertEqual(outcomes["email"]["findings"], 2)
-        self.assertEqual(outcomes["phone"]["outcome"], "no_provider_yet")
+        # Stage S6: phones now HAVE a provider (public-web discovery).
+        # This number is not the mock fixture number, so the honest
+        # result is "scanned" with zero candidate mentions — the S5
+        # "no_provider_yet" assertion pinned the pre-S6 world.
+        self.assertEqual(outcomes["phone"]["outcome"], "scanned")
+        self.assertEqual(outcomes["phone"]["findings"], 0)
 
         findings = result["findings"]
         self.assertEqual(len(findings), 2)

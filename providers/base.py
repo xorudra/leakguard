@@ -96,7 +96,7 @@ class HttpClient:
                  sleep=None, clock=None, timeout=DEFAULT_TIMEOUT,
                  max_retries=MAX_RETRIES, backoff=BACKOFF,
                  breaker_threshold=BREAKER_THRESHOLD,
-                 breaker_cooldown=BREAKER_COOLDOWN):
+                 breaker_cooldown=BREAKER_COOLDOWN, min_interval=0.0):
         self.provider_name = provider_name
         self.health = health
         self._transport = transport or urllib_transport
@@ -107,9 +107,14 @@ class HttpClient:
         self.backoff = tuple(backoff)
         self.breaker_threshold = breaker_threshold
         self.breaker_cooldown = breaker_cooldown
+        # Minimum seconds between successive calls to this provider
+        # (Stage S6 politeness for public discovery sources). 0 = off,
+        # which is every pre-S6 provider's behaviour, unchanged.
+        self.min_interval = float(min_interval or 0.0)
         self._lock = threading.Lock()
         self._consecutive_failures = 0
         self._opened_at = None       # clock() reading when the circuit opened
+        self._last_call_at = None    # clock() reading of the last call
 
     # ---------- circuit breaker ----------
     def circuit_state(self):
@@ -138,6 +143,30 @@ class HttpClient:
     def get_text(self, url, headers=None):
         return self._request(url, headers, parse="text")
 
+    def get_status(self, url, headers=None):
+        """Status-only request (Stage S6 username presence checks):
+        ProviderResult.data is the HTTP status code of any completed
+        response below 500 — a 404 is a perfectly good answer, so it
+        counts as a SUCCESSFUL call for breaker/health purposes.
+        5xx (after retries), timeouts and network failures keep the
+        usual error semantics, with the last status code in data when
+        one was received."""
+        return self._request(url, headers, parse="status")
+
+    def _pace(self):
+        """Enforce min_interval between calls to this provider. Uses
+        the injected clock/sleep, so tests stay instant and honest."""
+        if self.min_interval <= 0:
+            return
+        with self._lock:
+            now = self._clock()
+            wait = 0.0
+            if self._last_call_at is not None:
+                wait = self._last_call_at + self.min_interval - now
+            self._last_call_at = max(now, now + wait)
+        if wait > 0:
+            self._sleep(wait)
+
     def _report(self, ok, latency_ms, error_kind):
         if self.health is not None:
             self.health.record(self.provider_name, ok, latency_ms, error_kind)
@@ -147,10 +176,12 @@ class HttpClient:
             self._report(False, 0.0, "circuit_open")
             return ProviderResult(status="circuit_open",
                                   error_kind="circuit_open", latency_ms=0.0)
+        self._pace()
         start = self._clock()
         attempts = 1 + self.max_retries
         error_kind = None
         status_label = "error"
+        last_code = None
         for attempt in range(attempts):
             try:
                 code, text = self._transport(url, headers, self.timeout)
@@ -161,6 +192,15 @@ class HttpClient:
                 error_kind, retryable = "network", True
                 status_label = "error"
             else:
+                last_code = code
+                if parse == "status" and code < 500:
+                    # Any completed non-5xx response answers a
+                    # status-only question (200/404/403 alike).
+                    latency = (self._clock() - start) * 1000.0
+                    self._record_success()
+                    self._report(True, latency, None)
+                    return ProviderResult(status="ok", data=code,
+                                          latency_ms=latency)
                 if 200 <= code < 300:
                     latency = (self._clock() - start) * 1000.0
                     if parse == "json":
@@ -191,7 +231,9 @@ class HttpClient:
         latency = (self._clock() - start) * 1000.0
         self._record_failure()
         self._report(False, latency, error_kind)
-        return ProviderResult(status=status_label, error_kind=error_kind,
+        return ProviderResult(status=status_label,
+                              data=last_code if parse == "status" else None,
+                              error_kind=error_kind,
                               latency_ms=latency)
 
 

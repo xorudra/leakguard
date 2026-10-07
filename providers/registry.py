@@ -17,9 +17,17 @@ import threading
 from collections import deque
 
 from .base import HttpClient
+from .ddg_discovery import DuckDuckGoDiscoveryProvider
+from .domain_intel import DomainIntelProvider
 from .hibp_passwords import HibpPasswordsProvider
-from .mock import MockProvider
+from .mock import (MockDiscoveryProvider, MockDomainIntelProvider,
+                  MockProvider, MockUsernameProvider)
+from .username_platforms import UsernamePlatformsProvider
 from .xposedornot import XposedOrNotProvider
+
+# Stage S6 politeness: the public discovery sources get a shared
+# 1-second minimum interval between calls (per provider).
+DISCOVERY_MIN_INTERVAL = 1.0
 
 RECENT_WINDOW = 50
 
@@ -75,7 +83,12 @@ class Registry:
         self.mode = mode
         self.health = HealthTracker()
         if mode == "mock":
-            self.providers = [MockProvider(health=self.health)]
+            self.providers = [
+                MockProvider(health=self.health),
+                MockDiscoveryProvider(health=self.health),
+                MockUsernameProvider(health=self.health),
+                MockDomainIntelProvider(health=self.health),
+            ]
         else:
             self.providers = [
                 XposedOrNotProvider(
@@ -86,6 +99,24 @@ class Registry:
                     health=self.health,
                     client=HttpClient(HibpPasswordsProvider.info.name,
                                       health=self.health)),
+                DuckDuckGoDiscoveryProvider(
+                    health=self.health,
+                    client=HttpClient(
+                        DuckDuckGoDiscoveryProvider.info.name,
+                        health=self.health,
+                        min_interval=DISCOVERY_MIN_INTERVAL)),
+                UsernamePlatformsProvider(
+                    health=self.health,
+                    client=HttpClient(
+                        UsernamePlatformsProvider.info.name,
+                        health=self.health,
+                        min_interval=DISCOVERY_MIN_INTERVAL)),
+                DomainIntelProvider(
+                    health=self.health,
+                    client=HttpClient(
+                        DomainIntelProvider.info.name,
+                        health=self.health,
+                        min_interval=DISCOVERY_MIN_INTERVAL)),
             ]
 
     def get_providers(self, capability):

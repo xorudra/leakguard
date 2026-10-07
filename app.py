@@ -45,6 +45,7 @@ import agent as agent_engine
 from accounts import accounts_available
 from accounts import auth as auth_service
 from accounts import consents as consents_service
+from accounts import domains as domains_service
 from accounts import identifiers as identifiers_service
 from accounts import privacy as privacy_service
 from accounts import ratelimit
@@ -326,6 +327,13 @@ class Handler(BaseHTTPRequestHandler):
                 "identifiers": self._call(
                     identifiers_service.list_identifiers, user["id"]),
             })
+        if route == "/api/domains":
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._json(200, {
+                "domains": self._call(
+                    domains_service.list_domains, user["id"]),
+            })
         if route == "/api/scans":
             self._require_accounts()
             user, _token = self._require_user()
@@ -372,7 +380,8 @@ class Handler(BaseHTTPRequestHandler):
     def _do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path.startswith("/api/auth/") or parsed.path in (
-                "/api/consents", "/api/identifiers", "/api/scans"):
+                "/api/consents", "/api/identifiers", "/api/scans",
+                "/api/domains") or parsed.path.startswith("/api/domains/"):
             return self._accounts_post(parsed.path)
         if parsed.path == "/api/agent/plan":
             payload = self._read_json_body()
@@ -558,6 +567,23 @@ class Handler(BaseHTTPRequestHandler):
                                 user["id"], payload.get("kind"),
                                 payload.get("value"))
             return self._json(201, {"identifier": record})
+        if route == "/api/domains":
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            record = self._call(domains_service.add_domain,
+                                user["id"], payload.get("domain"))
+            return self._json(201, {"domain": record})
+        if route.startswith("/api/domains/") and \
+                route.endswith("/verify"):
+            domain_id = route[len("/api/domains/"):-len("/verify")]
+            try:
+                uuid.UUID(domain_id)
+            except (ValueError, AttributeError, TypeError):
+                return self._fail(errors.not_found("Domain not found"))
+            record = self._call(domains_service.verify_domain,
+                                user["id"], domain_id)
+            return self._json(200, {"domain": record})
         if route == "/api/scans":
             payload = self._read_json_body()
             if payload is None:
@@ -585,6 +611,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._fail(errors.not_found("Identifier not found"))
             result = self._call(identifiers_service.delete_identifier,
                                 user["id"], ident)
+            return self._json(200, result)
+        prefix = "/api/domains/"
+        if parsed.path.startswith(prefix) and len(parsed.path) > len(prefix):
+            security.require_csrf(self)
+            self._require_accounts()
+            user, _token = self._require_user()
+            domain_id = parsed.path[len(prefix):]
+            try:
+                uuid.UUID(domain_id)
+            except (ValueError, AttributeError, TypeError):
+                return self._fail(errors.not_found("Domain not found"))
+            result = self._call(domains_service.delete_domain,
+                                user["id"], domain_id)
             return self._json(200, result)
         return self._fail(errors.not_found())
 

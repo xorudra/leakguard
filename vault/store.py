@@ -30,7 +30,7 @@ import re
 from db import pool
 from vault import crypto
 
-KINDS = ("email", "phone", "name", "address", "username")
+KINDS = ("email", "phone", "name", "address", "username", "domain")
 
 _BULLET = "•"
 _WS_RE = re.compile(r"\s+")
@@ -85,6 +85,8 @@ def normalize(kind, value):
     email:    trim + lowercase
     phone:    digits only; a leading international "00" prefix is
               dropped (country-agnostic; no country is assumed)
+    domain:   host only — scheme, userinfo, port, path/query and a
+              trailing dot are stripped; lowercased (Stage S6)
     others:   trim, collapse internal whitespace, casefold
     """
     kind = _check_kind(kind)
@@ -96,6 +98,16 @@ def normalize(kind, value):
         if digits.startswith("00"):
             digits = digits[2:]
         return digits
+    if kind == "domain":
+        host = value.strip().lower()
+        if "://" in host:
+            host = host.split("://", 1)[1]
+        host = host.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+        if "@" in host:
+            host = host.rsplit("@", 1)[1]
+        if ":" in host:
+            host = host.split(":", 1)[0]
+        return host.rstrip(".")
     return _WS_RE.sub(" ", value.strip()).casefold()
 
 

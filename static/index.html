@@ -86,6 +86,22 @@
         <button type="button" id="idAddBtn">Save detail</button>
         <span id="idStatus" class="hint"></span>
       </div>
+      <p class="hint">What each kind gets checked against: emails against the breach databases;
+      phone numbers, names and addresses against public web mentions; usernames against public
+      profiles on major platforms plus web mentions. A mention or a matching handle is a lead
+      for you to review — never proof on its own.</p>
+
+      <h3>My domains</h3>
+      <p class="hint">Add a domain you own and LeakGuard can watch its public footprint
+      (DNS records and certificates). Monitoring only starts <strong>after you prove the
+      domain is yours</strong>: add the TXT record we show you to your domain's DNS, then
+      press Verify. Until then the domain is never looked at.</p>
+      <div id="domainList"></div>
+      <label>Domain <input type="text" id="domainValue" placeholder="example.com" autocomplete="off"></label>
+      <div class="rowBtns">
+        <button type="button" id="domainAddBtn">Add domain</button>
+        <span id="domainStatus" class="hint"></span>
+      </div>
 
       <h3>My permissions (consent)</h3>
       <p class="hint">Nothing here runs unless you switch it on. Switching off is instant and recorded.</p>

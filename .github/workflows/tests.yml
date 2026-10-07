@@ -1,0 +1,29 @@
+# LeakGuard test suite (Phase 106). Runs the same command a
+# developer runs locally: the full unittest discovery, against
+# pgserver's bundled Postgres — no external services, no secrets.
+# The weekly scheduled run exists so dependency or registry drift
+# (a yanked package, a changed transitive) surfaces even when
+# nobody pushed.
+name: tests
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Mondays 06:00 UTC.
+    - cron: "0 6 * * 1"
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt pgserver
+      - name: Syntax-check the frontend
+        run: node --check static/app.js
+      - name: Run the test suite
+        run: python -m unittest discover -s tests

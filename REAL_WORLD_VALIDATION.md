@@ -366,3 +366,72 @@ Social Catfish's and LexisNexis's CAPTCHA walls and Epsilon
 email channels. Agent Mode plan on production: 23 email routes.
 Baselines intact (214 / 100). Suites: pytest 625 passed / 22
 skipped; CI-parity discovery OK (skipped=2); GitHub CI green.
+
+## Addendum — automatic agent emails + one-click local runner (2026-10-09, owner order)
+
+Owner order (2026-10-08 23:31 IST): "Build both: automatic agent
+emails and the one-click on-device runner." Commits `1a1199e`
+(feature) + `a270e7e` (download-route header fix — see below).
+
+**Authorized-agent email sending.** The remediation engine now
+sends the erasure letter itself for email-channel cases, as the
+user's authorized agent under their recorded
+`automated_remediation` consent: From the service's Brevo lane,
+Reply-To set to the user so broker answers and verification
+demands reach them; the letter carries an authorized-agent footer
+naming the consent. New policy decision `letter_sent_by_agent`
+(policy.decide_email_agent_sent, replay-pinned). The mailer is
+injected by the app layer (`engine.set_agent_mailer`) so the
+remediation package's import graph is unchanged (architecture
+guard). Safety properties: a case is never agent-mailed twice
+(attempt ledger); with no lane configured or a failed send the
+case falls back to the original park-for-user behaviour with the
+letter ready, and the user's "I sent it" attestation path
+(`letter_sent_by_user`) is unchanged. Agent Mode (anonymous)
+still drafts only — agent sending requires an account's recorded
+consent.
+
+**One-click local runner.** `local_agent.py` rewritten: probe all
+40, one typed YES, then it submits every fillable form (the same
+SSRF-guarded submit the server uses), writes every email broker's
+letter as a ready-to-send `.eml` file, walks the user through
+only the human-only brokers in their own browser one page at a
+time, and writes a JSON + text run report (probe payloads — the
+user's own details — are stripped from the report). Served as a
+download at `GET /local_agent.py` (bytes only; the server never
+imports or executes the file — Phase 178 intact) with a card in
+Agent Mode. Tests: +3 agent-send engine tests, +5 runner tests
+(incl. an end-to-end download-route test).
+
+**A bug the staging gate caught:** the download route initially
+passed `extra_headers` as a dict; `_send` iterates (name, value)
+pairs, so the response crashed after the status line and staging
+answered an empty 502 for `/local_agent.py` while every other page
+was fine. Fixed in `a270e7e` (list-of-pairs, matching the export
+download) with a regression test booting the real handler.
+
+**Validation.** Suites: pytest 632 passed / 22 skipped (633 with
+the route test); CI-parity discovery Ran 620, OK (skipped=2);
+hygiene green; GitHub CI green on both commits. Staging (deploys
+dep-db3tvm2jnfac73ar65eg + dep-db3u3j3bc2fs73bvb17g): download
+route serves bytes identical to the repo file; fresh-account run
+**3 submitted / 23 needs_human / 14 blocked — broker-by-broker
+identical to the email-pass baseline**, with all 20 email cases
+parked at `email_send_required` (staging has no email lane by
+design — the fallback is the proven behaviour there). Production
+(deploy dep-db3u6s3bc2fs73bvnne0, live 2026-10-09 00:10 IST):
+fresh-account run **23 submitted / 3 needs_human / 14 blocked**;
+exactly 20 flips vs the email-pass production baseline, every one
+`needs_human/email_send_required` → `submitted /
+letter_sent_by_agent`, zero unexpected flips; the 3 form
+submissions, 3 browser_required, and 14 blocked are unchanged.
+Baselines intact (Quick Scan test@example.com: 214 breaches,
+score 100). Production anchor now `a270e7e`.
+
+Honest residue, unchanged: whether each broker honours an
+agent-sent request is settled by the verification cycle, not
+assumed at send time; brokers that demand the consumer write
+directly will reply to the user (Reply-To) and the case can be
+finished by hand. CAPTCHA/login/phone gates remain human-only —
+the runner puts those pages in front of the user on their own
+device; no attestation is ever faked.

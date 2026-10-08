@@ -254,10 +254,11 @@ input:-webkit-autofill{-webkit-box-shadow:0 0 0 60px var(--elev) inset;-webkit-t
    #181818 card, #b3b3b3 secondary text, green pill primary button.
    The page layout (single form column, soft glow above the card)
    is adapted from "Authentication Screens (Login/Register)" by
-   Muff & Nipps (Figma Community, CC BY 4.0 — attribution under the
-   form in index.html); the glow is Spotify green, not the
-   original's purple/pink. Scoped to #authForms / #resetBox plus
-   body.signinPage so the rest of the app is untouched. */
+   Muff & Nipps (Figma Community, CC BY 4.0); the glow is Spotify
+   green, not the original's purple/pink. (On-page credit line
+   removed at the owner's order, 2026-10-08.) Scoped to #authForms
+   / #resetBox plus body.signinPage so the rest of the app is
+   untouched. */
 #authForms,#resetBox{
   position:relative;overflow:hidden;isolation:isolate;
   background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
@@ -297,8 +298,6 @@ input:-webkit-autofill{-webkit-box-shadow:0 0 0 60px var(--elev) inset;-webkit-t
 }
 #authForms a{color:var(--muted)}
 #authForms a:hover{color:#fff}
-#authForms .authCredit{max-width:420px;margin-top:22px;font-size:11.5px;color:#8f8f8f}
-#authForms .authCredit a{color:#a7a7a7;text-decoration:underline}
 
 /* The dedicated page: everything except the account panel goes
    away, the panel becomes a centered card on the black page. */

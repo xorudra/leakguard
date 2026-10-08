@@ -10,7 +10,7 @@
    If registration fails (old browser, non-secure context) the app
    simply runs without a worker — this file is an enhancement,
    never a dependency. Bump the cache name to retire old shells. */
-const LG_CACHE = "leakguard-shell-v3";
+const LG_CACHE = "leakguard-shell-v4";
 const LG_SHELL = [
   "/",
   "/static/style.css",

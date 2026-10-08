@@ -19,6 +19,11 @@ Layers:
   threshold, fires on the seeded breach (audit row +
   one notification per admin, emailed via the fake lane), and a
   second evaluate() the same day does not email again (dedupe).
+  The Phase 175 scan_latency classes add: the sample-size floor
+  (extreme durations on a quiet system stay silent), the healthy
+  band staying silent above the floor, and flag-respect — the
+  rule rides the scheduler tick behind the monitoring_scheduler
+  flag, so a flagged-off tick never evaluates it.
 * TestSchedulerAlertGuard — no database: a raising alerts
   evaluator cannot break scheduler.tick().
 
@@ -623,6 +628,132 @@ class TestAlertErrorSpikeDb(AlertDbBase, unittest.TestCase):
         fired = self.fired_rules(alerts.evaluate())
         self.assertGreaterEqual(fired["error_spike"]["observed"], 20)
         self.assert_alert_delivered_once("error_spike")
+
+
+class TestAlertScanLatencyDb(AlertDbBase, unittest.TestCase):
+    """Phase 175: the latency rule needs BOTH legs — a median at
+    or over 120 s AND at least 10 completed jobs in 24 h."""
+
+    def seed_done(self, key, duration_seconds):
+        self.seed_job(key, "done", created_ago=duration_seconds + 60,
+                      started_ago=duration_seconds, finished_ago=0)
+
+    def test_latency_fires_at_sample_floor_and_dedupes(self):
+        from monitoring import alerts
+
+        # 9 slow jobs: median 180 s, but below the sample floor —
+        # the rule must stay silent.
+        for i in range(9):
+            self.seed_done("slow-%d" % i, 180)
+        self.assertNotIn("scan_latency",
+                         self.fired_rules(alerts.evaluate()))
+        # The 10th slow job completes the sample: median 180 >= 120.
+        self.seed_done("slow-9", 180)
+        fired = self.fired_rules(alerts.evaluate())
+        self.assertIn("scan_latency", fired)
+        hit = fired["scan_latency"]
+        self.assertEqual(hit["metric"],
+                         "median_scan_duration_seconds_24h")
+        self.assertEqual(hit["observed"], 180)
+        self.assertEqual(hit["threshold"], 120)
+        self.assert_alert_delivered_once("scan_latency")
+        # The audit detail carries the sample size as a flat scalar.
+        audit_row = self.db_one(
+            "SELECT * FROM audit_log"
+            " WHERE action = 'engineering_alert'"
+            " AND target_id = 'scan_latency'")
+        self.assertEqual(
+            audit_row["detail"]["completed_jobs_24h"], 10)
+        # A second pass the same day fires again but does not email
+        # again — the repeat lands 'suppressed' (dedupe discipline).
+        self.assertIn("scan_latency",
+                      self.fired_rules(alerts.evaluate()))
+        self.assert_alert_delivered_once("scan_latency")
+        suppressed = self.db_all(
+            "SELECT * FROM notifications WHERE user_id = %s"
+            " AND kind = 'engineering_alert'"
+            " AND status = 'suppressed'",
+            (self.admin_id,))
+        self.assertEqual(len(suppressed), 1, suppressed)
+
+
+class TestAlertScanLatencySampleFloorDb(AlertDbBase,
+                                       unittest.TestCase):
+    """A quiet system must never fire on a few extreme jobs."""
+
+    def test_extreme_durations_below_sample_floor_stay_silent(self):
+        from monitoring import alerts
+
+        for i in range(3):
+            self.seed_job("huge-%d" % i, "done", created_ago=3700,
+                          started_ago=3600, finished_ago=0)
+        self.assertNotIn("scan_latency",
+                         self.fired_rules(alerts.evaluate()))
+        rows = self.db_all(
+            "SELECT * FROM notifications WHERE user_id = %s"
+            " AND kind = 'engineering_alert'",
+            (self.admin_id,))
+        self.assertEqual(rows, [])
+
+
+class TestAlertScanLatencyFastDb(AlertDbBase, unittest.TestCase):
+    """Above the sample floor but inside the healthy band: silent."""
+
+    def test_fast_median_stays_silent(self):
+        from monitoring import alerts
+
+        for i in range(12):
+            self.seed_job("fast-%d" % i, "done", created_ago=70,
+                          started_ago=10, finished_ago=0)
+        self.assertNotIn("scan_latency",
+                         self.fired_rules(alerts.evaluate()))
+        rows = self.db_all(
+            "SELECT * FROM notifications WHERE user_id = %s"
+            " AND kind = 'engineering_alert'",
+            (self.admin_id,))
+        self.assertEqual(rows, [])
+
+
+class TestAlertScanLatencyFlagDb(AlertDbBase, unittest.TestCase):
+    """The rule rides evaluate(), which only runs from the
+    scheduler tick — behind the monitoring_scheduler flag, like
+    every other rule (Phase 77 placement). Flag off: the tick
+    never evaluates, so no latency alert can be delivered."""
+
+    def test_latency_rule_respects_scheduler_flag(self):
+        from monitoring import alerts, scheduler
+
+        for i in range(10):
+            self.seed_job("flag-slow-%d" % i, "done",
+                          created_ago=240, started_ago=180,
+                          finished_ago=0)
+        calls = []
+        saved_evaluate = alerts.evaluate
+
+        def counting_evaluate():
+            calls.append(1)
+            return saved_evaluate()
+
+        alerts.evaluate = counting_evaluate
+        os.environ["LEAKGUARD_FLAG_MONITORING_SCHEDULER"] = "off"
+        try:
+            self.assertEqual(scheduler.tick(), [])
+            self.assertEqual(calls, [])
+            rows = self.db_all(
+                "SELECT * FROM notifications WHERE user_id = %s"
+                " AND kind = 'engineering_alert'",
+                (self.admin_id,))
+            self.assertEqual(rows, [])
+            # Flag back on: the same tick now evaluates and the
+            # seeded breach is delivered exactly once.
+            del os.environ["LEAKGUARD_FLAG_MONITORING_SCHEDULER"]
+            scheduler.tick()
+        finally:
+            alerts.evaluate = saved_evaluate
+            os.environ.pop("LEAKGUARD_FLAG_MONITORING_SCHEDULER",
+                           None)
+        self.assertEqual(len(calls), 1)
+        self.assert_alert_delivered_once("scan_latency")
 
 
 class TestSchedulerAlertGuard(unittest.TestCase):

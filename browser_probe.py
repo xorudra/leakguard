@@ -20,6 +20,19 @@ Domain allowlist (Phase 166): the probe only visits broker domains
 config list (LEAKGUARD_PROBE_EXTRA_DOMAINS / probe_domains.txt).
 Off-list targets are refused before launch; off-list requests or
 redirects inside the browser are aborted and recorded in 'refused'.
+
+Local-only status (Phase 178 decision, docs/DOC_REVIEW.md): this
+script imports no project code and is never imported by the
+server. The single spawn path is agent.py's subprocess call in
+its deep-probe chain (used by local_agent.py and, in deep mode,
+by the anonymous POST /api/agent/probe route). On the deployed
+server Playwright and Chromium are deliberately NOT installed
+(they live in requirements-optional.txt, not requirements.txt),
+so there probe() reports "Playwright not installed on this
+server" instead of launching anything; LEAKGUARD_NO_BROWSER=1
+disables the spawn outright. The account remediation engine
+never uses this layer — it records the browser step as skipped
+on_server (remediation/engine.py).
 """
 
 import json

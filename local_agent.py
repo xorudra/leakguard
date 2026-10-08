@@ -21,6 +21,14 @@ Usage (Python 3, no dependencies):
 Nothing is sent anywhere except the brokers' own opt-out pages (GET
 requests to read them). Submissions are never made by this script —
 you submit in your browser, where you can see exactly what happens.
+
+LOCAL-ONLY (Phase 178 decision, docs/DOC_REVIEW.md): this file is a
+user-run device tool. The LeakGuard server never imports or
+executes it — app.py and every server package have zero references
+to it (grep audit, 2026-10-08). Its only project import is the
+`agent` engine, shared with the server. It ships in the repo so a
+user can download and run it on their own machine; deleting it
+would remove the walled-broker path, not any server surface.
 """
 
 import argparse

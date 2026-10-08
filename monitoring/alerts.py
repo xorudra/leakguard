@@ -38,6 +38,37 @@ Rules (thresholds are the module constants below):
                       first exhausted provider and the full list.
                       One alert per day for the rule as a whole —
                       never one email per provider.
+* scan_latency      — the MEDIAN completed-scan duration over
+                      the trailing 24 h (the exact figure the
+                      admin metrics surface as
+                      median_completed_duration_seconds_last_24h:
+                      percentile_cont(0.5) over
+                      finished_at - started_at for status 'done')
+                      >= 120 s, across >= 10 completed jobs.
+                      Threshold arithmetic (operator judgment,
+                      same standard as the rules above): the
+                      healthy band measured in P2-B and on live
+                      deploys is seconds per job — the mock
+                      worker drains ~7 jobs/s locally, live
+                      full-scan jobs complete in seconds, and
+                      the slowest healthy figure ever recorded
+                      is the P1-era ~60 s for a whole 214-identity
+                      cycle's convergence over the
+                      Oregon->Singapore link, not one job. A
+                      120 s MEDIAN is therefore >= 2x the worst
+                      healthy single-job band: the typical job,
+                      not one monster profile, has become slower
+                      than the slowest healthy cycle — provider
+                      slowdown, database latency, or instance
+                      contention. The median (not the mean) is
+                      deliberate: a few legitimately huge
+                      profiles must not be able to fire it. The
+                      >= 10 completed-jobs floor is the other
+                      half: below it a "median" is one or two
+                      jobs' weather (a cold Neon wake adds
+                      seconds to the first query after idle),
+                      so a quiet system can never fire this rule
+                      on a single slow job.
 
 On a trigger, for each fired rule:
 * an audit row (actor_kind 'system', action 'engineering_alert',
@@ -68,6 +99,8 @@ DEAD_JOBS_24H_THRESHOLD = 3
 FAILED_CASES_24H_THRESHOLD = 5
 UNREACHABLE_SOURCES_THRESHOLD = 5
 ERROR_OCCURRENCES_1H_THRESHOLD = 20
+SCAN_LATENCY_MEDIAN_SECONDS = 120
+SCAN_LATENCY_MIN_COMPLETED_24H = 10
 
 
 def _queue_buildup(conn):
@@ -156,6 +189,31 @@ def _provider_budget(conn):
                       "exhausted_providers": ", ".join(exhausted)}}
 
 
+def _scan_latency(conn):
+    # The same computation the admin metrics publish as
+    # median_completed_duration_seconds_last_24h (accounts/
+    # admin.py) — one definition of "scan duration" everywhere:
+    # worker execution time (finished_at - started_at) of jobs
+    # completed in the trailing 24 h.
+    row = conn.execute(
+        "SELECT percentile_cont(0.5) WITHIN GROUP"
+        " (ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at)))"
+        " AS med, COUNT(*) AS n FROM scan_jobs"
+        " WHERE status = 'done' AND started_at IS NOT NULL"
+        " AND finished_at >= now() - interval '24 hours'",
+    ).fetchone()
+    med, completed = row["med"], int(row["n"])
+    if med is None or completed < SCAN_LATENCY_MIN_COMPLETED_24H:
+        return None
+    if float(med) >= SCAN_LATENCY_MEDIAN_SECONDS:
+        return {"rule": "scan_latency",
+                "metric": "median_scan_duration_seconds_24h",
+                "observed": int(float(med)),
+                "threshold": SCAN_LATENCY_MEDIAN_SECONDS,
+                "extra": {"completed_jobs_24h": completed}}
+    return None
+
+
 def _error_spike(conn):
     total = conn.execute(
         "SELECT COALESCE(SUM(occurrence_count), 0) AS n"
@@ -173,7 +231,7 @@ def _error_spike(conn):
 
 
 _RULES = (_queue_buildup, _worker_failures, _provider_outage,
-          _error_spike, _provider_budget)
+          _error_spike, _provider_budget, _scan_latency)
 
 
 def _deliver(fired):

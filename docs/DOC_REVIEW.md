@@ -265,3 +265,130 @@ stale; §10 PASS. No silent rewrites: every change to
 MIGRATION_PLAN.md in this review is a dated, marked annotation or
 correction, and `PHASE_STATUS.md` remains the live authority the
 annotations point to.
+
+---
+
+## Phase 178 — Codebase cleanup decision: the local-only tools
+
+**Date:** 2026-10-08 · **Reviewer:** automated review (agent) ·
+**Question put by the phase:** `local_agent.py`,
+`proxy_relay.py`, and `browser_probe.py` sit at the repo root
+beside the server entry point. Keep them as documented
+local-only surface, or remove them? This section is the audit
+and the decision; it is recorded here because this file is the
+standing record for review phases (131, 132 above) and the
+decision is a review outcome, not a feature.
+
+### Audit method
+
+Three sweeps over the tracked tree (`.git` and `__pycache__`
+excluded):
+
+1. **Reference sweep** — every mention of the three filenames
+   in code, tests, tools, docs, and config
+   (`grep -rn -E "local_agent|proxy_relay|browser_probe"`).
+2. **Server-graph sweep** — the same grep restricted to the
+   shipped server: `app.py` + the nine packages (`core`,
+   `accounts`, `providers`, `scanning`, `remediation`,
+   `monitoring`, `dashboard`, `db`, `vault`) + `agent.py`.
+3. **Import audit** — the AST import scan in
+   `tests/test_architecture.py` (the Phase 1 record), re-run
+   for this review and extended (below).
+4. **Dead-file sweep** — every root-level script and every
+   `tools/*.py` checked for at least one reference from code,
+   tests, tools, or docs.
+
+### Audit results
+
+**Server imports: none.** Sweep 2 found **zero** references to
+any of the three filenames in `app.py` or any server package.
+The import audit agrees: `local_agent.py` imports only `agent`;
+`browser_probe.py` and `proxy_relay.py` import **no project
+code at all**. Nothing in the server's import graph can reach
+them.
+
+**`local_agent.py` — referenced by:** README (the "On your own
+device" path, its reason to exist), `tests/test_architecture.py`,
+and the status docs. **Purpose (live):** the user-run runner
+for Cloudflare-walled brokers — same `agent` engine, user's
+own device and IP, never submits anything itself.
+
+**`proxy_relay.py` — referenced by:** README,
+`requirements-optional.txt`, `tools/mobile_viewport_check.py`,
+`tools/a11y_check.py` (both live-site check tools start it when
+it is down, so headless Chromium can traverse this VM's
+authenticated egress proxy), and the status docs. **Purpose
+(live):** the local CONNECT relay those tools and the local
+browser probe (`LEAKGUARD_BROWSER_PROXY`) depend on.
+
+**`browser_probe.py` — referenced by:** `agent.py`,
+`tests/test_browser_probe.py` (the Phase 166 allowlist suite),
+the two `tools/` checks (as the documented pattern),
+README, and the status docs. **Purpose (live):** the local
+Playwright probe for JavaScript-walled opt-out pages.
+
+**One nuance the audit surfaced — recorded, not smoothed.**
+The only code path that can *execute* `browser_probe.py` is
+`agent.py::browser_probe()` (a subprocess spawn — never an
+import), reached from `agent.probe_with_browser_fallback`.
+That chain has two callers: `local_agent.py` (the expected
+one) and the server's anonymous Agent Mode route
+`POST /api/agent/probe` with `deep: true` (`app.py`). So
+"local-only" is precise about imports and *almost* precise
+about execution; the exception is bounded by four facts, all
+verified in code: (1) the spawn is subprocess-isolated with a
+timeout — a hung page cannot hang the server; (2) the route
+is per-IP rate-limited (`agent_probe`); (3) the probe enforces
+the Phase 166 domain allowlist before Playwright is even
+imported; (4) on the deployed server the layer is inert —
+Playwright/Chromium are deliberately not installed
+(`requirements-optional.txt` only), so `probe()` returns its
+honest "Playwright not installed on this server" blocker
+instead of launching anything, and `LEAKGUARD_NO_BROWSER=1`
+disables the spawn outright. The account remediation engine
+never touches this path at all: it re-implements the chain's
+HTTP/relay layers and records the browser step as
+`{"step": "browser", "skipped": "on_server"}` in every
+attempt trail (`remediation/engine.py`).
+
+**Dead-file sweep: nothing dead.** All five root scripts
+(`app.py`, `agent.py`, the three under review) and all five
+`tools/*.py` files are referenced by at least one of code,
+tests, tools, or docs. There is no file in the tracked tree
+that this audit can prove purposeless.
+
+### Decision
+
+**KEEP all three as documented local-only surface.** Each has
+a live, named purpose (above) that removal would destroy:
+the walled-broker device path (`local_agent.py`), the local
+probe it and the Agent Mode deep probe use
+(`browser_probe.py`), and the relay the probe and the repo's
+own live-site checks require on proxy-locked networks
+(`proxy_relay.py`). Removal is the right answer only for
+provably purposeless code, and the sweep proves the opposite.
+
+**Removal candidates: none.** Nothing met the proof bar
+(unreferenced by code, tests, tools, *and* docs), so nothing
+was deleted in this phase. If a future audit finds a file
+that does meet it, this section is the template: name the
+file, cite the sweep, then delete.
+
+### Applied in this pass
+
+- **Header sharpening** — each of the three files now states
+  its local-only status, its purpose, and the server fact in
+  its own docstring: `local_agent.py` and `proxy_relay.py`
+  ("never imported or executed by the server"),
+  `browser_probe.py` (the precise form: never imported; the
+  one spawn path, its deployed-server inertness, and the
+  remediation engine's `skipped: on_server` recorded).
+- **Architecture pins** — `tests/test_architecture.py` gains
+  `test_app_never_imports_local_only_scripts` (the server
+  entry point's AST imports exclude all three — the existing
+  package-level pin did not cover `app.py` itself) and
+  `test_local_only_scripts_stay_local` (`local_agent` reaches
+  only `agent`; the probe and relay import no project code),
+  so the fact this decision rests on fails CI if it ever
+  stops being true.
+- No server code was changed, and no file was deleted.

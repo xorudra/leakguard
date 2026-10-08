@@ -158,6 +158,32 @@ def test_agent_engine_imports_only_core():
     assert all_ - {"core"} == set(), f"agent.py imports {all_ - {'core'}}"
 
 
+# --- Phase 178 (2026-10-08): the local-only scripts stay local ---
+# The keep-as-local-surface decision (docs/DOC_REVIEW.md, Phase
+# 178) rests on the server never importing these three; pin that
+# at the import-graph level, beyond the package-level pin above
+# (test_packages_never_import_entry_scripts covers the packages;
+# these cover the server entry point itself and the scripts' own
+# imports). agent.py spawning browser_probe.py as a subprocess is
+# not an import and stays permitted — it is the documented,
+# allowlist-guarded local path.
+
+def test_app_never_imports_local_only_scripts():
+    _top, all_ = _project_imports(REPO / "app.py", "app")
+    bad = all_ & {"local_agent", "browser_probe", "proxy_relay"}
+    assert bad == set(), f"app.py imports local-only scripts {bad}"
+
+
+def test_local_only_scripts_stay_local():
+    _top, all_ = _project_imports(REPO / "local_agent.py",
+                                  "local_agent")
+    assert all_ - {"agent"} == set(), (
+        f"local_agent.py imports {all_ - {'agent'}}")
+    for script in ("browser_probe", "proxy_relay"):
+        _top, all_ = _project_imports(REPO / (script + ".py"), script)
+        assert all_ == set(), f"{script}.py imports project code {all_}"
+
+
 def test_nothing_but_app_imports_dashboard():
     for package in PACKAGES:
         if package == "dashboard":

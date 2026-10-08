@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 """Local no-auth CONNECT relay -> upstream authenticated proxy (from env).
 Forwards CONNECT using Python sockets (which the upstream accepts), so
-Chromium can use http://127.0.0.1:8899 without credentials."""
+Chromium can use http://127.0.0.1:8899 without credentials.
+
+LOCAL-ONLY (Phase 178 decision, docs/DOC_REVIEW.md): a development
+tool for proxy-locked networks like this project's dev VM. The
+LeakGuard server never imports or executes it — app.py and every
+server package have zero references to it (grep audit,
+2026-10-08), and it imports no project code. Its live users are
+the local browser probe (via LEAKGUARD_BROWSER_PROXY) and the
+repo's live-site check tools (tools/mobile_viewport_check.py,
+tools/a11y_check.py), which start it when it is not running.
+"""
 import base64
 import os
 import select

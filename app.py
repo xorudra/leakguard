@@ -449,9 +449,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, "not found", "text/plain")
             return self._send(
                 200, data, "text/x-python; charset=utf-8",
-                extra_headers={
-                    "Content-Disposition":
-                        'attachment; filename="local_agent.py"'})
+                extra_headers=[(
+                    "Content-Disposition",
+                    'attachment; filename="local_agent.py"')])
         if route == "/.well-known/security.txt":
             # RFC 9116 security contact (Stage S13). Static text —
             # served by the app itself, database or not.

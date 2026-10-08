@@ -11,12 +11,20 @@ sends nothing at all.
 
 import importlib.util
 import json
+import os
+import sys
 import tempfile
+import threading
 import unittest
+import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+import app as app_mod  # noqa: E402
 
 
 def _load_runner():
@@ -131,6 +139,54 @@ class TestLocalRunner(unittest.TestCase):
         self.assertIn("Rudra", body)
         self.assertIn("rudra@example.com", body)
         self.assertIn("MailBroker", body)
+
+
+class TestRunnerDownloadRoute(unittest.TestCase):
+    """GET /local_agent.py serves the runner file as a download.
+
+    Regression pin: the route first shipped passing extra_headers
+    as a dict, which crashed _send mid-response (live staging
+    answered an empty 502 while every other page was fine). The
+    route is DB-free by design, so this boots the real handler
+    with no database configured."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._saved = {k: os.environ.get(k) for k in
+                      ("DATABASE_URL", "MIGRATION_DATABASE_URL")}
+        for key in cls._saved:
+            os.environ.pop(key, None)
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), app_mod.Handler)
+        cls.port = cls.server.server_address[1]
+        cls.thread = threading.Thread(target=cls.server.serve_forever,
+                                      daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        for key, value in cls._saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    def test_download_serves_the_runner_file(self):
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}))
+        with opener.open(
+                f"http://127.0.0.1:{self.port}/local_agent.py",
+                timeout=10) as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertIn("attachment",
+                          resp.headers.get("Content-Disposition", ""))
+            self.assertIn("local_agent.py",
+                          resp.headers.get("Content-Disposition", ""))
+            body = resp.read().decode("utf-8")
+        self.assertIn("LeakGuard Local Runner", body)
+        self.assertEqual(
+            body, (REPO / "local_agent.py").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

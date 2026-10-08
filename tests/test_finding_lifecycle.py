@@ -629,6 +629,17 @@ class TestLifecycleMigrationUpgrade(PgClassMixin, AccountMixin,
                 conn.execute(
                     "INSERT INTO schema_migrations (name) VALUES (%s)",
                     (path.name,))
+            # 0017 (sign-up name, 2026-10-08) is pre-applied out of
+            # order: current auth code writes users.name_ciphertext
+            # when this class's fixture registers, and 0017 is
+            # independent of the 0012 backfill under test — the
+            # runner in the test must still apply exactly 0012-0016.
+            path17 = [p for p in cls.migrate.migration_files()
+                      if p.name.startswith("0017")][0]
+            conn.execute(path17.read_text(encoding="utf-8"))
+            conn.execute(
+                "INSERT INTO schema_migrations (name) VALUES (%s)",
+                (path17.name,))
         from remediation import registry_seed
 
         registry_seed.seed_brokers()
@@ -690,6 +701,7 @@ class TestLifecycleMigrationUpgrade(PgClassMixin, AccountMixin,
         # touch no findings lifecycle state (0015 adds
         # default-false dq flag columns only; 0016 adds a
         # nullable column to remediation_attempts only).
+        # 0017 was pre-applied in setUpClass (see there).
         self.assertEqual(applied, ["0012_finding_lifecycle.sql",
                                    "0013_error_events.sql",
                                    "0014_provider_usage.sql",

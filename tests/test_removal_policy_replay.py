@@ -169,6 +169,14 @@ class TestPolicyDecisions(unittest.TestCase):
         self.assertEqual(
             policy.derive_channel({"contact_email": "o@example.com"},
                                   {"automation": "http_form"}), "email")
+        # The proven-form exception (2026-10-08): a broker whose
+        # form demonstrably submits from the server keeps the form
+        # channel even with a published email on file.
+        self.assertEqual(
+            policy.derive_channel(
+                {"name": "Spokeo",
+                 "contact_email": "privacy@spokeo.com"},
+                {"automation": "http_form"}), "form")
         self.assertEqual(
             policy.derive_channel({}, {"automation": "http_form"}),
             "form")

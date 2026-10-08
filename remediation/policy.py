@@ -107,10 +107,22 @@ def spec_state_name(internal_status):
 # now delegates here; the seed calls this once per broker at seed time)
 # ---------------------------------------------------------------------------
 
+# Brokers whose web form is PROVEN to submit from the server
+# (production evidence, 2026-10-07/08: Spokeo, CheckPeople and
+# Data Axle removals submitted with HTTP 200 in live runs). They
+# also publish a contact email — recorded in brokers.json for the
+# Agent Mode letter fallback — but the form stays their account
+# channel: a working submission beats a letter the user must send.
+_FORM_CHANNEL_BROKERS = {"Spokeo", "CheckPeople", "Data Axle (InfoUSA)"}
+
+
 def derive_channel(broker, playbook):
-    """How a broker is worked: a direct contact address always wins
-    (email); otherwise a fillable HTTP opt-out form (form); whatever
-    is left needs the user's own browser (manual)."""
+    """How a broker is worked: the proven-form brokers above keep
+    the form channel; otherwise a direct contact address wins
+    (email); otherwise a fillable HTTP opt-out form (form);
+    whatever is left needs the user's own browser (manual)."""
+    if broker.get("name") in _FORM_CHANNEL_BROKERS:
+        return "form"
     if broker.get("contact_email"):
         return "email"
     if playbook and playbook.get("automation") == "http_form":

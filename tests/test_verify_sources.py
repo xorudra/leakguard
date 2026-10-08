@@ -689,6 +689,26 @@ class TestVerifySourcesDb(ServerMixin, unittest.TestCase):
         spokeo = cases["Spokeo"]
         truthfinder = cases["TruthFinder"]
         self.assertEqual(spokeo["status"], "submitted")
+        # TruthFinder gained a published privacy email in the
+        # 2026-10-08 email-coverage pass, so its case takes the
+        # email channel: the letter is parked for the user first.
+        # Confirm "I sent it" (the retry action) and drain once
+        # more — the case reaches submitted by the user's own hand,
+        # which is what the verification flow below checks.
+        self.assertEqual(truthfinder["status"], "needs_human")
+        self.assertEqual(truthfinder["reason"], "email_send_required")
+        status, _h, body = self.request_json(
+            "POST", "/api/remediation/cases/%s/retry"
+            % truthfinder["id"], body={}, headers=CSRF, cookie=cookie)
+        self.assertEqual(status, 200, body)
+        stub = DrainStubExecutor()
+        while worker_mod.run_once(stub):
+            pass
+        status, _h, body = self.request_json(
+            "GET", "/api/remediation/cases", cookie=cookie)
+        self.assertEqual(status, 200, body)
+        cases = {c["broker_name"]: c for c in body["cases"]}
+        truthfinder = cases["TruthFinder"]
         self.assertEqual(truthfinder["status"], "submitted")
 
         fetcher = StubFetcher(routes={

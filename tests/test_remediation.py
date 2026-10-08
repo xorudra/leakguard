@@ -760,7 +760,10 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
         self.assertEqual(sp["channel"], "form")
         wp = self.db_row("SELECT channel FROM brokers"
                          " WHERE slug = 'whitepages'", ())
-        self.assertEqual(wp["channel"], "manual")
+        # Whitepages gained its published opt-out email
+        # (support@whitepages.com, its own privacy policy) in the
+        # 2026-10-08 email-coverage pass: manual -> email.
+        self.assertEqual(wp["channel"], "email")
 
     def test_brokers_db_shape_matches_file(self):
         status, _h, body = self.request_json("GET", "/api/brokers")
@@ -804,12 +807,18 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
         self.set_consent(cookie, "automated_remediation", True)
         self.run_removal(cookie)
         stub = StubExecutor()
-        stub.probe_by_broker["Social Catfish"] = {
+        # The CAPTCHA and login legs run on ThatsThem / USPhoneBook:
+        # Social Catfish and PeopleFinders gained published removal
+        # emails in the 2026-10-08 email-coverage pass and now take
+        # the email channel (their cases park at email_send_required
+        # like BeenVerified's below) — the form-blocker behaviours
+        # are exercised on brokers that remain form-channel.
+        stub.probe_by_broker["ThatsThem"] = {
             "reachable": True, "status": 200, "fillable": False,
             "forms": [], "payload_preview": {},
             "blockers": ["CAPTCHA on the page — a human must solve "
                          "this step"]}
-        stub.probe_by_broker["PeopleFinders"] = {
+        stub.probe_by_broker["USPhoneBook"] = {
             "reachable": True, "status": 200, "fillable": False,
             "forms": [], "payload_preview": {},
             "blockers": ["Asks for account login — removal must be "
@@ -829,11 +838,11 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
         self.assertGreaterEqual(attempts["n"], 2)  # probe + submit
         self.assertEqual(stub.submits_for(email, "Spokeo"), ["Spokeo"])
 
-        catfish = self.case_for(cookie, "Social Catfish")
+        catfish = self.case_for(cookie, "ThatsThem")
         self.assertEqual(catfish["status"], "needs_human")
         self.assertEqual(catfish["reason"], "captcha")
 
-        pf = self.case_for(cookie, "PeopleFinders")
+        pf = self.case_for(cookie, "USPhoneBook")
         self.assertEqual(pf["status"], "needs_human")
         self.assertEqual(pf["reason"], "login_required")
 
@@ -860,9 +869,9 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
         self.assertIn("Digital Personal Data Protection Act",
                       item["body"])
         # The CAPTCHA case is in the queue too, pointing at the page.
-        self.assertEqual(queue["Social Catfish"]["action"], "open_optout")
-        self.assertIn("socialcatfish.com",
-                      queue["Social Catfish"]["url"])
+        self.assertEqual(queue["ThatsThem"]["action"], "open_optout")
+        self.assertIn("thatsthem.com",
+                      queue["ThatsThem"]["url"])
 
         # No double submit: the queue is empty; draining again is a
         # no-op and the stub sees no new submits for this user.
@@ -893,23 +902,27 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
         self.set_consent(cookie, "automated_remediation", True)
         self.run_removal(cookie)
         stub = StubExecutor()
-        stub.probe_by_broker["Epsilon"] = {
+        # The missing-field leg runs on TransUnion: Epsilon gained
+        # a published opt-out email in the 2026-10-08 email-coverage
+        # pass and now takes the email channel, whose letter flow
+        # does not exercise the form-field path this test pins.
+        stub.probe_by_broker["TransUnion"] = {
             "reachable": True, "status": 200, "fillable": False,
             "payload_preview": {}, "blockers": [],
-            "forms": [{"action": "https://legal.epsilon.com/dsr",
+            "forms": [{"action": "https://www.transunion.com/optout",
                        "method": "POST",
                        "fields": [{"name": "city", "id": "",
                                    "placeholder": "", "type": "text"}],
                        "unmapped_fields": ["city"]}]}
         self.drain(stub)
-        eps = self.case_for(cookie, "Epsilon")
+        eps = self.case_for(cookie, "TransUnion")
         self.assertEqual(eps["status"], "needs_human")
         self.assertEqual(eps["reason"], "missing_field:city")
         # The queue note names the missing detail in plain words.
         status, _h, body = self.request_json(
             "GET", "/api/remediation/queue", cookie=cookie)
         item = {q["broker_name"]: q
-                for q in body["queue"]}["Epsilon"]
+                for q in body["queue"]}["TransUnion"]
         self.assertEqual(item["action"], "open_optout")
         self.assertIn("city", item["note"])
 
@@ -1084,6 +1097,20 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
             self.assertEqual(body["case"]["status"], "reappeared")
 
             # mark_reappeared: the external-evidence flip.
+            # TruthFinder takes the email channel since the
+            # 2026-10-08 email-coverage pass: confirm the letter
+            # ("I sent it") first so its case is submitted, the
+            # state this leg verifies from.
+            tf = self.case_for(cookie, "TruthFinder")
+            self.assertEqual(tf["status"], "needs_human")
+            self.assertEqual(tf["reason"], "email_send_required")
+            status, _h, body = self.request_json(
+                "POST", "/api/remediation/cases/%s/retry" % tf["id"],
+                body={}, headers=CSRF, cookie=cookie)
+            self.assertEqual(status, 200, body)
+            self.drain(stub)
+            self.assertEqual(self.case_for(cookie, "TruthFinder")
+                             ["status"], "submitted")
             stub.verify_by_broker["TruthFinder"] = "gone"
             tf = self.case_for(cookie, "TruthFinder")
             self.request_json(

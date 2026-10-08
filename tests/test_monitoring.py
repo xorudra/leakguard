@@ -1019,6 +1019,23 @@ class TestMonitoringServiceDb(PgClassMixin, LaneMixin, AccountMixin,
             "GET", "/api/remediation/cases", cookie=cookie)
         cases = {c["broker_name"]: c for c in body["cases"]}
         self.assertEqual(cases["Spokeo"]["status"], "submitted")
+        # TruthFinder takes the email channel since the 2026-10-08
+        # email-coverage pass: its case parks with a ready letter.
+        # Confirm "I sent it" (retry) and drain again so the case
+        # is submitted — the state the reappeared wiring exercises.
+        tf = cases["TruthFinder"]
+        self.assertEqual(tf["status"], "needs_human")
+        self.assertEqual(tf["reason"], "email_send_required")
+        status, _h, body = self.request_json(
+            "POST", "/api/remediation/cases/%s/retry" % tf["id"],
+            body={}, headers=CSRF, cookie=cookie)
+        self.assertEqual(status, 200, body)
+        worked = 0
+        while worked < 500 and remediation_worker.run_once(stub):
+            worked += 1
+        status, _h, body = self.request_json(
+            "GET", "/api/remediation/cases", cookie=cookie)
+        cases = {c["broker_name"]: c for c in body["cases"]}
         self.assertEqual(cases["TruthFinder"]["status"], "submitted")
 
         original = engine_mod.AgentExecutor

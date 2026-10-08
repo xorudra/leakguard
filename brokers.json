@@ -1,10 +1,11 @@
 [
   {
-    "method": "Web form — search your listing, paste its URL, confirm by email",
+    "method": "Web form — search your listing, paste its URL, confirm by email; or email a removal request to privacy@spokeo.com",
     "name": "Spokeo",
     "optout_url": "https://www.spokeo.com/optout",
     "region": "US / Global",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "privacy@spokeo.com"
   },
   {
     "method": "Web form — find your record, submit opt-out, confirm by email",
@@ -17,18 +18,20 @@
     "contact_email_alt": "privacy@beenverified.com"
   },
   {
-    "method": "Suppression request — find listing, verify by phone call",
+    "method": "Suppression request — find listing, verify by phone call; or email an opt-out request to support@whitepages.com",
     "name": "Whitepages",
     "optout_url": "https://www.whitepages.com/suppression-requests",
     "region": "US",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "support@whitepages.com"
   },
   {
-    "method": "Web form — find your record and request removal",
+    "method": "Web form — find your record and request removal; removal requests can also be emailed to support@truepeoplesearch.com",
     "name": "TruePeopleSearch",
     "optout_url": "https://www.truepeoplesearch.com/removal",
     "region": "US",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "support@truepeoplesearch.com"
   },
   {
     "method": "Web form — find your record and request removal",
@@ -38,32 +41,36 @@
     "type": "People search"
   },
   {
-    "method": "Web form — search, select record, confirm by email",
+    "method": "Web form — search, select record, confirm by email; privacy-rights requests also by email to customercare@peoplefinders.com",
     "name": "PeopleFinders",
     "optout_url": "https://www.peoplefinders.com/opt-out",
     "region": "US",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "customercare@peoplefinders.com"
   },
   {
-    "method": "Privacy centre — submit opt-out with the email on the record",
+    "method": "Privacy centre — submit opt-out with the email on the record; privacy-rights requests also by email to privacy@intelius.com",
     "name": "Intelius",
     "optout_url": "https://www.intelius.com/opt-out",
     "region": "US",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "privacy@intelius.com"
   },
   {
-    "method": "Web form — find record via suppression tool",
+    "method": "Web form — find record via suppression tool; privacy-rights requests also by email to privacy@truthfinder.com",
     "name": "TruthFinder",
     "optout_url": "https://www.truthfinder.com/opt-out",
     "region": "US",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "privacy@truthfinder.com"
   },
   {
-    "method": "Web form — find record via suppression tool",
+    "method": "Web form — find record via suppression tool; privacy-rights requests also by email to privacy@instantcheckmate.com",
     "name": "Instant Checkmate",
     "optout_url": "https://www.instantcheckmate.com/opt-out",
     "region": "US",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "privacy@instantcheckmate.com"
   },
   {
     "method": "Web form — claim/remove your profile page",
@@ -92,14 +99,16 @@
     "name": "MyLife",
     "optout_url": "https://www.mylife.com/privacy",
     "region": "US",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "privacy@mylife.com"
   },
   {
-    "method": "Web form — find and remove your record",
+    "method": "Web form — find and remove your record; removal requests can also be emailed to support@checkpeople.com",
     "name": "CheckPeople",
     "optout_url": "https://checkpeople.com/opt-out",
     "region": "US",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "support@checkpeople.com"
   },
   {
     "method": "Privacy page — opt-out via BeenVerified suppression tool",
@@ -131,11 +140,12 @@
     "type": "People search"
   },
   {
-    "method": "Web form via BeenVerified's opt-out portal (NeighborWho's own flow redirects there) — find and remove your record",
+    "method": "Web form via BeenVerified's opt-out portal (NeighborWho's own flow redirects there) — find and remove your record; or email a removal request to privacy@neighborwho.com",
     "name": "NeighborWho",
     "optout_url": "https://www.beenverified.com/svc/optout/search/optouts",
     "region": "US",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "privacy@neighborwho.com"
   },
   {
     "method": "Web form — submit record URL from your profile page",
@@ -152,18 +162,20 @@
     "type": "People search"
   },
   {
-    "method": "Web form / email — request record removal",
+    "method": "Web form / email — request record removal (privacyrequests@socialcatfish.com)",
     "name": "Social Catfish",
     "optout_url": "https://socialcatfish.com/opt-out",
     "region": "US / Global",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "privacyrequests@socialcatfish.com"
   },
   {
-    "method": "Web form — find and remove your record",
+    "method": "Web form — find and remove your record; removal requests also by email to privacy@infotracer.com",
     "name": "InfoTracer",
     "optout_url": "https://infotracer.com/optout/",
     "region": "US",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "privacy@infotracer.com"
   },
   {
     "method": "Web form — submit your PeekYou profile URL",
@@ -180,11 +192,12 @@
     "type": "People search"
   },
   {
-    "method": "Web form — removal request with listing details",
+    "method": "Web form — removal request with listing details; removal requests also by email to privacy@searchquarry.com",
     "name": "SearchQuarry",
     "optout_url": "https://www.searchquarry.com/opt-out-new/",
     "region": "US",
-    "type": "People search"
+    "type": "People search",
+    "contact_email": "privacy@searchquarry.com"
   },
   {
     "method": "Web form — find record, opt out, confirm",
@@ -201,18 +214,20 @@
     "type": "People search"
   },
   {
-    "method": "Official opt-out form — choose segments (mail/phone/email), complete CAPTCHA, confirm via emailed link",
+    "method": "Official opt-out form — choose segments (mail/phone/email), complete CAPTCHA, confirm via emailed link; CCPA requests also by email to consumeradvo@acxiom.com",
     "name": "Acxiom",
     "optout_url": "https://isapps.acxiom.com/optout/optout.aspx",
     "region": "Global",
-    "type": "Data broker (marketing)"
+    "type": "Data broker (marketing)",
+    "contact_email": "consumeradvo@acxiom.com"
   },
   {
-    "method": "Data subject request form — deletion / opt-out of sale",
+    "method": "Data subject request form — deletion / opt-out of sale; opt-out requests also by email to privacy@epsilon.com",
     "name": "Epsilon",
     "optout_url": "https://legal.epsilon.com/dsr",
     "region": "US / Global",
-    "type": "Data broker (marketing)"
+    "type": "Data broker (marketing)",
+    "contact_email": "privacy@epsilon.com"
   },
   {
     "method": "Opt-out registry — submit email / advertising IDs",
@@ -222,18 +237,20 @@
     "type": "Data broker (marketing)"
   },
   {
-    "method": "Consumer portal — opt out / freeze where eligible",
+    "method": "Consumer portal — opt out / freeze where eligible; suppression requests also by email to privacy.information.mgr@lexisnexis.com",
     "name": "LexisNexis Risk Solutions",
     "optout_url": "https://consumer.risk.lexisnexis.com/request",
     "region": "US / Global",
-    "type": "Data broker (risk)"
+    "type": "Data broker (risk)",
+    "contact_email": "privacy.information.mgr@lexisnexis.com"
   },
   {
-    "method": "Consumer Privacy portal — opt out of marketing data sharing; access, deletion and correction requests",
+    "method": "Consumer Privacy portal — opt out of marketing data sharing; access, deletion and correction requests; targeted-ad opt-out also by email to optout@experian.com",
     "name": "Experian",
     "optout_url": "https://consumerprivacy.experian.com/",
     "region": "US / Global",
-    "type": "Credit bureau / broker"
+    "type": "Credit bureau / broker",
+    "contact_email": "optout@experian.com"
   },
   {
     "method": "myPrivacy Preference Center — opt out of sale/sharing, limit sensitive-data use",
@@ -250,25 +267,28 @@
     "type": "Credit bureau / broker"
   },
   {
-    "method": "Privacy portal via Cotality (formerly CoreLogic) — website-data requests; product data largely exempt (GLBA/FCRA)",
+    "method": "Privacy portal via Cotality (formerly CoreLogic) — website-data requests; product data largely exempt (GLBA/FCRA); privacy requests also by email to datasubjectrequests@cotality.com",
     "name": "CoreLogic",
     "optout_url": "https://www.cotality.com/privacy.aspx",
     "region": "US",
-    "type": "Data broker (property)"
+    "type": "Data broker (property)",
+    "contact_email": "datasubjectrequests@cotality.com"
   },
   {
-    "method": "Do-not-sell / deletion request form or email",
+    "method": "Do-not-sell / deletion request form or email (privacyteam@data-axle.com)",
     "name": "Data Axle (InfoUSA)",
     "optout_url": "https://www.data-axle.com/privacy-policy/do-not-sell",
     "region": "US",
-    "type": "Data broker (marketing)"
+    "type": "Data broker (marketing)",
+    "contact_email": "privacyteam@data-axle.com"
   },
   {
-    "method": "Ad opt-out page — browser / device level",
+    "method": "Ad opt-out page — browser / device level; privacy requests by email to privacy@epsilon.com (Epsilon)",
     "name": "Epsilon (Conversant)",
     "optout_url": "https://www.conversantmedia.com/optout",
     "region": "Global",
-    "type": "Data broker (ad tech)"
+    "type": "Data broker (ad tech)",
+    "contact_email": "privacy@epsilon.com"
   },
   {
     "method": "Your Privacy Choices — deletion / opt-out request",

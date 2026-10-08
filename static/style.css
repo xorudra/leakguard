@@ -247,3 +247,72 @@ input:-webkit-autofill{-webkit-box-shadow:0 0 0 60px var(--elev) inset;-webkit-t
 @media (prefers-reduced-motion:reduce){
   *{transition:none!important;animation:none!important;scroll-behavior:auto!important}
 }
+
+/* ---------- auth screens (owner-chosen, 2026-10-08) ----------
+   Sign-in / register / reset restyled after "Authentication Screens
+   (Login/Register)" by Muff & Nipps (Figma Community, CC BY 4.0 —
+   attribution lives under the form in index.html): near-black panel,
+   blurred violet→pink→blue gradient beam, dark inputs, and a
+   pink→periwinkle gradient primary button. Deliberately scoped to
+   #authForms / #resetBox so the rest of the app keeps its theme. */
+#authForms,#resetBox{
+  position:relative;overflow:hidden;isolation:isolate;
+  background:#0b0b10;border:1px solid #26262f;border-radius:16px;
+  padding:38px 34px;margin-top:18px;
+}
+#authForms::before,#resetBox::before{
+  content:"";position:absolute;z-index:-1;pointer-events:none;
+  right:7%;top:-12%;width:118px;height:124%;border-radius:999px;
+  background:linear-gradient(180deg,#7b61ff 0%,#9d7bff 30%,#c86cff 52%,#5b8cff 78%,#cfefff 100%);
+  filter:blur(38px);opacity:.5;
+}
+#authForms::after,#resetBox::after{
+  content:"✦";position:absolute;z-index:-1;pointer-events:none;
+  top:16px;right:22px;color:#fff;opacity:.75;font-size:15px;
+}
+#authForms .authWelcome,#resetBox .authWelcome{
+  margin:0 0 8px;font-size:27px;font-weight:800;letter-spacing:-.5px;color:#fff;
+}
+#authForms form,#resetBox form{position:relative;max-width:420px}
+#authForms .hint,#resetBox .hint{color:#a2a2ad}
+#authForms label,#resetBox label{
+  color:#a2a2ad;font-size:12px;font-weight:600;letter-spacing:.02em;
+}
+#authForms input,#resetBox input{
+  background:#1b1b23;border:1px solid #3d3d4a;border-radius:6px;color:#fff;
+  padding:12px 14px;margin-top:6px;
+}
+#authForms input::placeholder,#resetBox input::placeholder{color:#6f6f7a}
+#authForms input:hover,#resetBox input:hover{border-color:#55555f}
+#authForms input:focus,#resetBox input:focus{
+  border-color:#9d7bff;box-shadow:0 0 0 3px rgba(123,97,255,.28);
+}
+#authForms input:-webkit-autofill,#resetBox input:-webkit-autofill{
+  -webkit-box-shadow:0 0 0 60px #1b1b23 inset;
+}
+#authForms .rowBtns,#resetBox .rowBtns{
+  flex-direction:column;align-items:stretch;flex-wrap:nowrap;gap:10px;
+}
+#acLoginBtn,#rsBtn{
+  background:linear-gradient(90deg,#e8a2ff 0%,#6e8cff 100%);
+  color:#fff;border:0;border-radius:6px;padding:13px 24px;width:100%;
+}
+#acLoginBtn:hover,#rsBtn:hover{
+  background:linear-gradient(90deg,#e8a2ff 0%,#6e8cff 100%);
+  filter:brightness(1.08);transform:scale(1.01);
+}
+#authForms .btnGhost,#resetBox .btnGhost{
+  background:transparent;border:1px solid #3d3d4a;color:#fff;border-radius:6px;
+}
+#authForms .btnGhost:hover,#resetBox .btnGhost:hover{
+  background:rgba(255,255,255,.05);border-color:#55555f;
+}
+#authForms a{color:#a2a2ad}
+#authForms a:hover{color:#fff}
+#authForms .authCredit{max-width:420px;margin-top:22px;font-size:11.5px;color:#6f6f7a}
+#authForms .authCredit a{color:#8f8f9a;text-decoration:underline}
+@media(max-width:640px){
+  #authForms,#resetBox{padding:28px 18px}
+  #authForms::before,#resetBox::before{right:-34px;opacity:.38}
+  #authForms form,#resetBox form{max-width:none}
+}

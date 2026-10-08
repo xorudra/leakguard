@@ -488,7 +488,7 @@ async function probeMode(broker, profile, deep) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ broker, profile, deep: !!deep }),
-  }, deep ? 120000 : 25000);
+  }, deep ? 150000 : 40000);
   const d = await resp.json();
   if (!resp.ok) throw new Error(errMsg(d, "Probe failed"));
   return d;
@@ -593,7 +593,7 @@ $("autoBtn").addEventListener("click", async () => {
               }
             }
           } catch (e) {
-            outcome = ["blocked", "unreachable from the server right now"];
+            outcome = ["blocked", "check timed out before a verdict came back — run this broker again, or use a real browser for this one"];
           }
           record(item.broker, outcome[0], outcome[1]);
         }

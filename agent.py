@@ -35,17 +35,24 @@ except Exception:  # pragma: no cover - broken-layout fallback
     _ssrf = None
 
 
+def _url_guard_error(url):
+    """The SSRF guard's refusal message for `url`, or None when the
+    guard clears it. Lets callers explain WHY an address was refused
+    instead of collapsing every refusal into one vague sentence."""
+    if _ssrf is None:
+        return "ssrf guard unavailable"
+    try:
+        _ssrf.assert_public_url(url)
+        return None
+    except Exception as e:
+        return str(e)
+
+
 def _url_is_public(url):
     """True only when the SSRF guard clears `url` for fetching:
     http/https, and the host — literal or DNS-resolved — entirely
     public. Guard unavailable or rejecting both answer False."""
-    if _ssrf is None:
-        return False
-    try:
-        _ssrf.assert_public_url(url)
-        return True
-    except Exception:
-        return False
+    return _url_guard_error(url) is None
 
 
 BASE = Path(__file__).resolve().parent
@@ -188,27 +195,47 @@ def probe_broker(broker_name, profile=None):
     result = {"broker": broker_name, "url": url, "automation": pb["automation"],
               "needs": pb["needs"], "reachable": False, "status": None,
               "forms": [], "blockers": [], "payload_preview": {}}
-    if not _url_is_public(url):
+    guard_error = _url_guard_error(url)
+    if guard_error is not None:
         # The opt-out URL comes from brokers.json (data): never let
         # it point this server at a non-public address (Phase 70).
-        result["blockers"].append("Opt-out address did not pass the outbound safety check — use a real browser for this one")
+        if "non-public address" in guard_error:
+            # The broker's own DNS deliberately resolves to a blocked
+            # destination for server networks (measured live:
+            # ClustrMaps publishes a loopback address) — say so
+            # plainly instead of leaving safety-check jargon.
+            result["blockers"].append("Opt-out address blocked by the outbound safety check — this broker's site deliberately refuses server networks (its address resolves to a blocked destination); use a real browser for this one")
+        else:
+            result["blockers"].append("Opt-out address did not pass the outbound safety check — use a real browser for this one")
         return result
     req = urllib.request.Request(url, headers=UA)
-    try:
-        # Connection-pinned fetch (Phase 70): the guard resolves
-        # and validates inside the connection itself, so the
-        # pre-check above can never be raced by a DNS rebinding.
-        with _ssrf.pinned_urlopen(req, timeout=15) as resp:
-            result["status"] = resp.status
-            result["reachable"] = True
-            html = resp.read(512 * 1024).decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
-        result["status"] = e.code
-        result["blockers"].append(f"Site answered HTTP {e.code} to a script (bot protection or moved page) — use a real browser for this one")
-        return result
-    except Exception:
-        result["blockers"].append("Page unreachable from this server right now")
-        return result
+    html = None
+    for attempt in range(2):
+        try:
+            # Connection-pinned fetch (Phase 70): the guard resolves
+            # and validates inside the connection itself, so the
+            # pre-check above can never be raced by a DNS rebinding.
+            with _ssrf.pinned_urlopen(req, timeout=15) as resp:
+                result["status"] = resp.status
+                result["reachable"] = True
+                html = resp.read(512 * 1024).decode("utf-8", "replace")
+            break
+        except urllib.error.HTTPError as e:
+            # An HTTP answer is a verdict, not a transient failure —
+            # never retried.
+            result["status"] = e.code
+            result["blockers"].append(f"Site answered HTTP {e.code} to a script (bot protection or moved page) — use a real browser for this one")
+            return result
+        except Exception:
+            # One retry for transient network failures (timeout,
+            # reset, slow TLS under load): a single dropped attempt
+            # must not harden into a false "unreachable" verdict.
+            if attempt == 0:
+                import time
+                time.sleep(2)
+                continue
+            result["blockers"].append("Page unreachable from this server right now")
+            return result
     parser = FormParser()
     try:
         parser.feed(html)
@@ -250,17 +277,22 @@ def relay_probe(url, profile=None):
     relay_url = RELAY_READER.format(url=urllib.parse.quote(url, safe=""))
     html = None
     # The free relay is intermittent (measured 522s between successes) —
-    # retry a few times with backoff before declaring it unreachable.
+    # one retry with backoff before declaring it unreachable. Bounded
+    # on purpose: two attempts at 30s keep the whole deep chain
+    # (direct 15s + relay + browser layer) inside the browser
+    # client's deep-probe window, so a slow relay can no longer make
+    # the client give up and misreport a reachable broker as
+    # "unreachable".
     import time
-    for attempt in range(3):
+    for attempt in range(2):
         req = urllib.request.Request(relay_url, headers=UA)
         try:
-            with urllib.request.urlopen(req, timeout=45) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:
                 out["status"] = resp.status
                 html = resp.read(1024 * 1024).decode("utf-8", "replace")
             break
         except Exception:
-            if attempt < 2:
+            if attempt < 1:
                 time.sleep(3 * (attempt + 1))
     if html is None:
         out["blockers"].append("Relay reader could not fetch the page either (free relay is intermittent — retrying the probe often works)")

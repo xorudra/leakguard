@@ -733,8 +733,9 @@ function renderAccount() {
   $("actionCenter").hidden = !signedIn;
   if (signedIn) loadActionCenter();
   $("acctLabel").hidden = !signedIn;
-  if (signedIn) $("acctLabel").textContent = meUser.email_masked;
+  if (signedIn) $("acctLabel").textContent = meUser.name || meUser.email_masked;
   $("authForms").hidden = signedIn;
+  if (!signedIn && registerMode) setRegisterMode(false);
   $("privacyCenter").hidden = !signedIn;
   if (signedIn) {
     $("pcEmail").textContent = meUser.email_masked;
@@ -797,6 +798,7 @@ $("acctBtn").addEventListener("click", () => {
 
 $("authForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (registerMode) setRegisterMode(false);
   const email = $("acEmail").value.trim();
   const password = $("acPassword").value;
   const code = $("acTotp").value.trim();
@@ -825,6 +827,14 @@ $("authForm").addEventListener("submit", async (e) => {
   }
 });
 
+let registerMode = false;
+function setRegisterMode(on) {
+  registerMode = on;
+  $("acNameWrap").hidden = !on;
+  $("acRegisterBtn").textContent = on ? "Create my account" : "Create free account";
+  if (on) $("acName").focus();
+}
+
 $("acRegisterBtn").addEventListener("click", async () => {
   const email = $("acEmail").value.trim();
   const password = $("acPassword").value;
@@ -832,11 +842,24 @@ $("acRegisterBtn").addEventListener("click", async () => {
     $("acStatus").textContent = "Enter an email and a password (at least 10 characters) first.";
     return;
   }
+  if (!registerMode) {
+    // First click only opens sign-up: ask for the name too (owner
+    // request, 2026-10-08), second click creates the account.
+    setRegisterMode(true);
+    $("acStatus").textContent = "Almost there — add your name, then tap Create my account.";
+    return;
+  }
+  const name = $("acName").value.trim();
+  if (!name) {
+    $("acStatus").textContent = "Add your name so we can greet you properly.";
+    $("acName").focus();
+    return;
+  }
   $("acStatus").textContent = "Creating your account…";
   try {
     const r = await apiJson("/api/auth/register", {
       method: "POST", headers: AH,
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, name }),
     });
     if (!r.ok) throw new Error(errMsg(r.data, "Could not create the account"));
     meUser = r.data.user;

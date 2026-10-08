@@ -854,7 +854,8 @@ class Handler(BaseHTTPRequestHandler):
             self._rate_limit_credentials(payload.get("email"))
             user, token = self._call(
                 auth_service.register,
-                payload.get("email"), payload.get("password"))
+                payload.get("email"), payload.get("password"),
+                payload.get("name"))
             return self._json(201, {"user": user}, extra_headers=[
                 ("Set-Cookie", sessions_mod.cookie_header(token))])
 

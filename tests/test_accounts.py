@@ -292,11 +292,14 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
     def unique_email(self):
         return "acct-%s@example.com" % uuid.uuid4().hex[:16]
 
-    def register(self, email=None, password=None):
+    def register(self, email=None, password=None, name=None):
         email = email or self.unique_email()
+        payload = {"email": email, "password": password or self.PASSWORD}
+        if name is not None:
+            payload["name"] = name
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            body={"email": email, "password": password or self.PASSWORD},
+            body=payload,
             headers=CSRF)
         if status == 201:
             self.user_ids.append(body["user"]["id"])
@@ -345,6 +348,32 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
         status, _h, me = self.me(self.session_cookie(headers))
         self.assertEqual(status, 200)
         self.assertEqual(me["id"], user["id"])
+
+    def test_register_with_name_round_trips(self):
+        # Owner request 2026-10-08: sign-up asks for a name too.
+        # It is stored encrypted (0017) and returned to the owner
+        # on the register response and on /me; whitespace is
+        # normalised.
+        status, _headers, body = self.register(name="  Rudra   Singh ")
+        self.assertEqual(status, 201)
+        self.assertEqual(body["user"]["name"], "Rudra Singh")
+        cookie = self.session_cookie(_headers)
+        status, _h, me = self.me(cookie)
+        self.assertEqual(status, 200)
+        self.assertEqual(me["name"], "Rudra Singh")
+
+    def test_register_without_name_still_works(self):
+        status, _headers, body = self.register()
+        self.assertEqual(status, 201)
+        self.assertIsNone(body["user"]["name"])
+
+    def test_register_rejects_bad_name(self):
+        status, _h, body = self.register(name="   ")
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "invalid_name")
+        status, _h, body = self.register(name="x" * 81)
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "invalid_name")
 
     def test_duplicate_email_409(self):
         email = self.unique_email()

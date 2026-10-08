@@ -78,6 +78,11 @@
       saves your details <strong>encrypted</strong> so you never type them twice, and unlocks monitoring,
       consent controls and a full data export. Free, like everything here.</p>
       <form id="authForm">
+        <div id="acNameWrap" hidden>
+          <label>Your name
+            <input type="text" id="acName" maxlength="80" placeholder="e.g. Rudra" autocomplete="name">
+          </label>
+        </div>
         <label>Email address
           <input type="email" id="acEmail" required placeholder="you@example.com" autocomplete="email">
         </label>

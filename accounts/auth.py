@@ -27,9 +27,9 @@ ACCOUNT_EMAIL_LABEL = "account_email"
 EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$")
 
 _USER_COLUMNS = (
-    "id, email_hmac, email_ciphertext, email_masked, password_hash,"
-    " totp_secret_ciphertext, totp_enabled, totp_last_step,"
-    " created_at, updated_at, deleted_at"
+    "id, email_hmac, email_ciphertext, email_masked, name_ciphertext,"
+    " password_hash, totp_secret_ciphertext, totp_enabled,"
+    " totp_last_step, created_at, updated_at, deleted_at"
 )
 
 
@@ -57,6 +57,7 @@ def public_user(row):
     return {
         "id": str(row["id"]),
         "email_masked": row["email_masked"],
+        "name": reveal_name(row),
         "totp_enabled": bool(row["totp_enabled"]),
         "created_at": _iso(row["created_at"]),
     }
@@ -70,6 +71,22 @@ def reveal_email(row):
     """Decrypt the account email. For owner-only flows: the data
     export, and internal login-time use. Never log the result."""
     return crypto.decrypt_value(_master_key(), bytes(row["email_ciphertext"]))
+
+
+def reveal_name(row):
+    """Decrypt the sign-up display name (0017), or None when the
+    account has none / the key cannot read it. Owner-only surface:
+    public_user is only ever returned to the signed-in owner."""
+    try:
+        cipher = row["name_ciphertext"]
+    except Exception:
+        return None
+    if not cipher:
+        return None
+    try:
+        return crypto.decrypt_value(_master_key(), bytes(cipher))
+    except Exception:
+        return None
 
 
 def _get_user_by_email(normalized_email):
@@ -111,13 +128,31 @@ def _validate_password(password):
 # Register / login / logout
 # ---------------------------------------------------------------------------
 
-def register(email, password):
+def _validate_name(name):
+    """Sign-up display name (owner request, 2026-10-08). Optional at
+    the service layer (older accounts and internal callers pass
+    None); when given it must be a real, short, single-line name."""
+    if name is None:
+        return None
+    if not isinstance(name, str):
+        raise errors.bad_request("invalid_name", "Enter your name")
+    cleaned = " ".join(name.split())
+    if not (1 <= len(cleaned) <= 80) or any(
+            ord(ch) < 32 for ch in cleaned):
+        raise errors.bad_request(
+            "invalid_name", "Enter your name (up to 80 characters)")
+    return cleaned
+
+
+def register(email, password, name=None):
     """Create an account + consent defaults + a first session.
-    Returns (public_user, raw_session_token)."""
+    Returns (public_user, raw_session_token). The optional name is
+    stored vault-encrypted only (0017), never in plaintext."""
     normalized = normalize_email(email)
     if not EMAIL_RE.match(normalized):
         raise errors.bad_request("invalid_email", "Enter a valid email address")
     _validate_password(password)
+    cleaned_name = _validate_name(name)
     digest = account_email_hmac(normalized)
     from accounts import consents
 
@@ -134,12 +169,14 @@ def register(email, password):
                     "An account with this email already exists")
             row = conn.execute(
                 "INSERT INTO users (email_hmac, email_ciphertext,"
-                " email_masked, password_hash)"
-                " VALUES (%s, %s, %s, %s) RETURNING " + _USER_COLUMNS,
+                " email_masked, name_ciphertext, password_hash)"
+                " VALUES (%s, %s, %s, %s, %s) RETURNING " + _USER_COLUMNS,
                 (
                     digest,
                     crypto.encrypt_value(_master_key(), normalized),
                     vault_store.mask("email", normalized),
+                    crypto.encrypt_value(_master_key(), cleaned_name)
+                    if cleaned_name else None,
                     passwords.hash_password(password),
                 ),
             ).fetchone()

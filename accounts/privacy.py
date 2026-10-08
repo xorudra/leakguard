@@ -82,6 +82,7 @@ def build_export(user_id):
         "account": {
             "email": auth.reveal_email(row),
             "email_masked": row["email_masked"],
+            "name": auth.reveal_name(row),
             "created_at": auth._iso(row["created_at"]),
         },
         "identifiers": exported_identifiers,

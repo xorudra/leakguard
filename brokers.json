@@ -147,7 +147,7 @@
   {
     "method": "Web form — email + CAPTCHA gate, then find record and remove",
     "name": "AdvancedBackgroundChecks",
-    "optout_url": "https://www.advancedbackgroundchecks.com/removal",
+    "optout_url": "https://www.advancedbackgroundchecks.com/opt-out",
     "region": "US",
     "type": "People search"
   },

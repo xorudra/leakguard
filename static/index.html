@@ -37,7 +37,7 @@
       <div class="stat"><b>40</b><span>brokers covered</span></div>
       <div class="stat"><b>0–100</b><span>exposure score</span></div>
       <div class="stat"><b>0</b><span>tokens burned — Agent Mode is pure scripts</span></div>
-      <div class="stat"><b>₹0</b><span>free forever</span></div>
+      <div class="stat"><b>₹0</b><span>free — no card, no paid tier</span></div>
     </div>
   </section>
 
@@ -75,7 +75,7 @@
     <div id="authForms">
       <p class="hint">An account is optional — the scan above always works without one. An account just
       saves your details <strong>encrypted</strong> so you never type them twice, and unlocks monitoring,
-      consent controls and a full data export. Free forever, like everything here.</p>
+      consent controls and a full data export. Free, like everything here.</p>
       <form id="authForm">
         <label>Email address
           <input type="email" id="acEmail" required placeholder="you@example.com" autocomplete="email">
@@ -339,7 +339,8 @@
 
       <h3>Passkeys</h3>
       <p class="hint">A passkey signs you in with this device's fingerprint, face or PIN —
-      no password to type, and it cannot be phished or leaked: LeakGuard stores only the
+      no password to type, and it is phishing-resistant by design — there is no password
+      to phish or leak: LeakGuard stores only the
       passkey's public half, never anything that could sign in as you. Passkeys are
       optional — your password (and two-factor, if it is on) keeps working exactly as
       before. Signing in with a passkey asks your device to confirm it is really you
@@ -415,7 +416,8 @@
     <h2><span class="step">1</span> Leak scan</h2>
     <p><span class="pill">QUICK SCAN — ONE EMAIL ADDRESS, RIGHT NOW</span></p>
     <p class="hint">No account, nothing stored: type one email address and see its breaches in
-    seconds. For the full protection — your details saved once, removals run for you and
+    seconds — if the free server was asleep, the first check can take about a minute
+    while it wakes. For the full protection — your details saved once, removals run for you and
     monitoring that keeps watch — create the free account above instead. Either way the honest
     limits below apply: brokers, people-search sites and Google results can be removed; a breach
     dump already copied to Telegram, dark-web forums or torrents cannot.</p>
@@ -424,10 +426,11 @@
         <input type="email" id="email" required placeholder="you@example.com" autocomplete="email">
       </label>
       <label>Password to check (optional)
-        <input type="password" id="password" placeholder="Checked safely — never sent or stored" autocomplete="off">
+        <input type="password" id="password" placeholder="Checked safely — hashed, never stored" autocomplete="off">
       </label>
-      <p class="hint">Password check uses Have I Been Pwned k-anonymity: only the first 5 characters of its
-      SHA-1 hash are sent. Your password never leaves this page in plain form and is never stored.</p>
+      <p class="hint">Checked safely with Have I Been Pwned k-anonymity: your password is hashed on
+      our server, only the first 5 characters of the hash ever leave it, and the password
+      is never stored or logged.</p>
       <button type="submit" id="scanBtn">Scan my data</button>
     </form>
     <div id="scanStatus" class="status" hidden aria-live="polite"></div>
@@ -473,7 +476,10 @@
     <h2><span class="step">2</span> Agent Mode (zero-token, automatic)</h2>
     <p>Fill in your details once and press the green button — the agent does everything else with
     <strong>plain scripts, no AI, no tokens</strong>: it probes all 40 brokers live, submits every removal
-    form it can fill, and prepares the rest. You watch it work; there is nothing else for you to do.</p>
+    form it can fill, and prepares the rest. You watch it work. The only steps ever handed
+    back to you are the ones no tool can honestly do for you: pressing Send on the
+    email-broker letters, and any broker hiding behind a CAPTCHA or sign-in — each
+    listed with the exact step to finish.</p>
     <label>Your full name <input type="text" id="agName" placeholder="Rudra"></label>
     <label>Your email <input type="email" id="agEmail" placeholder="you@example.com"></label>
     <label>Phone (optional) <input type="text" id="agPhone" placeholder="+91 …"></label>
@@ -815,7 +821,7 @@
   </section>
 
   <footer>
-    <p>LeakGuard · Free to use · Scans use XposedOrNot and Have I Been Pwned · No scan data is stored on this server.</p>
+    <p>LeakGuard · Free to use · Scans use XposedOrNot and Have I Been Pwned · Anonymous Quick Scan stores nothing on this server.</p>
     <p><a href="/trust">Trust &amp; security</a> · <a href="/privacy">Privacy policy</a> · <a href="/terms">Terms of use</a> · <a href="/support">Support</a></p>
     <p><a href="https://leakguard-hh8e.onrender.com">Website</a> · <a href="https://github.com/xorudra/leakguard" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/xorudra/siteguard" target="_blank" rel="noopener">SiteGuard (sister project)</a></p>
   </footer>

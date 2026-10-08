@@ -37,11 +37,11 @@ The agent does the boring work with plain deterministic scripts. **No AI tokens 
   |---|---|
   | HTTP | Fetches the page directly and parses its real form |
   | Relay reader | Retries via a different network when the site blocks servers |
-  | Real browser | Headless Chromium for JavaScript-walled pages |
+  | Real browser | Headless Chromium for JavaScript-walled pages (optional install; on the hosted service the deep pass uses HTTP + relay, and says so when a page would need a real browser) |
 
   It pre-fills the form payload with your details and honestly reports blockers — CAPTCHA, login walls, bot protection — instead of pretending they aren't there.
 - ✉️ **Email channels** — some sites (e.g. BeenVerified, Nuwber) wall their web forms off from datacenter networks entirely. LeakGuard surfaces their official opt-out **email addresses**, which work from anywhere.
-- 🔒 **Guarded submit** — submission only behind your explicit per-broker confirmation, and only to the broker's own host.
+- 🔒 **Guarded submit** — a run starts only from your explicit confirmation (one press confirms the run); every submission call still requires the confirm flag, and submissions only ever go to the broker's own host.
 - 🚫 **No AI anywhere** — an earlier optional AI fallback for cryptic form fields was removed in Stage S1 and never came back: every step above is deterministic code, so there is nothing to configure and nothing that can hallucinate a result.
 
 ## ⚖️ The honest limits

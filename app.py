@@ -59,6 +59,7 @@ from core import context, errors, flags, logging_setup, security
 from core import ratelimit as core_ratelimit
 from dashboard import graph as graph_service
 from dashboard import policy_analyzer as policy_analyzer_service
+from dashboard import report as report_service
 from dashboard import search_exposure as search_exposure_service
 from dashboard import service as action_center_service
 from db import pool as db_pool
@@ -600,6 +601,21 @@ class Handler(BaseHTTPRequestHandler):
             user = self._require_reader()
             return self._json(200, self._call(
                 search_exposure_service.search_exposure, user["id"]))
+        if route == "/api/report":
+            # Exposure & removal report (spec Phase 85): the
+            # caller's own state as one generated HTML document
+            # (dashboard/report.py). Session-only — it is a
+            # personal document, so a read-only Bearer token never
+            # suffices — and masked-only by construction: the
+            # builder holds no decryption path. Generated on
+            # demand, never persisted; the response flows through
+            # _send, so the /api/* Cache-Control: no-store policy
+            # (Phase 67) covers it like every API response.
+            self._require_accounts()
+            user, _token = self._require_user()
+            return self._send(
+                200, self._call(report_service.render_report, user),
+                "text/html; charset=utf-8")
         if route == "/api/graph":
             # The exposure map (Stage S14): the caller's own
             # details → where they appeared → removal state, built

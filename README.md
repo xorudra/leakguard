@@ -163,7 +163,7 @@ Token management itself is session-only (`GET`/`POST /api/tokens`, `DELETE /api/
 ## 🔐 Privacy
 
 - **Anonymous Quick Scan:** no account and **no server-side storage** — the scan runs per request and is gone when the response is.
-- **Accounts (optional):** the details you save are stored encrypted in the vault (AES-256-GCM; lookups by HMAC, never plaintext), and your scans, findings and removal cases are stored — that storage is what makes monitoring, the Action Center and one-command removal possible. You can export everything from the Privacy Center (JSON or CSV, password re-auth required) and delete the account at any time: deletion is a 30-day soft delete, then a hard purge of everything the account owns; the PII-free audit trail (counts and actions, never values) is kept.
+- **Accounts (optional):** the details you save are stored encrypted in the vault (AES-256-GCM; lookups by HMAC, never plaintext), and your scans, findings and removal cases are stored — that storage is what makes monitoring, the Action Center and one-command removal possible. You can export everything from the Privacy Center (JSON or CSV, password re-auth required); the Privacy Center also renders a printable exposure & removal report on demand — masked values only, generated in the moment and never stored — and you can delete the account at any time: deletion is a 30-day soft delete, then a hard purge of everything the account owns; the PII-free audit trail (counts and actions, never values) is kept.
 - Removal progress for anonymous use lives only in the visitor's browser (`localStorage`).
 - Password checks use k-anonymity — only the first 5 characters of the SHA-1 hash ever leave the server, and passwords are never stored or logged.
 

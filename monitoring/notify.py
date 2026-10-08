@@ -99,10 +99,13 @@ def _urllib_transport(url, headers, body, timeout):
         return exc.code, text
 
 
-def send_email(to, subject, text):
+def send_email(to, subject, text, reply_to=None):
     """One email through the Brevo lane. True ONLY when Brevo
     accepted it (2xx). Any failure — no lane, refused, unreachable —
-    is False; the caller records 'failed' / 'unsent_no_lane'."""
+    is False; the caller records 'failed' / 'unsent_no_lane'.
+    `reply_to` (an email address) is set as the message's Reply-To
+    when given — the authorized-agent send uses it so a broker's
+    answer reaches the data subject, not the service."""
     if not lane_configured():
         return False
     from_email, from_name = _sender()
@@ -112,6 +115,8 @@ def send_email(to, subject, text):
         "subject": subject,
         "textContent": text,
     }
+    if reply_to:
+        payload["replyTo"] = {"email": reply_to}
     headers = {
         "api-key": os.environ.get("BREVO_API_KEY"),
         "Content-Type": "application/json",

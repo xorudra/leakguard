@@ -48,6 +48,54 @@ from vault import store as vault_store
 
 
 # ---------------------------------------------------------------------------
+# Authorized-agent email sending (owner decision, 2026-10-08)
+#
+# The mailer is INJECTED by the app layer at startup
+# (set_agent_mailer): the remediation package's import graph does
+# not include the mail lane (architecture guard), so the engine
+# only knows this callable — fn(to, subject, body, reply_to) ->
+# bool, True only when the lane accepted the message. Unset (every
+# test, any embedding without a lane) the email channel keeps its
+# original park-for-user behaviour.
+# ---------------------------------------------------------------------------
+
+_agent_mailer = None
+
+
+def set_agent_mailer(fn):
+    """Wire (or clear, with None) the authorized-agent mailer."""
+    global _agent_mailer
+    _agent_mailer = fn
+
+
+_AGENT_FOOTER = (
+    "\n\n---\n"
+    "Sent by LeakGuard as the authorized agent of {name}, under "
+    "the automated-remediation consent recorded in their LeakGuard "
+    "account. Please direct any reply, confirmation, or "
+    "verification request to the data subject at {email} (this "
+    "message's Reply-To is set to them)."
+)
+
+
+def _try_agent_send(letter, profile):
+    """Send one erasure letter as the user's authorized agent.
+    True only when the wired mailer accepted it; every failure —
+    no mailer, lane down, exception — is False and the caller
+    falls back to parking the letter for the user."""
+    if _agent_mailer is None or not letter.get("to"):
+        return False
+    body = letter["body"] + _AGENT_FOOTER.format(
+        name=profile.get("full_name") or "the data subject",
+        email=profile.get("email") or "")
+    try:
+        return bool(_agent_mailer(letter["to"], letter["subject"],
+                                  body, profile.get("email")))
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Verification fetching (verify_search's one network path)
 # ---------------------------------------------------------------------------
 
@@ -656,16 +704,38 @@ def process_case(case_id, executor=None):
     channel = broker["channel"]
 
     if channel == "email":
-        letter_on_file = _has_attempt(case_id, "letter", "generated")
-        decision = policy.decide_email(letter_on_file)
-        # The case only returns to the queue via the user's
-        # "I sent it" retry — their attestation is the submission.
-        # First pass: render the ready-to-send letter as the
-        # attempt's detail and park the case for the user.
-        detail = {}
-        if not letter_on_file:
-            detail = letters.letter_for_broker(broker, profile)
-        _apply_decision(case_id, decision, detail)
+        # Already agent-sent in an earlier pass: never send twice —
+        # re-apply the agent-sent decision idempotently.
+        if _has_attempt(case_id, "letter", "sent_by_agent"):
+            _apply_decision(case_id, policy.decide_email_agent_sent(),
+                            {})
+            return load_case(case_id)
+        # A generated letter already on file means the case was
+        # parked for the user and came back via their "I sent it"
+        # retry — their attestation is the submission (unchanged).
+        if _has_attempt(case_id, "letter", "generated"):
+            _apply_decision(case_id, policy.decide_email(True), {})
+            return load_case(case_id)
+        # First pass: render the letter, then try the
+        # authorized-agent send (owner decision, 2026-10-08). The
+        # mailer is wired by the app layer (the remediation package
+        # never imports the mail lane — architecture guard); when
+        # no mailer is wired, or the lane refuses, the case falls
+        # back to the original park-for-user behaviour with the
+        # letter ready in the queue.
+        letter = letters.letter_for_broker(broker, profile)
+        if _try_agent_send(letter, profile):
+            detail = dict(letter)
+            detail["sent_by"] = "agent"
+            detail["reply_to"] = profile.get("email") or ""
+            _apply_decision(case_id, policy.decide_email_agent_sent(),
+                            detail)
+        else:
+            detail = dict(letter)
+            detail["agent_send"] = ("unavailable" if _agent_mailer
+                                    is None else "failed")
+            _apply_decision(case_id, policy.decide_email(False),
+                            detail)
         return load_case(case_id)
 
     if channel == "manual":

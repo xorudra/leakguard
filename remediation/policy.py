@@ -156,12 +156,17 @@ def decide_consent(consented):
 
 
 def decide_email(letter_on_file):
-    """Email channel: brokers only accept requests from the data
-    subject's own mailbox, so the engine renders a ready-to-send
-    letter and parks the case. When the case comes back to the
+    """Email channel, user-send path: the engine renders a
+    ready-to-send letter and parks the case for the user to send
+    from their own mailbox. When the case comes back to the
     queue with a generated letter already on file, that return IS
     the user's 'I sent it' — the case is recorded submitted, by
     the user's own hand.
+
+    Since 2026-10-08 the engine tries the authorized-agent send
+    FIRST (decide_email_agent_sent); this user-send decision is
+    the fallback when no lane is available or the send fails, and
+    the attestation path when the user sends the parked letter.
 
     Ambiguity preserved from the engine's original control flow:
     the decision keys only on a letter attempt existing, so ANY
@@ -175,6 +180,20 @@ def decide_email(letter_on_file):
     return {"status": "needs_human", "reason": "email_send_required",
             "attempt": ("letter", "generated"),
             "mark_submitted": False}
+
+
+def decide_email_agent_sent():
+    """Email channel, authorized-agent send (owner decision,
+    2026-10-08): the engine sent the erasure letter itself, as the
+    user's recorded-consent agent, through the service lane with
+    Reply-To set to the user. Brevo accepted it — that acceptance
+    is the submission event; whether the broker honours the
+    request is, as always, settled by the verification cycle, not
+    assumed here."""
+    return {"status": "submitted",
+            "reason": "letter_sent_by_agent",
+            "attempt": ("letter", "sent_by_agent"),
+            "mark_submitted": True}
 
 
 def decide_manual(playbook_automation):

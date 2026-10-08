@@ -217,6 +217,11 @@ class TestPolicyDecisions(unittest.TestCase):
             {"status": "submitted", "reason": "letter_sent_by_user",
              "attempt": ("letter_confirmed", "submitted"),
              "mark_submitted": True})
+        self.assertEqual(
+            policy.decide_email_agent_sent(),
+            {"status": "submitted", "reason": "letter_sent_by_agent",
+             "attempt": ("letter", "sent_by_agent"),
+             "mark_submitted": True})
 
     def test_manual_channel(self):
         decision = policy.decide_manual("browser_required")

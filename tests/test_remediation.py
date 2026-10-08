@@ -1040,6 +1040,77 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
         self.assertEqual(bv["reason"], "letter_sent_by_user")
         self.assertIsNotNone(bv["submitted_at"])
 
+    # ---------- authorized-agent email sending (2026-10-08) ------
+    def test_agent_send_submits_email_cases(self):
+        cookie, _uid, _acct = self.register()
+        _name, email = self.add_full_profile(cookie, self.uniq())
+        self.set_consent(cookie, "automated_remediation", True)
+        self.run_removal(cookie)
+        calls = []
+
+        def mailer(to, subject, body, reply_to):
+            calls.append({"to": to, "subject": subject,
+                          "body": body, "reply_to": reply_to})
+            return True
+
+        engine_mod.set_agent_mailer(mailer)
+        try:
+            self.drain(StubExecutor())
+        finally:
+            engine_mod.set_agent_mailer(None)
+        bv = self.case_for(cookie, "BeenVerified")
+        self.assertEqual(bv["status"], "submitted")
+        self.assertEqual(bv["reason"], "letter_sent_by_agent")
+        self.assertIsNotNone(bv["submitted_at"])
+        # BeenVerified and PeopleLooker share this inbox; the
+        # BeenVerified case's own letter is the one naming it.
+        bv_calls = [c for c in calls
+                    if c["to"] == "optout@beenverified.com"
+                    and "BeenVerified" in c["body"]]
+        self.assertEqual(len(bv_calls), 1)
+        # The broker answers the user, not the service.
+        self.assertEqual(bv_calls[0]["reply_to"], email)
+        self.assertIn("authorized agent", bv_calls[0]["body"])
+        # Form-channel brokers are never mailed.
+        self.assertFalse(any("spokeo" in c["to"] for c in calls))
+        # No double-send: draining again sends nothing new.
+        before = len(calls)
+        self.drain(StubExecutor())
+        self.assertEqual(len(calls), before)
+
+    def test_agent_send_failure_parks_for_user(self):
+        cookie, _uid, _acct = self.register()
+        self.add_full_profile(cookie, self.uniq())
+        self.set_consent(cookie, "automated_remediation", True)
+        self.run_removal(cookie)
+        engine_mod.set_agent_mailer(
+            lambda to, subject, body, reply_to: False)
+        try:
+            self.drain(StubExecutor())
+        finally:
+            engine_mod.set_agent_mailer(None)
+        bv = self.case_for(cookie, "BeenVerified")
+        self.assertEqual(bv["status"], "needs_human")
+        self.assertEqual(bv["reason"], "email_send_required")
+
+    def test_agent_send_exception_parks_for_user(self):
+        cookie, _uid, _acct = self.register()
+        self.add_full_profile(cookie, self.uniq())
+        self.set_consent(cookie, "automated_remediation", True)
+        self.run_removal(cookie)
+
+        def boom(to, subject, body, reply_to):
+            raise RuntimeError("lane exploded")
+
+        engine_mod.set_agent_mailer(boom)
+        try:
+            self.drain(StubExecutor())
+        finally:
+            engine_mod.set_agent_mailer(None)
+        bv = self.case_for(cookie, "BeenVerified")
+        self.assertEqual(bv["status"], "needs_human")
+        self.assertEqual(bv["reason"], "email_send_required")
+
     # ---------- verification + reappearance ----------
     def test_verify_transitions_and_reappearance(self):
         cookie, _uid, _acct = self.register()

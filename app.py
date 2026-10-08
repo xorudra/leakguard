@@ -437,6 +437,21 @@ class Handler(BaseHTTPRequestHandler):
             # paths. Static content — no database is needed to read
             # the rules that govern the service.
             return self._serve_file(STATIC / "index.html", "text/html; charset=utf-8")
+        if route == "/local_agent.py":
+            # The on-device runner (Phase 178 local-only tool),
+            # served as a download so a user can run the removal
+            # run from their own connection — brokers that wall
+            # the server answer a home IP normally. Bytes only:
+            # the server never imports or executes this file.
+            try:
+                data = (BASE / "local_agent.py").read_bytes()
+            except OSError:
+                return self._send(404, "not found", "text/plain")
+            return self._send(
+                200, data, "text/x-python; charset=utf-8",
+                extra_headers={
+                    "Content-Disposition":
+                        'attachment; filename="local_agent.py"'})
         if route == "/.well-known/security.txt":
             # RFC 9116 security contact (Stage S13). Static text —
             # served by the app itself, database or not.
@@ -1270,7 +1285,21 @@ def _startup_remediation_worker():
     """Start the in-process remediation worker (Stage S7) when a
     database is configured. Guarded exactly like the scan worker."""
     try:
-        from remediation import worker
+        from remediation import engine, worker
+        from monitoring import notify
+
+        # Authorized-agent email sending (2026-10-08): wire the
+        # mail lane into the engine as an injected callable — the
+        # remediation package never imports the lane itself. When
+        # the lane is not configured the mailer answers False and
+        # email cases park for the user, exactly as before.
+        def _agent_mailer(to, subject, body, reply_to):
+            if not notify.lane_configured():
+                return False
+            return notify.send_email(to, subject, body,
+                                     reply_to=reply_to)
+
+        engine.set_agent_mailer(_agent_mailer)
 
         if worker.start_worker_if_configured():
             print("LeakGuard: remediation worker started")

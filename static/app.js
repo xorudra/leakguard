@@ -685,6 +685,11 @@ let lastScanEmail = "";
    the bottom of this file, before any async load can resolve. */
 let lgResetMode = false;
 let lgResetToken = null;
+/* Dedicated sign-in page (/signin): same idea as reset mode — set
+   synchronously by the boot code at the bottom of this file. While
+   it is on, the auth panel is the whole page, and a successful
+   sign-in leaves for the app home (renderAccount honours this). */
+let lgSigninMode = false;
 
 async function apiJson(path, opts) {
   const resp = await fetch(path, opts || {});
@@ -705,6 +710,15 @@ function refreshSaveScanBox() {
 }
 
 function renderAccount() {
+  if (lgSigninMode) {
+    if (meUser) { location.replace("/"); return; }
+    $("acctBtn").textContent = "← Back";
+    $("authForms").hidden = false;
+    $("privacyCenter").hidden = true;
+    $("actionCenter").hidden = true;
+    $("adminCard").hidden = true;
+    return;
+  }
   if (lgResetMode) {
     $("acctBtn").textContent = "Sign in";
     $("authForms").hidden = true;
@@ -771,6 +785,8 @@ async function loadMe() {
 }
 
 $("acctBtn").addEventListener("click", () => {
+  if (lgSigninMode) { location.href = "/"; return; }
+  if (!meUser && !lgResetMode) { location.href = "/signin"; return; }
   const panel = $("account");
   panel.hidden = !panel.hidden;
   if (!panel.hidden) {
@@ -2971,6 +2987,22 @@ loadMe();
     $("rsBtn").disabled = true;
   }
   panel.scrollIntoView();
+})();
+
+/* ---------------- Sign-in page (/signin) ----------------
+   The dedicated sign-in page: the same landing pattern as /reset.
+   body.signinPage (style.css) strips the page down to the auth
+   panel alone; renderAccount handles the rest, including sending
+   an already-signed-in visitor (or a fresh sign-in) home. */
+(function () {
+  if (location.pathname !== "/signin") return;
+  lgSigninMode = true;
+  document.body.classList.add("signinPage");
+  const panel = $("account");
+  panel.hidden = false;
+  $("authForms").hidden = false;
+  $("privacyCenter").hidden = true;
+  window.scrollTo(0, 0);
 })();
 
 /* ---------------- Static information pages ----------------

@@ -421,6 +421,11 @@ class Handler(BaseHTTPRequestHandler):
             # Password-reset landing (Stage S8): the same SPA, which
             # reads ?token= itself and shows the reset form.
             return self._serve_file(STATIC / "index.html", "text/html; charset=utf-8")
+        if route == "/signin":
+            # Dedicated sign-in page (owner request, 2026-10-08): the
+            # same SPA, which app.js puts into sign-in mode for this
+            # path — only the auth panel shows, as its own page.
+            return self._serve_file(STATIC / "index.html", "text/html; charset=utf-8")
         if route == "/trust":
             # Trust & security page (Stage S13): the same SPA, which
             # unhides its Trust section for this path. Static content

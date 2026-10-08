@@ -278,3 +278,48 @@ submission is AdvancedBackgroundChecks through its corrected form; the other
 31 brokers' statuses are unchanged versus the Wave 2 run; baselines intact
 (214 / 100 / 52,372,427). No code, workflow, channel, or scope changes —
 `brokers.json` data only.
+
+### Addendum (2026-10-08, owner live-run report): false "unreachable" verdicts in Agent Mode — FIXED
+
+The owner ran Agent Mode ("Remove my data everywhere") on production and
+reported the results (screenshots). Outcomes were 4 submitted / 2 letters /
+34 blocked; the blocked set contained verdicts that were **not true**, all
+in the Agent Mode probe path (the account remediation flow was not
+implicated):
+
+1. **CoreLogic, LiveRamp, Epsilon (Conversant)** were reported
+   "unreachable from the server right now". All three are reachable —
+   before the fix and after — in single probes and in a 10-way
+   concurrent burst (HTTP 200). Root cause, found in the code: that
+   sentence was the browser client's catch-all for its own 120-second
+   abort of the deep probe, while the server's deep chain could
+   legitimately run ~160s (direct 15s + relay 3 attempts x 45s +
+   backoff + browser layer). Slow chains were cut off mid-flight and
+   the abort was misreported as a server verdict.
+2. **ClustrMaps** was refused by the SSRF guard ("did not pass the
+   outbound safety check"). Verified via public DNS (dns.google,
+   controls resolving normally): **clustrmaps.com deliberately
+   publishes a loopback A record (127.0.0.1)** for these networks —
+   the guard's refusal is correct; only the wording was jargon.
+3. Contributing factor: a single transient network failure hardened
+   into a permanent "Page unreachable" verdict (no retry anywhere in
+   the direct fetch).
+
+Fix (commit `053b1d5`, staging-first, production deploy
+dep-db3s3djncjis73bjjh50, live 2026-10-08 21:46 IST): the relay layer is
+bounded to 2 attempts x 30s; the client windows are widened (fast 40s,
+deep 150s); a client-side timeout now honestly reports that the check
+timed out before a verdict; the direct fetch retries exactly once on
+transient failures (HTTP answers are verdicts, never retried); the
+non-public-resolution refusal now explains in plain words that the
+broker's site deliberately refuses server networks. Regression tests:
+`tests/test_agent_probe_resilience.py`. Suites: pytest 625 passed /
+22 skipped; CI-parity discovery OK (skipped=2); GitHub CI green.
+Post-deploy evidence, both environments: deep probes for CoreLogic
+and LiveRamp return reachable / HTTP 200 / 1 form in ~44s (inside the
+window with wide margin); ClustrMaps serves the new plain-language
+blocker; Epsilon (Conversant) reports its true CAPTCHA wall and
+InfoTracer its true JavaScript-form wall; baselines intact
+(214 / 100). No broker outcome became a success that was not one
+before — the remaining blocked set is the brokers' documented
+anti-bot wall (403 / CAPTCHA / login / JavaScript), unchanged.

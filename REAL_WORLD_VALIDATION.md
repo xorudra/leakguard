@@ -323,3 +323,46 @@ InfoTracer its true JavaScript-form wall; baselines intact
 (214 / 100). No broker outcome became a success that was not one
 before — the remaining blocked set is the brokers' documented
 anti-bot wall (403 / CAPTCHA / login / JavaScript), unchanged.
+
+### Addendum (2026-10-08, owner request): email route for every broker that publishes one
+
+The owner asked for LeakGuard to "do email to every brokers". At the
+time only 3 of 40 brokers (BeenVerified, PeopleLooker, Nuwber) had a
+recorded email route. All 37 others were researched against the
+broker's OWN site (privacy policy / opt-out page / help centre) or its
+official California data-broker registry entry — pattern-guessed
+addresses were never used, and six initially unverifiable addresses
+were confirmed character-for-character in a live browser (including
+Spokeo's privacy@spokeo.com on its own opt-out page and Social
+Catfish's privacyrequests@socialcatfish.com, its published
+Delete/Opt-Out address).
+
+Result (commit `0b93b26`): 20 brokers gained a verified
+`contact_email` — **23 of 40 brokers now have an email route**.
+Deliberately not added: addresses a source scopes away from consumer
+removal (Equifax, TransUnion, USPhoneBook, FamilyTreeNow, Oracle,
+Neustar) and brokers publishing no usable email (incl. ClustrMaps,
+FastPeopleSearch, SearchPeopleFree, LiveRamp, Radaris, ThatsThem,
+VoterRecords, AdvancedBackgroundChecks, PeekYou, PublicRecordsNow).
+
+Channel honesty: `remediation/policy.py` gained a narrow exception —
+Spokeo, CheckPeople and Data Axle keep the FORM channel (their forms
+are production-proven to submit; `policy._FORM_CHANNEL_BROKERS`,
+replay-pinned in tests) and use the email only as the Agent Mode
+letter fallback. Everywhere else the email channel replaces a wall,
+never a working submission.
+
+Validation (staging dep-db3t3ou7bikc73aaahhg, then production
+dep-db3t74s9v7es738arang, live 2026-10-08 23:03 IST), full 40-broker
+account runs on fresh accounts in BOTH environments, compared
+broker-by-broker against the F1 runs: totals 3 submitted /
+15 needs_human / 22 blocked → **3 / 23 / 14**; the submitted three
+are identical (Spokeo, AdvancedBackgroundChecks, Data Axle); all 17
+changed cases moved from blocked (http_403, form_not_fillable) or
+dead-end reasons (browser_required, captcha, manual_only) to
+needs_human/email_send_required — a ready-to-send letter. Notably,
+Social Catfish's and LexisNexis's CAPTCHA walls and Epsilon
+(Conversant)'s CAPTCHA are bypassed by the brokers' own published
+email channels. Agent Mode plan on production: 23 email routes.
+Baselines intact (214 / 100). Suites: pytest 625 passed / 22
+skipped; CI-parity discovery OK (skipped=2); GitHub CI green.

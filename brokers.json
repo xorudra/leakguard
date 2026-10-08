@@ -131,9 +131,9 @@
     "type": "People search"
   },
   {
-    "method": "Web form — find and remove your record",
+    "method": "Web form via BeenVerified's opt-out portal (NeighborWho's own flow redirects there) — find and remove your record",
     "name": "NeighborWho",
-    "optout_url": "https://www.neighborwho.com/opt-out",
+    "optout_url": "https://www.beenverified.com/svc/optout/search/optouts",
     "region": "US",
     "type": "People search"
   },
@@ -145,9 +145,9 @@
     "type": "People search"
   },
   {
-    "method": "Web form — find record, confirm by email",
+    "method": "Web form — email + CAPTCHA gate, then find record and remove",
     "name": "AdvancedBackgroundChecks",
-    "optout_url": "https://www.advancedbackgroundchecks.com/optout",
+    "optout_url": "https://www.advancedbackgroundchecks.com/removal",
     "region": "US",
     "type": "People search"
   },
@@ -161,7 +161,7 @@
   {
     "method": "Web form — find and remove your record",
     "name": "InfoTracer",
-    "optout_url": "https://members.infotracer.com/optout.aspx",
+    "optout_url": "https://infotracer.com/optout/",
     "region": "US",
     "type": "People search"
   },
@@ -182,7 +182,7 @@
   {
     "method": "Web form — removal request with listing details",
     "name": "SearchQuarry",
-    "optout_url": "https://searchquarry.com/removal-request",
+    "optout_url": "https://www.searchquarry.com/opt-out-new/",
     "region": "US",
     "type": "People search"
   },
@@ -224,21 +224,21 @@
   {
     "method": "Consumer portal — opt out / freeze where eligible",
     "name": "LexisNexis Risk Solutions",
-    "optout_url": "https://consumer.risk.lexisnexis.com/consumerDisclosurePortal",
+    "optout_url": "https://consumer.risk.lexisnexis.com/request",
     "region": "US / Global",
     "type": "Data broker (risk)"
   },
   {
-    "method": "Privacy centre — opt out of marketing data sharing",
+    "method": "Consumer Privacy portal — opt out of marketing data sharing; access, deletion and correction requests",
     "name": "Experian",
-    "optout_url": "https://www.experian.com/privacy/opt-out",
+    "optout_url": "https://consumerprivacy.experian.com/",
     "region": "US / Global",
     "type": "Credit bureau / broker"
   },
   {
-    "method": "Privacy centre — opt-out choices for marketing use",
+    "method": "myPrivacy Preference Center — opt out of sale/sharing, limit sensitive-data use",
     "name": "Equifax",
-    "optout_url": "https://www.equifax.com/personal/privacy-statement/opt-out",
+    "optout_url": "https://myprivacy.equifax.com/opt-in-opt-out/personal-info/",
     "region": "US / Global",
     "type": "Credit bureau / broker"
   },
@@ -250,9 +250,9 @@
     "type": "Credit bureau / broker"
   },
   {
-    "method": "Privacy request form — deletion / do-not-sell",
+    "method": "Privacy portal via Cotality (formerly CoreLogic) — website-data requests; product data largely exempt (GLBA/FCRA)",
     "name": "CoreLogic",
-    "optout_url": "https://www.corelogic.com/privacy/opt-out",
+    "optout_url": "https://www.cotality.com/privacy.aspx",
     "region": "US",
     "type": "Data broker (property)"
   },
@@ -273,7 +273,7 @@
   {
     "method": "Your Privacy Choices — deletion / opt-out request",
     "name": "LiveRamp",
-    "optout_url": "https://liveramp.com/privacy/your-privacy-choices",
+    "optout_url": "https://liveramp.com/privacy/my-privacy-choices",
     "region": "Global",
     "type": "Data broker (ad tech)"
   },

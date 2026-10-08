@@ -243,3 +243,38 @@ rules, nothing was redesigned.
   one instance).
 - The monitoring cycle's execution on 2026-10-15 (L2) — scheduled
   and observable, not yet occurred.
+
+---
+
+## Addendum — F1 resolved (2026-10-08, owner-authorized maintenance)
+
+The 9 stale opt-out addresses (in `brokers.json`, the broker registry) were
+refreshed in a dedicated staging-first cycle. Every replacement was verified
+as the broker's own official opt-out destination, traced from the broker's
+own site or privacy policy — no address was invented, and every one of the 9
+brokers still operates an online route, so none had to be marked unavailable.
+
+| Broker | Before | After (verified destination) | Live outcome after fix (production) |
+|---|---|---|---|
+| NeighborWho | neighborwho.com/opt-out (404) | beenverified.com/svc/optout/search/optouts (NeighborWho's own FAQ/footer flow redirects to its sister brand's portal; same removal system) | blocked / http_403 (portal bot wall — page exists) |
+| AdvancedBackgroundChecks | /optout (404) | /opt-out (the site's own /do-not-sell notice page links it; live form on the page) | **submitted** |
+| InfoTracer | members.infotracer.com/optout.aspx (404) | infotracer.com/optout/ | blocked / form_not_fillable |
+| SearchQuarry | /removal-request (404) | searchquarry.com/opt-out-new/ | needs_human / browser_required |
+| LexisNexis Risk Solutions | /consumerDisclosurePortal (404) | consumer.risk.lexisnexis.com/request | needs_human / captcha |
+| Experian | experian.com/privacy/opt-out (404) | consumerprivacy.experian.com (per Experian's own US Consumer Data Privacy Policy) | needs_human / browser_required |
+| Equifax | /privacy-statement/opt-out (404) | myprivacy.equifax.com/opt-in-opt-out/personal-info/ (per Equifax's own Privacy Statement) | needs_human / browser_required |
+| CoreLogic | corelogic.com/privacy/opt-out (404) | cotality.com/privacy.aspx (company rebranded to Cotality; privacy page links the request portal; method text now states the GLBA/FCRA limits honestly) | blocked / form_not_fillable |
+| LiveRamp | /privacy/your-privacy-choices (404) | liveramp.com/privacy/my-privacy-choices | blocked / form_not_fillable |
+
+Validation: commits `461ef91` + `e6738ba` (the second corrects the first
+AdvancedBackgroundChecks candidate, /removal, which staging validation
+showed still answering 404 — replaced with the broker's own /opt-out form
+page before production ever saw it). Suites: pytest 619 passed / 19 skipped
+(two runs), CI-parity discovery Ran 607 OK, GitHub CI green on both commits.
+Full 40-broker runs executed on staging (twice) and production (fresh test
+account): **http_404 outcomes went 9 → 0 in both environments**; totals moved
+2 submitted / 11 needs_human / 27 blocked → **3 / 15 / 22**; the only new
+submission is AdvancedBackgroundChecks through its corrected form; the other
+31 brokers' statuses are unchanged versus the Wave 2 run; baselines intact
+(214 / 100 / 52,372,427). No code, workflow, channel, or scope changes —
+`brokers.json` data only.

@@ -318,7 +318,7 @@ class TestFakeBrokerWorkflowDb(ServerMixin, unittest.TestCase):
             tag, self._run_tag[:4])
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            {"email": email, "password": PASSWORD})
+            {"email": email, "password": PASSWORD, "policy_accepted": True})
         self.assertEqual(status, 201)
         cookie = headers.get("Set-Cookie").split(";")[0]
         user_id = body["user"]["id"]

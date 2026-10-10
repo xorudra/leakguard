@@ -144,6 +144,10 @@ ALLOWLISTED_LITERALS = {
     # password its re-auth rejection case submits.
     "walk-through-pass-1",
     "not-the-password-1",
+    # tests/test_launch_safety_wave1.py — fixture password for the
+    # throwaway wave-1 accounts (policy acceptance / export /
+    # reset-limit flows); never a real credential.
+    "correct-horse-battery-9",
 }
 
 

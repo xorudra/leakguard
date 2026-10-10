@@ -9,6 +9,14 @@ purpose. The Privacy Center's data export includes the full history.
 Consent precedes capability in this product (migration-plan
 sequencing rule): monitoring, automated remediation and
 notifications all check the current state before acting.
+
+Registration itself is a consent event (Launch Safety Standard
+F26): creating an account requires agreeing to the Privacy Policy
+and Terms, and that acceptance is recorded here — purpose
+"policy_acceptance", granted=true, with the accepted policy's
+version in policy_version (migration 0018). It is NOT one of the
+toggleable PURPOSES: a user cannot withdraw it from the Privacy
+Center; withdrawing from the policy means deleting the account.
 """
 
 from accounts import audit
@@ -16,6 +24,18 @@ from core import errors
 from db import pool
 
 PURPOSES = ("scanning", "monitoring", "automated_remediation", "notifications")
+
+# The registration agreement. POLICY_PURPOSE is deliberately kept
+# OUT of PURPOSES (the capability toggles): current_consents()
+# reports exactly the four toggles, and set_consent() must never
+# let a client flip the policy acceptance itself.
+POLICY_PURPOSE = "policy_acceptance"
+# The policy edition new registrations accept: the effective date
+# shown on the /privacy and /terms pages (static/index.html). Bump
+# this when those pages' effective date changes — registrations
+# after the bump record the new edition, older rows keep theirs,
+# which is exactly what an acceptance record is for.
+CURRENT_POLICY_VERSION = "2026-10-07"
 
 
 def seed_defaults(conn, user_id):
@@ -29,6 +49,20 @@ def seed_defaults(conn, user_id):
         )
 
 
+def record_policy_acceptance(conn, user_id,
+                             policy_version=CURRENT_POLICY_VERSION):
+    """Append the registration policy acceptance for a new user.
+    Runs inside the caller's transaction/connection, like
+    seed_defaults. granted=true, ledger version 1; the accepted
+    policy edition rides in policy_version (0018)."""
+    conn.execute(
+        "INSERT INTO consents (user_id, purpose, version, granted,"
+        " policy_version) VALUES (%s, %s, 1, true, %s)"
+        " ON CONFLICT DO NOTHING",
+        (user_id, POLICY_PURPOSE, policy_version),
+    )
+
+
 def _public(row):
     from accounts.auth import _iso
 
@@ -36,6 +70,7 @@ def _public(row):
         "purpose": row["purpose"],
         "granted": bool(row["granted"]),
         "version": int(row["version"]),
+        "policy_version": row.get("policy_version"),
         "updated_at": _iso(row["created_at"]),
     }
 
@@ -48,7 +83,7 @@ def current_consents(user_id):
     with pool.connection() as conn:
         rows = conn.execute(
             "SELECT DISTINCT ON (purpose) purpose, granted, version,"
-            " created_at FROM consents WHERE user_id = %s"
+            " policy_version, created_at FROM consents WHERE user_id = %s"
             " ORDER BY purpose, version DESC",
             (user_id,),
         ).fetchall()
@@ -59,6 +94,7 @@ def current_consents(user_id):
             "purpose": purpose,
             "granted": False,
             "version": 0,
+            "policy_version": None,
             "updated_at": None,
         }))
     return state
@@ -68,7 +104,8 @@ def history(user_id):
     """The full append-only history (data export)."""
     with pool.connection() as conn:
         rows = conn.execute(
-            "SELECT purpose, granted, version, created_at FROM consents"
+            "SELECT purpose, granted, version, policy_version, created_at"
+            " FROM consents"
             " WHERE user_id = %s ORDER BY created_at, purpose, version",
             (user_id,),
         ).fetchall()

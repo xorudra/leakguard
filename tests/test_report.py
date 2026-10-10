@@ -193,7 +193,7 @@ class ReportDbBase(ServerMixin):
         email = email or "report-%s@example.com" % self.uniq()
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            body={"email": email, "password": PASSWORD},
+            body={"email": email, "password": PASSWORD, "policy_accepted": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
         return self.session_cookie(headers), body["user"]["id"], email

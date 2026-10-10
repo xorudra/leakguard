@@ -144,15 +144,30 @@ def _validate_name(name):
     return cleaned
 
 
-def register(email, password, name=None):
+def register(email, password, name=None, policy_accepted=False):
     """Create an account + consent defaults + a first session.
     Returns (public_user, raw_session_token). The optional name is
-    stored vault-encrypted only (0017), never in plaintext."""
+    stored vault-encrypted only (0017), never in plaintext.
+
+    policy_accepted is the registration agreement (Launch Safety
+    Standard F26): the web sign-up requires the "I agree to the
+    Privacy Policy and Terms" checkbox and this service refuses
+    without it, so no API path can create an account whose policy
+    acceptance was never captured. The acceptance itself is
+    recorded in the consent ledger (accounts/consents.py) inside
+    the same transaction as the account. Internal/test callers
+    that create accounts directly pass policy_accepted=True to
+    state the agreement on the caller's behalf."""
     normalized = normalize_email(email)
     if not EMAIL_RE.match(normalized):
         raise errors.bad_request("invalid_email", "Enter a valid email address")
     _validate_password(password)
     cleaned_name = _validate_name(name)
+    if policy_accepted is not True:
+        raise errors.bad_request(
+            "policy_acceptance_required",
+            "Please agree to the Privacy Policy and Terms to create"
+            " an account")
     digest = account_email_hmac(normalized)
     from accounts import consents
 
@@ -181,6 +196,7 @@ def register(email, password, name=None):
                 ),
             ).fetchone()
             consents.seed_defaults(conn, row["id"])
+            consents.record_policy_acceptance(conn, row["id"])
     except errors.ApiError:
         raise
     except Exception as exc:

@@ -691,7 +691,7 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
         email = "rem-%s@example.com" % self.uniq()
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            body={"email": email, "password": self.PASSWORD},
+            body={"email": email, "password": self.PASSWORD, "policy_accepted": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
         return self.session_cookie(headers), body["user"]["id"], email

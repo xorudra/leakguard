@@ -291,7 +291,7 @@ class TestNotifyBatchDb(unittest.TestCase):
 
         user, _token = auth.register(
             "batch-%s@example.com" % uuid.uuid4().hex[:12],
-            "correct-horse-9")
+            "correct-horse-9", policy_accepted=True)
         uid = user["id"]
         consents.set_consent(uid, "notifications", True)
         ident = self._insert_identifier(uid)

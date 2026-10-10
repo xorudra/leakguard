@@ -210,7 +210,7 @@ class TestPrivacyCenterWalk(ServerMixin, unittest.TestCase):
         # --- register -------------------------------------------------
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            body={"email": email, "password": PASSWORD}, headers=CSRF)
+            body={"email": email, "password": PASSWORD, "policy_accepted": True}, headers=CSRF)
         self.assertEqual(status, 201, body)
         user = body["user"]
         self.assertEqual(user["email_masked"], "w•••@example.com")

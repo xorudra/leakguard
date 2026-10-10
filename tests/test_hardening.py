@@ -252,11 +252,13 @@ class TestAnonymousHardening(ServerMixin, unittest.TestCase):
         # still passing through the limiter, which runs first.
         for _ in range(3):
             status, _h, body = self.request_json(
-                "POST", "/api/scan", body={"email": "not-an-email"})
+                "POST", "/api/scan", body={"email": "not-an-email"},
+                headers=CSRF)
             self.assertEqual(status, 400)
             self.assertEqual(body["error"]["code"], "invalid_email")
         status, headers, body = self.request_json(
-            "POST", "/api/scan", body={"email": "not-an-email"})
+            "POST", "/api/scan", body={"email": "not-an-email"},
+            headers=CSRF)
         self.assertEqual(status, 429)
         self.assertEqual(body["error"]["code"], "rate_limited")
         self.assertIn("request_id", body["error"])
@@ -268,7 +270,8 @@ class TestAnonymousHardening(ServerMixin, unittest.TestCase):
         big = b'{"email": "' + b"a" * (300 * 1024) + b'"}'
         status, _h, body = self.request_json(
             "POST", "/api/scan", raw=big,
-            headers={"Content-Type": "application/json"})
+            headers={"Content-Type": "application/json",
+                     "X-Requested-With": "fetch"})
         self.assertEqual(status, 413)
         self.assertEqual(body["error"]["code"], "body_too_large")
 
@@ -361,7 +364,7 @@ class TestRouteLimitsDb(PgMixin, ServerMixin, unittest.TestCase):
         email = "hard-%s@example.com" % self.uniq()
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            body={"email": email, "password": self.PASSWORD}, headers=CSRF)
+            body={"email": email, "password": self.PASSWORD, "policy_accepted": True}, headers=CSRF)
         return status, headers, body
 
     def test_register_ip_cap(self):

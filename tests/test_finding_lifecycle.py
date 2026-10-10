@@ -276,7 +276,7 @@ class AccountMixin:
         email = "lc-%s@example.com" % self.uniq()
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            body={"email": email, "password": self.PASSWORD},
+            body={"email": email, "password": self.PASSWORD, "policy_accepted": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
         return self.session_cookie(headers), body["user"]["id"], email
@@ -640,6 +640,17 @@ class TestLifecycleMigrationUpgrade(PgClassMixin, AccountMixin,
             conn.execute(
                 "INSERT INTO schema_migrations (name) VALUES (%s)",
                 (path17.name,))
+            # 0018 (consent policy_version, 2026-10-10) is likewise
+            # pre-applied out of order: current auth code records
+            # the registration policy acceptance into that column
+            # when this class's fixture registers, and 0018 is
+            # independent of the 0012 backfill under test.
+            path18 = [p for p in cls.migrate.migration_files()
+                      if p.name.startswith("0018")][0]
+            conn.execute(path18.read_text(encoding="utf-8"))
+            conn.execute(
+                "INSERT INTO schema_migrations (name) VALUES (%s)",
+                (path18.name,))
         from remediation import registry_seed
 
         registry_seed.seed_brokers()

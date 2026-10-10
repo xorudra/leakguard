@@ -721,6 +721,16 @@ class Handler(BaseHTTPRequestHandler):
                 or route.startswith("/api/remediation/cases/"):
             return self._accounts_post(route)
         if route == "/api/agent/plan":
+            # CSRF guard on the anonymous POST routes too (Launch
+            # Safety Standard A2): same rule as the account routes.
+            # The product's own callers are unaffected — the web UI
+            # sends X-Requested-With on these calls (and is
+            # same-origin besides), and local_agent.py never calls
+            # these endpoints at all: the local runner executes the
+            # agent engine in-process on the user's device (see its
+            # module docstring), so no cross-context client exists
+            # to break.
+            security.require_csrf(self)
             payload = self._read_json_body()
             if payload is None:
                 return self._fail(errors.invalid_json())
@@ -739,6 +749,7 @@ class Handler(BaseHTTPRequestHandler):
                 "engine": "zero-token deterministic scripts (playbooks + live form probe) — no AI involved",
             })
         if route == "/api/agent/probe":
+            security.require_csrf(self)
             self._enforce_rate_limit("agent_probe",
                                      "ip:" + self._client_ip())
             payload = self._read_json_body()
@@ -756,6 +767,7 @@ class Handler(BaseHTTPRequestHandler):
                 result = agent_engine.probe_broker(broker, profile)
             return self._json(200, result)
         if route == "/api/agent/submit":
+            security.require_csrf(self)
             self._enforce_rate_limit("agent_submit",
                                      "ip:" + self._client_ip())
             payload = self._read_json_body()
@@ -785,6 +797,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, agent_engine.submit_form(action, method, clean))
         if route != "/api/scan":
             return self._fail(errors.not_found())
+        security.require_csrf(self)
         self._enforce_rate_limit("anon_scan", "ip:" + self._client_ip())
         payload = self._read_json_body()
         if payload is None:
@@ -870,7 +883,7 @@ class Handler(BaseHTTPRequestHandler):
             user, token = self._call(
                 auth_service.register,
                 payload.get("email"), payload.get("password"),
-                payload.get("name"))
+                payload.get("name"), payload.get("policy_accepted"))
             return self._json(201, {"user": user}, extra_headers=[
                 ("Set-Cookie", sessions_mod.cookie_header(token))])
 
@@ -909,6 +922,12 @@ class Handler(BaseHTTPRequestHandler):
             payload = self._read_json_body()
             if payload is None:
                 return self._fail(errors.invalid_json())
+            # Per-IP cap (Launch Safety Standard A10): the tokens
+            # themselves are 256-bit, single-use and expire in an
+            # hour, so this is defence in depth — reset attempts get
+            # the same uniform treatment as every other route class.
+            self._enforce_rate_limit("reset_password",
+                                     "ip:" + self._client_ip())
             self._call(auth_service.reset_password,
                        payload.get("token"), payload.get("new_password"))
             return self._json(200, {"ok": True})

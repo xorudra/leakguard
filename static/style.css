@@ -195,6 +195,8 @@ footer a{color:var(--muted)}
 .consentRow .cText b{display:block;font-size:14.5px}
 .consentRow .cText span{color:var(--faint);font-size:12.5px;line-height:1.45;display:block;margin-top:2px}
 .consentRow input{width:auto;margin:0;accent-color:var(--green);transform:scale(1.35);flex:none}
+.checkRow{display:flex;gap:9px;align-items:flex-start;font-size:13.5px;line-height:1.45;margin-top:10px}
+.checkRow input{width:auto;margin:2px 0 0;accent-color:var(--green);transform:scale(1.3);flex:none}
 
 /* ---------- action center (Stage S9) ---------- */
 #acScoreText{font-size:16.5px;font-weight:700;margin:0}

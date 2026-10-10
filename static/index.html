@@ -83,6 +83,13 @@
             <input type="text" id="acName" maxlength="80" placeholder="e.g. Rudra" autocomplete="name">
           </label>
         </div>
+        <div id="acPolicyWrap" hidden>
+          <label class="checkRow">
+            <input type="checkbox" id="acPolicy">
+            I agree to the <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>
+            and <a href="/terms" target="_blank" rel="noopener">Terms of use</a>
+          </label>
+        </div>
         <label>Email address
           <input type="email" id="acEmail" required placeholder="you@example.com" autocomplete="email">
         </label>
@@ -685,8 +692,10 @@
 
     <h3>Your rights, in practice</h3>
     <ul>
-      <li><strong>See everything:</strong> Privacy Center → “Download my data” exports all of it
-      as one file (JSON or CSV).</li>
+      <li><strong>See everything:</strong> Privacy Center → “Download my data” exports your
+      account details, saved details, scan history and findings, removal cases, notifications,
+      settings and consent history as one file (JSON or CSV). Passkeys and API tokens appear as
+      names and dates only — never the keys themselves.</li>
       <li><strong>Withdraw permission:</strong> every consent switch in the Privacy Center takes
       effect instantly and is recorded.</li>
       <li><strong>Delete everything:</strong> Privacy Center → “Delete account”. You are signed
@@ -801,7 +810,9 @@
       may remain; it contains no email or saved-detail values.</li>
       <li>In the Privacy Center you can download your data as JSON or CSV after entering
       your password again. The export includes your account email and saved details in
-      full because they are yours; protect the file.</li>
+      full because they are yours, plus your scan history and findings, removal cases,
+      notifications, settings and consent history; passkeys and API tokens are listed by
+      name and dates only, never the keys themselves. Protect the file.</li>
     </ul>
 
     <h3>Contact</h3>

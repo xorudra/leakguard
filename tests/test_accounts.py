@@ -194,7 +194,7 @@ class TestAccountsUnavailable(ServerMixin, unittest.TestCase):
     def test_register_503_structured(self):
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            body={"email": "a@example.com", "password": "long-enough-1"},
+            body={"email": "a@example.com", "password": "long-enough-1", "policy_accepted": True},
             headers=CSRF)
         self.assertEqual(status, 503)
         self.assertEqual(body["error"]["code"], "db_unavailable")
@@ -294,7 +294,8 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
 
     def register(self, email=None, password=None, name=None):
         email = email or self.unique_email()
-        payload = {"email": email, "password": password or self.PASSWORD}
+        payload = {"email": email, "password": password or self.PASSWORD,
+                   "policy_accepted": True}
         if name is not None:
             payload["name"] = name
         status, headers, body = self.request_json(

@@ -38,6 +38,7 @@ DEFAULT_LIMITS = {
     "agent_probe": (30, 3600),          # POST /api/agent/probe, per IP
     "agent_submit": (30, 3600),         # POST /api/agent/submit, per IP
     "forgot_password": (5, 3600),       # POST /api/auth/forgot-password, per IP
+    "reset_password": (10, 3600),       # POST /api/auth/reset-password, per IP
     "register": (10, 3600),             # POST /api/auth/register, per IP
     "user_scans": (10, 3600),           # POST /api/scans, per user
     "user_remediation_run": (6, 3600),  # POST /api/remediation/run, per user

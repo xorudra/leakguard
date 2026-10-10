@@ -26,7 +26,7 @@ $("scanForm").addEventListener("submit", async (e) => {
   try {
     const resp = await fetch("/api/scan", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
       body: JSON.stringify({ email, password }),
     });
     const data = await resp.json();
@@ -315,7 +315,7 @@ $("planBtn").addEventListener("click", async () => {
   try {
     const resp = await fetch("/api/agent/plan", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
       body: JSON.stringify(profile),
     });
     const data = await resp.json();
@@ -374,7 +374,7 @@ async function probeBroker(broker, btn) {
   try {
     const resp = await fetch("/api/agent/probe", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
       body: JSON.stringify({ broker, profile: agentProfile(), deep: true }),
     });
     const d = await resp.json();
@@ -486,7 +486,7 @@ async function fetchTimeout(url, opts, ms) {
 async function probeMode(broker, profile, deep) {
   const resp = await fetchTimeout("/api/agent/probe", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
     body: JSON.stringify({ broker, profile, deep: !!deep }),
   }, deep ? 150000 : 40000);
   const d = await resp.json();
@@ -498,7 +498,7 @@ async function autoSubmit(broker, probe) {
   const form = probe.forms[probe.forms.length - 1];
   const resp = await fetchTimeout("/api/agent/submit", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
     body: JSON.stringify({ confirm: true, broker, form_action: form.action, method: form.method, payload: probe.payload_preview || {} }),
   }, 30000);
   const d = await resp.json();
@@ -539,7 +539,7 @@ $("autoBtn").addEventListener("click", async () => {
     if (!window.__plan) {
       const resp = await fetchTimeout("/api/agent/plan", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
         body: JSON.stringify(profile),
       }, 30000);
       const data = await resp.json();
@@ -831,6 +831,7 @@ let registerMode = false;
 function setRegisterMode(on) {
   registerMode = on;
   $("acNameWrap").hidden = !on;
+  $("acPolicyWrap").hidden = !on;
   $("acRegisterBtn").textContent = on ? "Create my account" : "Create free account";
   if (on) $("acName").focus();
 }
@@ -855,11 +856,18 @@ $("acRegisterBtn").addEventListener("click", async () => {
     $("acName").focus();
     return;
   }
+  if (!$("acPolicy").checked) {
+    // Client-side mirror of the server rule (the API refuses
+    // without policy_accepted too): no agreement, no account.
+    $("acStatus").textContent = "Please tick the box to agree to the Privacy Policy and Terms first.";
+    $("acPolicy").focus();
+    return;
+  }
   $("acStatus").textContent = "Creating your account…";
   try {
     const r = await apiJson("/api/auth/register", {
       method: "POST", headers: AH,
-      body: JSON.stringify({ email, password, name }),
+      body: JSON.stringify({ email, password, name, policy_accepted: true }),
     });
     if (!r.ok) throw new Error(errMsg(r.data, "Could not create the account"));
     meUser = r.data.user;

@@ -181,7 +181,8 @@ class TestVersioningNoDb(ServerMixin, unittest.TestCase):
     def test_anonymous_scan_validation_same(self):
         for path in ("/api/scan", "/api/v1/scan"):
             status, _h, body = self.request_json(
-                "POST", path, body={"email": "not-an-email"})
+                "POST", path, body={"email": "not-an-email"},
+                headers=CSRF)
             self.assertEqual(status, 400, path)
             self.assertEqual(body["error"]["code"], "invalid_email", path)
 
@@ -196,7 +197,7 @@ class TestVersioningNoDb(ServerMixin, unittest.TestCase):
         # CSRF guard answering (an unnormalized path would 404).
         status, _h, body = self.request_json(
             "POST", "/api/v1/auth/register",
-            body={"email": "a@example.com", "password": "long-enough-1"})
+            body={"email": "a@example.com", "password": "long-enough-1", "policy_accepted": True})
         self.assertEqual(status, 403)
         self.assertEqual(body["error"]["code"], "csrf_failed")
 
@@ -283,7 +284,8 @@ class AccountMixin:
         email = "batchb-%s@example.com" % self.uniq()
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            body={"email": email, "password": self.PASSWORD},
+            body={"email": email, "password": self.PASSWORD,
+                  "policy_accepted": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
         return self.session_cookie(headers), body["user"]["id"], email
@@ -414,8 +416,10 @@ class TestBatchBDb(PgClassMixin, ServerMixin, AccountMixin,
         self.assertEqual(csv_values["value"], json_ident["value"])
         self.assertEqual(csv_values["masked"], json_ident["masked"])
         account_rows = [r for r in rows[1:] if r[0] == "account"]
+        # The CSV carries precisely the JSON's account fields —
+        # 'name' included (wave-1 F29 fix: it was silently dropped).
         self.assertEqual({r[2] for r in account_rows},
-                         {"email", "email_masked", "created_at"})
+                         {"email", "email_masked", "name", "created_at"})
 
         # Both successful exports were audited, with their formats.
         audit_rows = self.db_rows(
@@ -463,7 +467,8 @@ class TestBatchBDb(PgClassMixin, ServerMixin, AccountMixin,
         self.assertEqual(body["error"]["code"], "feature_disabled")
         # The anonymous Quick Scan is never flag-gated.
         status, _h, body = self.request_json(
-            "POST", "/api/scan", body={"email": "test@example.com"})
+            "POST", "/api/scan", body={"email": "test@example.com"},
+            headers=CSRF)
         self.assertEqual(status, 200)
         self.assertIn("breach_count", body)
         del os.environ["LEAKGUARD_FLAG_ACCOUNT_SCANS"]

@@ -45,7 +45,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-PAGES = ("/", "/privacy", "/terms", "/support", "/trust", "/reset")
+PAGES = ("/", "/privacy", "/terms", "/support", "/trust", "/reset", "/signin")
 RELAY_PORT = 8899
 
 MEASURE_JS = """() => {

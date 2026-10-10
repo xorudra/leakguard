@@ -49,7 +49,10 @@ class ApiTestCase(unittest.TestCase):
     def request(self, method, path, body=None, raw=None):
         url = self.base + path
         data = raw
-        headers = {}
+        # The product's own frontend sends X-Requested-With on every
+        # call (the server's CSRF guard requires it on POST routes,
+        # anonymous ones included), so the test client does too.
+        headers = {"X-Requested-With": "fetch"}
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"

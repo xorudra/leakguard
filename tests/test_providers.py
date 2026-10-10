@@ -374,7 +374,8 @@ class ServerCase(unittest.TestCase):
 
     def request_json(self, method, path, body=None):
         data = json.dumps(body).encode("utf-8") if body is not None else None
-        headers = {"Content-Type": "application/json"} if body else {}
+        headers = ({"Content-Type": "application/json",
+                    "X-Requested-With": "fetch"} if body else {})
         req = urllib.request.Request(self.base + path, data=data,
                                      headers=headers, method=method)
         try:

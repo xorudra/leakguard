@@ -734,7 +734,11 @@
       exposed field names, confidence and an evidence hash — not the raw saved detail.
       Removal cases record the broker, status and evidence. If a removal letter is
       generated, it necessarily contains the details you supplied for that letter and is
-      shown only in your account.</li>
+      shown only in your account. When you start a removal run under the
+      automated-remediation consent, LeakGuard also sends that letter to the broker
+      for you, as your authorized agent, through the email processor listed below —
+      the letter states that LeakGuard acts as your agent, and the broker's replies
+      are addressed to your own email address, not to LeakGuard.</li>
       <li><strong>Settings, permissions and notifications:</strong> your consent history,
       monitoring choices and in-app notifications are stored so those features work.</li>
     </ul>
@@ -760,7 +764,7 @@
       <tbody>
         <tr><td>Render</td><td>Application hosting</td><td>Oregon, United States; runs the LeakGuard service</td></tr>
         <tr><td>Neon</td><td>Database</td><td>AWS ap-southeast-1, Singapore; stores the encrypted and hashed account data above</td></tr>
-        <tr><td>Brevo</td><td>Email delivery</td><td>Receives the recipient email address and message when LeakGuard sends a reset or notification email</td></tr>
+        <tr><td>Brevo</td><td>Email delivery</td><td>Receives the recipient email address and message when LeakGuard sends a reset or notification email, or a removal letter it sends to a broker as your authorized agent</td></tr>
         <tr><td>XposedOrNot</td><td>Email breach source</td><td>Receives the email address being checked</td></tr>
         <tr><td>Have I Been Pwned</td><td>Password exposure source</td><td>Receives only a five-character SHA-1 prefix, never the password</td></tr>
         <tr><td>DuckDuckGo</td><td>Public-web discovery</td><td>Receives the public search query used for a scan</td></tr>
@@ -768,6 +772,24 @@
       </tbody>
     </table>
     <p>There is no advertising, analytics tracking, or sale of account data in LeakGuard.</p>
+
+    <h3>Cookies and browser storage</h3>
+    <p>LeakGuard sets no advertising or analytics cookies and uses nothing that
+    tracks you across other websites. It uses only:</p>
+    <ul>
+      <li><strong>One sign-in cookie (essential):</strong> a first-party cookie named
+      <code>lg_session</code> keeps you signed in for up to 30 days. It holds only a
+      random session token — the server stores just a digest of it — and is marked
+      HttpOnly, Secure and SameSite=Lax, so page scripts cannot read it and it is
+      only sent over HTTPS. Signing out deletes it.</li>
+      <li><strong>On-device storage:</strong> your browser keeps a few items on your
+      own device only — your removal-progress marks and a short summary of your last
+      Quick Scan — so the page can show your progress when you return. The server
+      never receives them; clearing your browser storage removes them.</li>
+      <li><strong>Offline shell:</strong> a service worker caches the site's static
+      files (the page, styles and scripts) so LeakGuard loads quickly. It never
+      caches account data or API responses.</li>
+    </ul>
 
     <h3>Retention, export and deletion</h3>
     <ul>

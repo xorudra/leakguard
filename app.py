@@ -96,6 +96,34 @@ SECURITY_TXT = (
     "Preferred-Languages: en\n"
 )
 
+# Human-facing 404 for browser navigations to unknown non-API paths
+# (Launch Safety Standard item 39, 2026-10-11). API clients keep the
+# structured JSON error; a person who mistyped a link gets a readable
+# page with a way back instead of raw JSON. Self-contained on purpose
+# (inline styles): an error page must render even if assets fail.
+NOT_FOUND_HTML = (
+    "<!DOCTYPE html>\n"
+    "<html lang=\"en\">\n"
+    "<head>\n"
+    "<meta charset=\"utf-8\">\n"
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+    "<title>Page not found — LeakGuard</title>\n"
+    "</head>\n"
+    "<body style=\"font-family:system-ui,sans-serif;margin:0;"
+    "background:#0b0e13;color:#e8ecf1\">\n"
+    "<main style=\"max-width:34rem;margin:18vh auto;padding:0 1.25rem;"
+    "text-align:center\">\n"
+    "<h1 style=\"font-size:1.6rem;margin:0 0 .75rem\">Page not found</h1>\n"
+    "<p style=\"color:#aab4c0;line-height:1.55\">That page doesn't exist "
+    "— the link may be old, or the address may have a typo.</p>\n"
+    "<p style=\"margin-top:1.75rem\">"
+    "<a href=\"/\" style=\"color:#7cc4ff\">Go to the LeakGuard home "
+    "page</a></p>\n"
+    "</main>\n"
+    "</body>\n"
+    "</html>\n"
+)
+
 
 def _provider(capability):
     """First registered provider declaring `capability`, or None."""
@@ -683,6 +711,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._fail(errors.not_found("Scan not found"))
             return self._json(200, self._call(
                 scan_jobs_service.get_job, user["id"], job_id))
+        # Item 39 (2026-10-11): a browser navigation to an unknown
+        # page gets the readable HTML 404; everything else (API
+        # clients, fetch calls, health checks) keeps the structured
+        # JSON error exactly as before. The page is stamped no-store
+        # explicitly because _send only auto-stamps JSON/API routes.
+        accept = self.headers.get("Accept") or ""
+        if ("text/html" in accept and not route.startswith("/api/")
+                and not route.startswith("/static/")):
+            return self._send(404, NOT_FOUND_HTML,
+                              "text/html; charset=utf-8",
+                              extra_headers=[("Cache-Control", "no-store")])
         return self._fail(errors.not_found())
 
     def _read_json_body(self):

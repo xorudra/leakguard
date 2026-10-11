@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Recorded mobile-viewport check (spec Phase 97).
 
-Loads the main pages in headless Chromium at two mobile/tablet
-viewports and asserts, per page per viewport:
+Loads the main pages in headless Chromium at small-phone, phone,
+tablet and desktop viewports and asserts, per page per viewport:
 
   * no horizontal overflow —
     document.documentElement.scrollWidth <= window.innerWidth + 1;
@@ -35,7 +35,9 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 PAGES = ("/", "/privacy", "/terms", "/support", "/trust", "/reset")
-VIEWPORTS = ((360, 740), (768, 1024))
+# 320 = small-phone floor (Launch Safety item 37), 360 = mainstream
+# phone, 768 = tablet, 1280 = desktop.
+VIEWPORTS = ((320, 700), (360, 740), (768, 1024), (1280, 800))
 RELAY_PORT = 8899
 MOBILE_UA = (
     "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "

@@ -245,6 +245,11 @@ input:-webkit-autofill{-webkit-box-shadow:0 0 0 60px var(--elev) inset;-webkit-t
   .card{padding:20px 16px}
   .topbar nav{display:none}
   .scoreRow{gap:16px}
+  /* Item 37 (2026-10-11): the privacy policy table's min-content
+     width (~306px) overflowed a 320px viewport by 18px. Tighter
+     cells + anywhere-wrapping lets it fit small phones. */
+  .policyTable{font-size:13px}
+  .policyTable th,.policyTable td{padding:7px 6px;overflow-wrap:anywhere}
 }
 @media (prefers-reduced-motion:reduce){
   *{transition:none!important;animation:none!important;scroll-behavior:auto!important}

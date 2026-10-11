@@ -1,0 +1,33 @@
+-- 0019_identifiers_user_idx.sql — per-user index for the identifiers
+-- vault (Launch Safety Standard item 32 audit, 2026-10-11).
+--
+-- The item-32 audit compared the hot query patterns against every
+-- existing index and found exactly one per-user table without a
+-- user-leading index: identifiers. The queries it serves:
+--   * accounts/identifiers.list_identifiers — runs on every
+--     dashboard load:
+--       WHERE user_id = %s AND deleted_at IS NULL
+--       ORDER BY created_at, id
+--   * accounts/privacy export — WHERE user_id = %s
+--   * core/retention account erasure — DELETE ... WHERE user_id = %s
+--     (no deleted_at filter, which is why this index is deliberately
+--     NOT partial: it must serve that delete too.)
+-- Identifiers previously had only hmac_lookup and member_id indexes,
+-- while every sibling table (sessions, consents, scan_jobs, findings,
+-- domains, cases, tokens...) already leads with user_id.
+--
+-- Evidence (scratch database, seeded 300 users / 1,800 identifiers /
+-- 30,000 scan_jobs / 90,000 findings / 15,000 notifications, local
+-- pgserver; full plans in the audit note): the list query planned a
+-- Seq Scan on identifiers BEFORE and a Bitmap Index Scan on this
+-- index AFTER (0.240 ms -> 0.161 ms at seed scale); the (created_at,
+-- id) tail matches the ORDER BY, so the sort step disappears as the
+-- table grows. The other audited hot patterns (worker claim,
+-- findings lists, notification dedupe) already used their indexes —
+-- no further indexes were added: an index no query needs taxes
+-- every write.
+--
+-- Reversible: DROP INDEX identifiers_user_created_idx;
+
+CREATE INDEX IF NOT EXISTS identifiers_user_created_idx
+    ON identifiers (user_id, created_at, id);

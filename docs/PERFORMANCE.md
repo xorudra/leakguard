@@ -210,3 +210,27 @@ link the local bench above cannot reproduce:
   connection-churn residual above (hook reads over the WAN
   link), not per-row work: both the lifecycle writer and the
   notification writer are now constant-statement.
+
+### k6 load test (Launch Safety item 34, 2026-10-11)
+
+`tools/load_test.js` (k6 v2.3.0) now lives in the repo alongside
+bench.py. Profile: ramp 0→10 VUs (30 s), hold 20 (60 s), spike 50
+(30 s), down (30 s) — read-only public surface (`/`, `/privacy`,
+`/api/health`, `/api/brokers`) against a LOCALLY booted instance
+(this VM, pgserver keeper database, `LEAKGUARD_PROVIDERS=mock`).
+Never production. The anonymous scan POST is excluded on purpose:
+it is per-IP rate-limited by design, so a single-machine run would
+measure the limiter (bench phase f1 already proved the limiter
+sheds with clean 429s and zero 5xx).
+
+| Metric | Value |
+|---|---|
+| Requests | 13,032 (87 req/s over 2m30s) |
+| Failed requests | 0.00% (threshold < 1%) |
+| Checks | 13,032/13,032 passed (every response 200) |
+| Duration avg / p90 / p95 / max | 9.17 ms / 13.2 ms / 16.15 ms / 208 ms (p95 threshold < 1000 ms) |
+
+The breaking point was NOT reached inside this profile — nothing
+broke at 50 VUs locally. What breaks first beyond it stays the
+documented ceiling above: the single instance's CPU and the
+per-operation connection churn (bench f2), not the request code.

@@ -706,18 +706,21 @@ class TestLifecycleMigrationUpgrade(PgClassMixin, AccountMixin,
         applied = self.migrate.run_migrations()
         # 0012 is the migration under test; 0013 (error ledger,
         # Phase 76), 0014 (provider usage, Phases 66/124),
-        # 0015 (data-quality flags + ledgers, Phase 160) and
-        # 0016 (attempt workflow versions, Phase 31) are later
-        # additive migrations the runner also applies — they
-        # touch no findings lifecycle state (0015 adds
+        # 0015 (data-quality flags + ledgers, Phase 160),
+        # 0016 (attempt workflow versions, Phase 31) and
+        # 0019 (identifiers per-user index, Launch Safety item 32)
+        # are later additive migrations the runner also applies —
+        # they touch no findings lifecycle state (0015 adds
         # default-false dq flag columns only; 0016 adds a
-        # nullable column to remediation_attempts only).
+        # nullable column to remediation_attempts only; 0019 adds
+        # an index on identifiers only).
         # 0017 was pre-applied in setUpClass (see there).
         self.assertEqual(applied, ["0012_finding_lifecycle.sql",
                                    "0013_error_events.sql",
                                    "0014_provider_usage.sql",
                                    "0015_data_quality.sql",
-                                   "0016_attempt_workflow_version.sql"])
+                                   "0016_attempt_workflow_version.sql",
+                                   "0019_identifiers_user_idx.sql"])
 
         self.assertEqual(self.identity_state(uid, iid, "BreachX"),
                          ("open", None))

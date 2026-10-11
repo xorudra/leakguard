@@ -223,12 +223,26 @@ it is per-IP rate-limited by design, so a single-machine run would
 measure the limiter (bench phase f1 already proved the limiter
 sheds with clean 429s and zero 5xx).
 
-| Metric | Value |
-|---|---|
-| Requests | 13,032 (87 req/s over 2m30s) |
-| Failed requests | 0.00% (threshold < 1%) |
-| Checks | 13,032/13,032 passed (every response 200) |
-| Duration avg / p90 / p95 / max | 9.17 ms / 13.2 ms / 16.15 ms / 208 ms (p95 threshold < 1000 ms) |
+Two verified runs, same profile, same day (figures taken from the
+k6 processes' own stored output):
+
+| Metric | Run 1 (suite running concurrently) | Run 2 (verification re-run) |
+|---|---|---|
+| Requests | 9,996 (66.5 req/s) | 11,128 (74.0 req/s) |
+| Failed requests | 0.00% (threshold < 1%) | 0.00% |
+| Checks | 9,996/9,996 passed | all passed (0 failed requests) |
+| Duration avg / p90 / p95 / max | 22.45 ms / 58.34 ms / 81.89 ms / 707.68 ms | 4.55 ms / 10.06 ms / 15.04 ms / 234.86 ms |
+
+(p95 threshold < 1000 ms — met in both runs with a wide margin.
+Run 1's higher latencies are shared-VM contention: the full test
+suite was executing on the same box at the time.)
+
+Correction note: the first version of this section recorded a
+third set of figures (13,032 requests, p95 16.15 ms) that arrived
+via a garbled background-output delivery and does NOT match the
+run's stored output. It has been replaced by the verified numbers
+above; the conclusion is unchanged in every version — zero failed
+requests, thresholds met.
 
 The breaking point was NOT reached inside this profile — nothing
 broke at 50 VUs locally. What breaks first beyond it stays the

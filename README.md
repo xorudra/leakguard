@@ -4,9 +4,9 @@
 
 ### Your data got leaked. Find it. Remove it.
 
-### 🌐 Live Website: [leakguard-hh8e.onrender.com](https://leakguard-hh8e.onrender.com)
+### 🌐 Live Website: [leakguard.140-238-244-82.sslip.io](https://leakguard.140-238-244-82.sslip.io)
 
-[![Live Demo](https://img.shields.io/badge/▶_Live_Demo-leakguard--hh8e.onrender.com-2ea043?style=for-the-badge)](https://leakguard-hh8e.onrender.com)
+[![Live Demo](https://img.shields.io/badge/▶_Live_Demo-leakguard.140--238--244--82.sslip.io-2ea043?style=for-the-badge)](https://leakguard.140-238-244-82.sslip.io)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Dependencies](https://img.shields.io/badge/Dependencies-3_runtime-important?style=for-the-badge)
 ![Cost](https://img.shields.io/badge/Cost-₹0_Free-success?style=for-the-badge)
@@ -124,7 +124,7 @@ Tokens are **read-only by construction**: they authenticate `GET` requests only,
 
 ```bash
 TOKEN="lg_REPLACE_WITH_YOUR_TOKEN"
-BASE="https://leakguard-hh8e.onrender.com"
+BASE="https://leakguard.140-238-244-82.sslip.io"
 
 curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/action-center
 curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/scans
@@ -134,7 +134,7 @@ curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/notifications
 curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/monitoring/timeline
 ```
 
-Token management itself is session-only (`GET`/`POST /api/tokens`, `DELETE /api/tokens/<id>` from the Privacy Center). A revoked or unknown token answers the same `401` as being signed out. `GET /api/providers/health` stays public. What the platform stores, who processes data, and how long anything is kept: **[Trust & security](https://leakguard-hh8e.onrender.com/trust)**.
+Token management itself is session-only (`GET`/`POST /api/tokens`, `DELETE /api/tokens/<id>` from the Privacy Center). A revoked or unknown token answers the same `401` as being signed out. `GET /api/providers/health` stays public. What the platform stores, who processes data, and how long anything is kept: **[Trust & security](https://leakguard.140-238-244-82.sslip.io/trust)**.
 
 ## 🗂️ Project layout
 
@@ -169,7 +169,7 @@ Token management itself is session-only (`GET`/`POST /api/tokens`, `DELETE /api/
 
 ## ❓ FAQ
 
-**Is it really free?** Yes — the breach APIs are free, the code has only three small runtime dependencies, and it runs on Render's and Neon's free tiers. ₹0.
+**Is it really free?** Yes — the breach APIs are free, the code has only three small runtime dependencies, and it runs on Oracle Cloud's and Neon's free tiers. ₹0.
 
 **Does LeakGuard store my email or scan results?** For the anonymous Quick Scan, no — it is per-request and nothing is kept. If you create an account, yes: your saved details (encrypted), scans and removal cases are stored so monitoring and one-command removal work — and the Privacy Center gives you a full export and a delete that purges them.
 

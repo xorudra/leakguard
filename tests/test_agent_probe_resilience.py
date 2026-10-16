@@ -131,11 +131,16 @@ class TestRelayBounds(unittest.TestCase):
             calls.append(timeout)
             raise urllib.error.URLError("relay down")
 
-        with mock.patch("urllib.request.urlopen", fake_urlopen), \
+        # Since the audit 2026-10-16 relay fix, the relay fetch
+        # goes through the connection-pinned SSRF opener, never
+        # plain urllib.request.urlopen — patch that seam.
+        with mock.patch.object(agent._ssrf, "pinned_urlopen",
+                               fake_urlopen), \
                 mock.patch("time.sleep", lambda _s: None):
             out = agent.relay_probe("https://broker.example/optout", {})
         self.assertEqual(calls, [30, 30])
         self.assertFalse(out["reachable"])
+        self.assertTrue(out["unconfirmed"])
         self.assertTrue(any("Relay reader could not fetch" in b
                             for b in out["blockers"]))
 

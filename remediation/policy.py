@@ -43,7 +43,7 @@ mapping as well — renaming a spec-facing name is a policy change.
 
 import re
 
-POLICY_VERSION = 1
+POLICY_VERSION = 2
 
 # The internal case states, in the order the CHECK in migration
 # 0005_remediation.sql declares them (that CHECK is the
@@ -258,6 +258,14 @@ def decide_probe(probe, profile, field_patterns):
     if not probe.get("reachable"):
         status = probe.get("status")
         return "blocked", ("http_%s" % status) if status else "unreachable"
+    forms = probe.get("forms") or []
+    if forms and all(isinstance(f, dict) and f.get("unconfirmed")
+                     for f in forms):
+        # Every form on offer came through the third-party relay
+        # (POLICY_VERSION 2, audit 2026-10-16): an untrusted
+        # producer's form is a hint for the human, never an
+        # automatic submission.
+        return "needs_human", "relay_form_unconfirmed"
     if probe.get("fillable"):
         return "submit", None
     if not probe.get("forms"):

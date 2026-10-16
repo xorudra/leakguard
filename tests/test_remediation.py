@@ -321,6 +321,9 @@ _RELAY_FORM = [{
     "fields": [{"name": "email", "type": "email", "id": "",
                 "placeholder": ""}],
     "unmapped_fields": [],
+    # Production relay_probe marks every form it returns
+    # unconfirmed (audit 2026-10-16) — the fixture mirrors it.
+    "unconfirmed": True,
 }]
 
 _FILLABLE_RELAY = {"via": "relay", "reachable": True, "status": 200,
@@ -430,8 +433,10 @@ class TestAgentExecutorProbeStrategy(unittest.TestCase):
 
     def test_error_page_still_escalates_once(self):
         # The gate closes only on a RECEIVED page: an HTTP error
-        # page (403 wall) still gets its one relay escalation, which
-        # can un-wall it via the reader and reach a fillable form.
+        # page (403 wall) still gets its one relay escalation,
+        # which un-walls it via the reader — but the relay's form
+        # is unconfirmed (audit 2026-10-16), so the case parks for
+        # the human rather than auto-submitting.
         executor, calls = self._executor(
             _fast_probe(status=403,
                         blockers=["Site answered HTTP 403 to a script "
@@ -442,7 +447,7 @@ class TestAgentExecutorProbeStrategy(unittest.TestCase):
                          ["https://www.spokeo.com/optout"])
         self.assertEqual(result["via"], "http+relay")
         self.assertEqual(engine_mod.interpret_probe(result, PROFILE),
-                         ("submit", None))
+                         ("needs_human", "relay_form_unconfirmed"))
         self.assertEqual(self.browser_calls, [])
 
     def test_stage72_defaults(self):
@@ -521,17 +526,21 @@ class TestAgentExecutorProbeStrategy(unittest.TestCase):
         self.assertEqual(engine_mod.interpret_probe(result, PROFILE),
                          ("blocked", "http_403"))
 
-    def test_relay_fillable_form_escalates_to_submit(self):
+    def test_relay_form_escalates_but_is_never_auto_submitted(self):
+        # Audit 2026-10-16: the relay DID find a form, but a
+        # relay-served form is unconfirmed — the probe keeps it
+        # visible, marks the trail, and the policy parks the case
+        # for the human instead of submitting.
         executor, calls = self._executor(
             _fast_probe(blockers=["Page unreachable from this server "
                                   "right now"]),
             relay=_FILLABLE_RELAY)
         result = executor.probe(PROFILE, {"name": "Spokeo"})
         self.assertEqual(calls["relay"], ["https://www.spokeo.com/optout"])
-        self.assertTrue(result["fillable"])
+        self.assertFalse(result["fillable"])
         self.assertEqual(result["via"], "http+relay")
         self.assertEqual(engine_mod.interpret_probe(result, PROFILE),
-                         ("submit", None))
+                         ("needs_human", "relay_form_unconfirmed"))
         steps = [t["step"] for t in result["probe_trail"]]
         self.assertEqual(steps, ["http", "relay", "browser"])
         self.assertEqual(result["probe_trail"][2]["skipped"], "on_server")
@@ -1273,7 +1282,7 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
             engine_mod.AgentExecutor = orig_executor
 
     # ---------- Stage 7.1: staged probe escalation ----------
-    def test_relay_escalation_submits_and_audits_trail(self):
+    def test_relay_escalation_parks_unconfirmed_and_audits_trail(self):
         cookie, _uid, _acct = self.register()
         _name, email = self.add_full_profile(cookie, self.uniq())
         self.set_consent(cookie, "automated_remediation", True)
@@ -1298,11 +1307,15 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
 
         def relay(url, profile=None):
             relay_urls.append(url)
+            # Production relay_probe marks its forms unconfirmed
+            # (audit 2026-10-16) — the stub mirrors the contract.
+            forms = [dict(f, unconfirmed=True) for f in FILLABLE_FORM]
             return {"via": "relay", "reachable": True, "status": 200,
-                    "forms": FILLABLE_FORM, "challenge": False,
+                    "forms": forms, "challenge": False,
                     "payload_preview": {
                         "email": (profile or {}).get("email", "")},
-                    "blockers": [], "title": ""}
+                    "blockers": [], "title": "",
+                    "unconfirmed": True}
 
         def submit(action, method, payload, timeout=15):
             submit_actions.append(action)
@@ -1324,14 +1337,17 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
                 setattr(agent, n, fn)
 
         spokeo = self.case_for(cookie, "Spokeo")
-        self.assertEqual(spokeo["status"], "submitted")
-        self.assertIsNotNone(spokeo["submitted_at"])
-        # The relay path was taken exactly once for Spokeo, the form
-        # it found was submitted, and the browser step never ran.
+        # The relay path was taken exactly once for Spokeo and the
+        # browser step never ran — but since the audit 2026-10-16
+        # fix, the relay's unconfirmed form is NEVER auto-
+        # submitted: the case parks for the human.
+        self.assertEqual(spokeo["status"], "needs_human")
+        self.assertEqual(spokeo["reason"], "relay_form_unconfirmed")
+        self.assertIsNone(spokeo["submitted_at"])
         spokeo_url = brokers_by_name["Spokeo"]["optout_url"]
         self.assertEqual(relay_urls.count(spokeo_url), 1)
         self.assertEqual(browser_hits, [])
-        self.assertIn("https://www.spokeo.com/optout", submit_actions)
+        self.assertEqual(submit_actions, [])
         # The probe attempt's audit detail carries the whole trail.
         row = self.db_row(
             "SELECT detail FROM remediation_attempts"

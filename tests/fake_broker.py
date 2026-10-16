@@ -378,7 +378,8 @@ def make_relay_probe(sites):
 
     def relay_probe(url, profile=None):
         profile = profile or {}
-        out = {"via": "relay", "reachable": False, "status": None,
+        out = {"via": "relay", "unconfirmed": True,
+               "reachable": False, "status": None,
                "forms": [], "blockers": [], "challenge": False,
                "payload_preview": {}, "title": ""}
         try:
@@ -425,6 +426,9 @@ def make_relay_probe(sites):
                 "method": form["method"],
                 "fields": form["fields"],
                 "unmapped_fields": unmapped,
+                # Production relay_probe marks relay forms
+                # unconfirmed (audit 2026-10-16).
+                "unconfirmed": True,
             })
             if payload and not out["payload_preview"]:
                 out["payload_preview"] = payload

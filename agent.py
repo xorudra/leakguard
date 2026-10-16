@@ -270,10 +270,26 @@ def relay_probe(url, profile=None):
     server directly (measured: Whitepages). Cloudflare-hardened sites
     challenge the relay too (measured: BeenVerified) — that is reported,
     not hidden. Read-only: forms found here are for inspection/pre-fill;
-    submission never goes through a third-party relay."""
+    submission never goes through a third-party relay.
+
+    UNTRUSTED PRODUCER (audit 2026-10-16, agent.relay-untrusted-
+    producer-plain-urlopen): the relay is a free third-party service
+    answering over a connection this server does not control end to
+    end — a compromised or impersonated relay could serve a poisoned
+    form pointing at an arbitrary host. Three restraints follow:
+    the fetch itself goes through the same connection-pinned SSRF
+    opener as every other data-driven fetch (never plain urlopen);
+    every form and payload this function returns is marked
+    "unconfirmed"; and unconfirmed forms are never submitted by the
+    automatic engine (remediation/policy.py) — they are hints for a
+    human-confirmed path only."""
     profile = profile or {}
     out = {"via": "relay", "reachable": False, "status": None, "forms": [],
-           "blockers": [], "challenge": False, "payload_preview": {}}
+           "blockers": [], "challenge": False, "payload_preview": {},
+           "unconfirmed": True}
+    if _ssrf is None:
+        out["blockers"].append("Relay reader unavailable on this server (outbound safety module missing)")
+        return out
     relay_url = RELAY_READER.format(url=urllib.parse.quote(url, safe=""))
     html = None
     # The free relay is intermittent (measured 522s between successes) —
@@ -287,7 +303,7 @@ def relay_probe(url, profile=None):
     for attempt in range(2):
         req = urllib.request.Request(relay_url, headers=UA)
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with _ssrf.pinned_urlopen(req, timeout=30) as resp:
                 out["status"] = resp.status
                 html = resp.read(1024 * 1024).decode("utf-8", "replace")
             break
@@ -322,6 +338,8 @@ def relay_probe(url, profile=None):
             "method": form["method"],
             "fields": form["fields"],
             "unmapped_fields": unmapped,
+            # Relay-served content is untrusted: never auto-submit.
+            "unconfirmed": True,
         })
         if payload and not out["payload_preview"]:
             out["payload_preview"] = payload
@@ -387,9 +405,11 @@ def probe_with_browser_fallback(broker_name, profile=None):
             if relay["payload_preview"]:
                 result["payload_preview"] = relay["payload_preview"]
             result["blockers"] = relay["blockers"]
-            result["fillable"] = bool(result["payload_preview"]) and not relay["challenge"]
-            if result["fillable"]:
-                return result
+            # Relay forms are unconfirmed (untrusted producer,
+            # audit 2026-10-16): visible for inspection/pre-fill,
+            # never "fillable" for automatic submission.
+            result["fillable"] = False
+            return result
         else:
             result["blockers"] = list(dict.fromkeys(result.get("blockers", []) + relay["blockers"]))
     # --- layer 3: real browser ---
@@ -437,15 +457,17 @@ def probe_with_browser_fallback(broker_name, profile=None):
 
 
 def submit_form(form_action, method, payload, timeout=15):
-    """Submit a prepared payload. Only called behind the GUI's explicit
-    per-broker 'Submit' action — never automatically.
-
-    Both call sites host-allowlist the action against the broker
-    registry first; this is the second, independent check on the
-    same path (Phase 70): the action — data from a broker page or
-    an API caller — must also resolve entirely to public addresses,
-    so a compromised or poisoned form action cannot aim the server
-    at internal targets."""
+    """Submit a prepared payload. Called from the GUI's explicit
+    per-broker 'Submit' action and from the remediation engine's
+    executor — in both cases only after the caller has narrowed
+    the action to the selected broker's own hosts (opt-out page /
+    published alternate; audit 2026-10-16 — the engine also
+    refuses relay-derived unconfirmed forms outright). This
+    function is the second, independent check on the same path
+    (Phase 70): the action — data from a broker page or an API
+    caller — must also resolve entirely to public addresses, so a
+    compromised or poisoned form action cannot aim the server at
+    internal targets."""
     if not _url_is_public(form_action):
         return {"ok": False, "status": None, "error": "ssrf_guard"}
     data = urllib.parse.urlencode(payload).encode("utf-8")

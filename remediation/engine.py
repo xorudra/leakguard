@@ -351,20 +351,30 @@ class AgentExecutor(Executor):
             if relay["payload_preview"]:
                 result["payload_preview"] = relay["payload_preview"]
             result["blockers"] = relay["blockers"]
-            result["fillable"] = (bool(result["payload_preview"])
-                                  and not relay["challenge"])
+            # Relay forms are unconfirmed — an untrusted producer
+            # (audit 2026-10-16): the automatic engine never
+            # submits them. policy.decide_probe parks the case
+            # for the human instead (relay_form_unconfirmed).
+            result["fillable"] = False
         else:
             result["blockers"] = list(dict.fromkeys(
                 result.get("blockers", []) + relay["blockers"]))
 
     def submit(self, profile, broker, probe):
-        # Same SSRF guard as POST /api/agent/submit: the form action
-        # must live on a known broker host.
-        allowed = {
-            urllib.parse.urlparse(b["optout_url"]).netloc.lower()
-            for b in agent_engine.load_brokers()
-        }
+        # SSRF guards (audit 2026-10-16, agent.submit-any-broker-
+        # host-any-path): the form action must live on THIS
+        # broker's own hosts — its opt-out page or its published
+        # alternate — never merely on some other broker's host;
+        # and a relay-derived (unconfirmed) form is never
+        # submitted automatically at all.
+        allowed = set()
+        for key in ("optout_url", "alt_optout_url"):
+            if broker.get(key):
+                allowed.add(
+                    urllib.parse.urlparse(broker[key]).netloc.lower())
         for form in (probe or {}).get("forms") or []:
+            if form.get("unconfirmed"):
+                continue  # relay hint — human-confirmed paths only
             payload, _unmapped = agent_engine.match_fields(
                 form.get("fields") or [], profile)
             if not payload:

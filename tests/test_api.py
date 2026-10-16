@@ -191,6 +191,19 @@ class TestSubmitGuards(ApiTestCase):
         self.assert_structured_error(
             status, headers, body, 400, "unknown_broker_host")
 
+    def test_submit_other_brokers_host_refused(self):
+        # Audit 2026-10-16 (agent.submit-any-broker-host-any-path):
+        # Whitepages' real opt-out host with broker=Spokeo was
+        # accepted by the old any-broker-host check — the action
+        # must be on the SELECTED broker's own hosts.
+        status, headers, body = self.request_json(
+            "POST", "/api/agent/submit",
+            body={"confirm": True, "broker": "Spokeo",
+                  "form_action": "https://www.whitepages.com/suppression-requests",
+                  "method": "POST", "payload": {}})
+        self.assert_structured_error(
+            status, headers, body, 400, "unknown_broker_host")
+
     def test_submit_unknown_broker(self):
         status, headers, body = self.request_json(
             "POST", "/api/agent/submit",

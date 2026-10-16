@@ -824,16 +824,25 @@ class Handler(BaseHTTPRequestHandler):
             action = str(payload.get("form_action", ""))[:1000]
             method = str(payload.get("method", "POST")).upper()
             data = payload.get("payload") or {}
-            # SSRF guard: the form action must live on the broker's own host.
+            # SSRF guard: the form action must live on the
+            # SELECTED broker's own hosts (audit 2026-10-16,
+            # agent.submit-any-broker-host-any-path) — its
+            # opt-out page or published alternate. The old check
+            # accepted ANY broker's host for any broker, so a
+            # relay-poisoned or confused form could aim the
+            # caller's PII at the wrong broker entirely.
             brokers = {b["name"]: b for b in agent_engine.load_brokers()}
             known = brokers.get(broker)
             host = urllib.parse.urlparse(action).netloc.lower()
             allowed = set()
-            for b in brokers.values():
-                allowed.add(urllib.parse.urlparse(b["optout_url"]).netloc.lower())
+            if known:
+                for key in ("optout_url", "alt_optout_url"):
+                    if known.get(key):
+                        allowed.add(urllib.parse.urlparse(
+                            known[key]).netloc.lower())
             if not known or host not in allowed:
                 return self._fail(errors.bad_request(
-                    "unknown_broker_host", "Form action is not on a known broker host"))
+                    "unknown_broker_host", "Form action is not on the selected broker's host"))
             if method not in ("GET", "POST") or not isinstance(data, dict) or len(data) > 30:
                 return self._fail(errors.bad_request(
                     "bad_submission", "Bad submission"))

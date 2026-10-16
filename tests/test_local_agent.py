@@ -51,9 +51,14 @@ PROFILE = {"full_name": "Rudra", "email": "rudra@example.com",
 
 def _probe(name, _profile):
     if name == "FormBroker":
+        # Production probes carry the payload ON the form it was
+        # matched from (audit 2026-10-16) — the stub mirrors it.
         return {"reachable": True, "status": 200,
                 "forms": [{"action": "https://form.example/optout",
-                           "method": "post"}],
+                           "method": "post",
+                           "fields": [{"name": "email", "type": "email",
+                                       "id": "", "placeholder": ""}],
+                           "payload": {"email": "rudra@example.com"}}],
                 "payload_preview": {"email": "rudra@example.com"},
                 "blockers": []}
     if name == "WallBroker":
@@ -103,6 +108,64 @@ class TestLocalRunner(unittest.TestCase):
         # Probe internals (the payload carries the user's details)
         # never land in the report.
         self.assertNotIn("_payload", json.dumps(report))
+
+    def test_foreign_form_host_is_refused(self):
+        # Audit 2026-10-16: a probed form pointing at a host that
+        # is not the broker's own is never submitted to.
+        def probe(name, _profile):
+            if name == "FormBroker":
+                return {"reachable": True, "status": 200,
+                        "forms": [{"action": "https://evil.example/steal",
+                                   "method": "post",
+                                   "payload": {"email": "rudra@example.com"}}],
+                        "payload_preview": {"email": "rudra@example.com"},
+                        "blockers": []}
+            return _probe(name, _profile)
+
+        submits = []
+        results = self.mod.run(
+            PROFILE, out_dir=self.tmp.name, probe_fn=probe,
+            submit_fn=lambda a, m, p: submits.append((a, m, p)),
+            open_fn=lambda url: None,
+            input_fn=lambda prompt="": "yes",
+            print_fn=lambda *a: None)
+        by = {r["broker"]: r for r in results}
+        self.assertEqual(by["FormBroker"]["outcome"], "refused_host")
+        self.assertEqual(submits, [])
+
+    def test_payload_pairs_with_its_own_form(self):
+        # Audit 2026-10-16: the payload submitted must be the one
+        # matched from the SAME form that is submitted — not the
+        # result-level preview of a different form — and the
+        # pre-YES printout names the exact destination.
+        def probe(name, _profile):
+            if name == "FormBroker":
+                return {"reachable": True, "status": 200,
+                        "forms": [
+                            {"action": "https://form.example/other",
+                             "method": "post", "payload": {}},
+                            {"action": "https://form.example/optout",
+                             "method": "post",
+                             "payload": {"email": "rudra@example.com"}}],
+                        "payload_preview": {"email": "wrong@example.com"},
+                        "blockers": []}
+            return _probe(name, _profile)
+
+        submits, printed = [], []
+        results = self.mod.run(
+            PROFILE, out_dir=self.tmp.name, probe_fn=probe,
+            submit_fn=lambda a, m, p: submits.append((a, m, p))
+            or {"status": 200},
+            open_fn=lambda url: None,
+            input_fn=lambda prompt="": "yes",
+            print_fn=lambda *a: printed.append(" ".join(
+                str(x) for x in a)))
+        self.assertEqual(len(submits), 1)
+        self.assertEqual(submits[0][0], "https://form.example/optout")
+        self.assertEqual(submits[0][2], {"email": "rudra@example.com"})
+        self.assertTrue(any("will submit your details to "
+                            "https://form.example/optout" in line
+                            for line in printed))
 
     def test_refusing_confirmation_sends_nothing(self):
         submits = []

@@ -254,6 +254,14 @@ def probe_broker(broker_name, profile=None):
             "method": form["method"],
             "fields": form["fields"],
             "unmapped_fields": unmapped,
+            # The payload matched from THIS form's fields, carried
+            # on the form itself (audit 2026-10-16,
+            # local_agent.submit-no-host-allowlist-unbound-
+            # confirmation): consumers must pair a payload with
+            # the form it was built for — the result-level
+            # payload_preview below is display-only and may belong
+            # to a different form on the page.
+            "payload": payload,
         })
         if payload:
             result["payload_preview"] = payload
@@ -338,6 +346,7 @@ def relay_probe(url, profile=None):
             "method": form["method"],
             "fields": form["fields"],
             "unmapped_fields": unmapped,
+            "payload": payload,
             # Relay-served content is untrusted: never auto-submit.
             "unconfirmed": True,
         })
@@ -432,6 +441,7 @@ def probe_with_browser_fallback(broker_name, profile=None):
                 "method": form.get("method", "GET"),
                 "fields": form.get("fields", []),
                 "unmapped_fields": unmapped,
+                "payload": payload,
             })
             if payload and not result.get("payload_preview"):
                 result["payload_preview"] = payload

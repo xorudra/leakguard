@@ -52,6 +52,7 @@ path, not any server behaviour.
 import argparse
 import json
 import sys
+import urllib.parse
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
@@ -143,11 +144,37 @@ def run(profile, deep=False, do_open=True, assume_yes=False,
                  "contact_email": item.get("contact_email") or "",
                  "blockers": pr.get("blockers", []),
                  "probe_status": pr.get("status")}
-        forms = pr.get("forms") or []
-        if forms and pr.get("payload_preview"):
+        # The broker's own hosts — the ONLY places this runner may
+        # POST the user's details for this broker (audit
+        # 2026-10-16, local_agent.submit-no-host-allowlist-
+        # unbound-confirmation).
+        hosts = set()
+        for key in ("optout_url", "alt_optout_url"):
+            if item.get(key):
+                hosts.add(urllib.parse.urlparse(
+                    item[key]).netloc.lower())
+        entry["_hosts"] = hosts
+        # Pair each form with ITS OWN payload (carried on the form
+        # by the probe, or matched here from that form's fields) —
+        # never the result-level payload_preview, which may belong
+        # to a different form on the page.
+        chosen = None
+        for form in pr.get("forms") or []:
+            payload = form.get("payload")
+            if payload is None and form.get("fields"):
+                payload, _unmapped = agent_engine.match_fields(
+                    form["fields"], profile)
+            if payload:
+                chosen = (form, payload)
+                break
+        if chosen is not None:
             entry["route"] = "form"
-            entry["_form"] = forms[-1]
-            entry["_payload"] = pr["payload_preview"]
+            entry["_form"], entry["_payload"] = chosen
+            entry["submit_action"] = chosen[0].get("action", "")
+            entry["submit_host"] = urllib.parse.urlparse(
+                entry["submit_action"]).netloc.lower()
+            entry["form_unconfirmed"] = bool(
+                chosen[0].get("unconfirmed"))
         elif entry["contact_email"]:
             entry["route"] = "email"
         else:
@@ -160,6 +187,15 @@ def run(profile, deep=False, do_open=True, assume_yes=False,
     print_fn(f"\nPlan: {forms_n} forms to submit automatically, "
              f"{mail_n} erasure letters to write, "
              f"{human_n} brokers that need you in person.")
+    # The confirmation is BOUND to what it approves: every form
+    # submission's exact destination is printed BEFORE the YES
+    # prompt, so the user approves named hosts, not a blank cheque.
+    for r in results:
+        if r["route"] == "form":
+            note = (" (form found via the relay — unconfirmed)"
+                    if r.get("form_unconfirmed") else "")
+            print_fn(f"  {r['broker']}: will submit your details "
+                     f"to {r['submit_action']}{note}")
 
     if probe_only:
         for r in results:
@@ -182,8 +218,22 @@ def run(profile, deep=False, do_open=True, assume_yes=False,
             continue
         form = r.pop("_form")
         payload = r.pop("_payload")
+        hosts = r.pop("_hosts", set())
+        action = form.get("action", "")
+        action_host = urllib.parse.urlparse(action).netloc.lower()
+        if action_host not in hosts:
+            # The probed form points somewhere the broker's own
+            # registry entry does not — never send the user's
+            # details there; report it and move on.
+            r["outcome"] = "refused_host"
+            r["error"] = ("form action host %s is not the broker's "
+                          "own host" % (action_host or "?"))
+            print_fn(f"  {r['broker']}: refused — the form points "
+                     f"at {action_host or 'an unknown host'}, not "
+                     f"the broker's own site; nothing was sent")
+            continue
         try:
-            res = submit_fn(form.get("action", ""), form.get("method", "post"),
+            res = submit_fn(action, form.get("method", "post"),
                             payload) or {}
             r["outcome"] = "submitted"
             r["submit_status"] = res.get("status")
@@ -233,6 +283,7 @@ def run(profile, deep=False, do_open=True, assume_yes=False,
     for r in results:
         r.pop("_form", None)
         r.pop("_payload", None)
+        r.pop("_hosts", None)
     stamp = datetime.now(timezone.utc).isoformat()
     report = {"generated_at": stamp, "results": results}
     (out / "leakguard-run-report.json").write_text(

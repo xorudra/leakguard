@@ -33,6 +33,7 @@ Run:  python3 -m unittest discover -s tests
 import base64
 import json
 import os
+import re
 import sys
 import threading
 import unittest
@@ -551,9 +552,33 @@ class TestAuditDb(OrgsDbBase, unittest.TestCase):
 
     def test_password_reset_events(self):
         cookie, uid, email = self.register()
-        status, _h, body = self.request_json(
-            "POST", "/api/auth/forgot-password", body={"email": email},
-            headers=CSRF)
+        # Wire the mail lane locally so the reset email is really
+        # rendered + captured: since the audit 2026-10-16 fix the
+        # stored notification payload no longer carries the link,
+        # so the token is read from the sent email, not the row.
+        from monitoring import notify
+        saved_env = {k: os.environ.get(k) for k in
+                     ("BREVO_API_KEY", "NOTIFY_FROM_EMAIL")}
+        self.mail_bodies = []
+
+        def _transport(url, headers, body, timeout):
+            self.mail_bodies.append(body.decode("utf-8", "replace"))
+            return 202, "{}"
+
+        os.environ["BREVO_API_KEY"] = "test-brevo-key"
+        os.environ["NOTIFY_FROM_EMAIL"] = "alerts@leakguard.example"
+        notify.TRANSPORT = _transport
+        try:
+            status, _h, body = self.request_json(
+                "POST", "/api/auth/forgot-password",
+                body={"email": email}, headers=CSRF)
+        finally:
+            notify.TRANSPORT = None
+            for k, v in saved_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
         self.assertEqual(status, 200, body)
         rows = self.audit_rows(
             "WHERE action = 'auth.password_reset_requested'")
@@ -562,9 +587,13 @@ class TestAuditDb(OrgsDbBase, unittest.TestCase):
             "SELECT payload FROM notifications"
             " WHERE user_id = %s AND kind = 'password_reset'", (uid,))
         self.assertEqual(len(notes), 1)
-        reset_url = notes[0]["payload"]["reset_url"]
-        raw_token = urllib.parse.parse_qs(
-            urllib.parse.urlparse(reset_url).query)["token"][0]
+        # Stored payloads never carry the live link (audit
+        # 2026-10-16) — the token comes from the sent email.
+        self.assertNotIn("reset_url", notes[0]["payload"])
+        sent = [b for b in self.mail_bodies if "/reset?token=" in b]
+        self.assertEqual(len(sent), 1)
+        raw_token = re.search(
+            r"/reset\?token=([A-Za-z0-9_-]+)", sent[0]).group(1)
         new_password = "S11 reset password 456"
         status, _h, body = self.request_json(
             "POST", "/api/auth/reset-password",

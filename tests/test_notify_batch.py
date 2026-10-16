@@ -323,18 +323,19 @@ class TestNotifyBatchDb(unittest.TestCase):
                             for line in logs.output), logs.output)
         news = self._rows(uid, "new_finding")
         self.assertEqual(len(news), 1)
-        # The fallback is the OLD per-item path: mode "auto" with
-        # consent + lane delivers by email and records 'sent' —
-        # which is exactly what proves the fallback, not the
-        # batch, wrote this row.
-        self.assertEqual(news[0]["status"], "sent")
+        # The fallback is the per-item path — but since the audit
+        # 2026-10-16 fix (monitoring.per-finding-email-fallback),
+        # per-finding kinds are pinned in-app-only at the write
+        # seam, so the fallback row is 'in_app_only' and NO
+        # per-finding email leaves, exactly like the batch path.
+        self.assertEqual(news[0]["status"], "in_app_only")
         summaries = self._rows(uid, "scan_summary")
         self.assertEqual(len(summaries), 2)
         self.assertTrue(all(r["status"] == "sent" for r in summaries))
-        # Fallback cycle emails: the finding + its summary (the
+        # Fallback cycle emails: the two summaries only (the
         # baseline summary was the first call), plus the
         # registration verification email from account creation.
-        self.assertEqual(len(self.transport.calls), 4)
+        self.assertEqual(len(self.transport.calls), 3)
 
 
 if __name__ == "__main__":

@@ -198,10 +198,24 @@ def build_export(user_id):
         "SELECT id, kind, payload, status, created_at, sent_at"
         " FROM notifications WHERE user_id = %s"
         " ORDER BY created_at, id")
+    def _export_payload(n_row):
+        # Credential links are never exported (audit 2026-10-16,
+        # reset-url-persisted-in-notification-payload): rows are
+        # stored redacted since the fix, and this keeps pre-fix
+        # rows from leaking a live link into an export file.
+        payload = dict(n_row["payload"] or {})
+        if n_row["kind"] == "password_reset":
+            payload.pop("reset_url", None)
+            payload["has_reset_link"] = True
+        elif n_row["kind"] == "email_verification":
+            payload.pop("verify_url", None)
+            payload["has_verify_link"] = True
+        return _csv_value(payload)
+
     exported_notifications = [{
         "id": str(n_row["id"]),
         "kind": n_row["kind"],
-        "payload": _csv_value(n_row["payload"]),
+        "payload": _export_payload(n_row),
         "status": n_row["status"],
         "created_at": auth._iso(n_row["created_at"]),
         "sent_at": auth._iso(n_row["sent_at"]),

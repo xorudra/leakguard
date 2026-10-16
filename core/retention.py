@@ -100,6 +100,27 @@ def _purge_notifications(conn, now):
         (now - timedelta(days=NOTIFICATION_TTL_DAYS),))
 
 
+def _purge_credential_notifications(conn, now):
+    """Credential-link notifications die with their links (audit
+    2026-10-16, reset-url-persisted-in-notification-payload):
+    password_reset rows are deleted 2h after creation (the token
+    lives 1h), email_verification rows after 25h (token 24h) —
+    not after the generic 90 days. Rows written since the
+    storage-side redaction carry no link at all; this bounds the
+    exposure of any row that still does."""
+    resets = _delete(
+        conn,
+        "DELETE FROM notifications WHERE kind = 'password_reset'"
+        " AND created_at < %s",
+        (now - timedelta(hours=2),))
+    verifies = _delete(
+        conn,
+        "DELETE FROM notifications WHERE kind = 'email_verification'"
+        " AND created_at < %s",
+        (now - timedelta(hours=25),))
+    return resets + verifies
+
+
 def _purge_error_events(conn, now):
     return _delete(
         conn,
@@ -170,6 +191,7 @@ def _purge_deleted_users(now):
 _CATEGORIES = (
     ("sessions", _purge_sessions),
     ("reset_tokens", _purge_reset_tokens),
+    ("credential_notifications", _purge_credential_notifications),
     ("notifications", _purge_notifications),
     ("error_events", _purge_error_events),
 )
@@ -199,8 +221,8 @@ def run_once(now=None):
             None, "retention users failed: " + type(exc).__name__)
     _log("retention_purge " + " ".join(
         "%s=%s" % (k, counts[k]) for k in (
-            "sessions", "reset_tokens", "notifications", "error_events",
-            "users_purged")))
+            "sessions", "reset_tokens", "credential_notifications",
+            "notifications", "error_events", "users_purged")))
     try:
         from accounts import audit
 

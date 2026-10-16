@@ -177,7 +177,8 @@ def _handle_reappearance(user_id, new_findings, job_id, created):
             created.append(notify.create_notification(
                 user_id, "reappeared", payload,
                 dedupe_key="reappeared:%s:%s" % (
-                    case["id"], diff.identity_hash(match))))
+                    case["id"], diff.identity_hash(match)),
+                mode="never"))
         except Exception:
             pass  # the flip is the fact; the notice is best-effort
     return flipped
@@ -231,9 +232,11 @@ def handle_scan_completed(job_id):
     if not baseline:
         # Per-finding notices are in-app only (see the module
         # docstring): one batch write for the whole cycle. The
-        # per-item fallback below preserves the old path —
-        # including its mode "auto" delivery — for the day the
-        # batch itself fails.
+        # per-item fallback below passes mode="never" explicitly,
+        # and notify.create_notification pins these kinds to
+        # in-app-only at the write seam besides (audit 2026-10-16,
+        # monitoring.per-finding-email-fallback) — a batch failure
+        # can never resurrect per-finding email.
         new_items = [
             {"kind": "new_finding",
              "payload": _finding_payload(finding),
@@ -263,7 +266,8 @@ def handle_scan_completed(job_id):
                     created.append(notify.create_notification(
                         user_id, "new_finding",
                         _finding_payload(finding),
-                        dedupe_key="new:" + diff.identity_hash(finding)))
+                        dedupe_key="new:" + diff.identity_hash(finding),
+                        mode="never"))
                     emitted_new += 1
                 except Exception:
                     pass  # one bad notice must not sink the rest
@@ -272,7 +276,8 @@ def handle_scan_completed(job_id):
                     created.append(notify.create_notification(
                         user_id, "finding_resolved",
                         _finding_payload(finding),
-                        dedupe_key="resolved:" + diff.identity_hash(finding)))
+                        dedupe_key="resolved:" + diff.identity_hash(finding),
+                        mode="never"))
                 except Exception:
                     pass
 

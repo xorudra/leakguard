@@ -350,6 +350,40 @@ def _insert_row(conn, user_id, kind, dedupe_key, payload, status):
     return str(row["id"])
 
 
+# Per-finding kinds are IN-APP ONLY by product rule (P2-B: email
+# is the once-per-cycle scan_summary digest, never per-finding —
+# a 20-finding cycle would otherwise mail 20 near-identical
+# emails inside Brevo's 300/day cap and crowd out password
+# resets). The rule is pinned HERE, at the single write seam
+# (audit 2026-10-16, monitoring.per-finding-email-fallback):
+# whatever mode a caller passes, these kinds never email.
+PER_FINDING_KINDS = ("new_finding", "finding_resolved", "reappeared")
+
+# Kinds whose payload carries a live credential link. The link
+# is rendered into the email from the transient payload and is
+# NEVER what gets stored (audit 2026-10-16,
+# reset-url-persisted-in-notification-payload): the stored copy
+# records only that a link was sent, mirroring
+# monitoring/service.py's _public_notification redaction, so no
+# bearer token rests in the ledger (or, via it, in exports).
+_LINK_KINDS = {
+    "password_reset": ("reset_url", "has_reset_link"),
+    "email_verification": ("verify_url", "has_verify_link"),
+}
+
+
+def _stored_payload(kind, payload):
+    """The payload as it may be STORED: credential links dropped,
+    a boolean marker left in their place."""
+    link = _LINK_KINDS.get(kind)
+    if link is None or link[0] not in payload:
+        return payload
+    stored = dict(payload)
+    stored.pop(link[0], None)
+    stored[link[1]] = True
+    return stored
+
+
 def create_notification(user_id, kind, payload, dedupe_key=None,
                         mode="auto", email=None):
     """Record one notification and deliver it per the rules in the
@@ -360,6 +394,9 @@ def create_notification(user_id, kind, payload, dedupe_key=None,
     if mode not in ("auto", "always", "never"):
         raise ValueError("unknown delivery mode: %r" % (mode,))
     payload = payload or {}
+    if kind in PER_FINDING_KINDS:
+        mode = "never"
+    stored_payload = _stored_payload(kind, payload)
 
     # --- decide the pre-delivery status, ledger row first ---------
     pre_status = None
@@ -384,15 +421,15 @@ def create_notification(user_id, kind, payload, dedupe_key=None,
             ).fetchone()
             if dupe is not None:
                 row_id = _insert_row(conn, user_id, kind, dedupe_key,
-                                      payload, "suppressed")
+                                      stored_payload, "suppressed")
                 return {"id": row_id, "kind": kind,
                         "status": "suppressed"}
         if pre_status is not None:
             row_id = _insert_row(conn, user_id, kind, dedupe_key,
-                                 payload, pre_status)
+                                 stored_payload, pre_status)
             return {"id": row_id, "kind": kind, "status": pre_status}
-        row_id = _insert_row(conn, user_id, kind, dedupe_key, payload,
-                             "pending")
+        row_id = _insert_row(conn, user_id, kind, dedupe_key,
+                             stored_payload, "pending")
 
     # --- delivery attempt (outside the ledger transaction) -------
     recipient = email or _recipient_email(user_id)
@@ -476,7 +513,8 @@ def create_notifications_batch(user_id, items):
             placeholders.append("(%s, %s, %s, %s::jsonb, %s)")
             params.extend([
                 user_id, item["kind"], item.get("dedupe_key"),
-                json.dumps(item.get("payload") or {}), status])
+                json.dumps(_stored_payload(
+                    item["kind"], item.get("payload") or {})), status])
         rows = conn.execute(
             "INSERT INTO notifications (user_id, kind, dedupe_key,"
             " payload, status) VALUES "

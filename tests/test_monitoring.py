@@ -33,6 +33,7 @@ Run:  python3 -m unittest discover -s tests
 import base64
 import json
 import os
+import re
 import sys
 import threading
 import unittest
@@ -809,12 +810,20 @@ class TestMonitoringDb(PgClassMixin, LaneMixin, AccountMixin,
         notes = self.notifications_for(uid, "password_reset")
         self.assertEqual(len(notes), 1)
         self.assertEqual(notes[0]["status"], "sent")
-        reset_url = notes[0]["payload"]["reset_url"]
-        raw_token = urllib.parse.parse_qs(
-            urllib.parse.urlparse(reset_url).query)["token"][0]
+        # The stored payload carries NO live link (audit
+        # 2026-10-16, reset-url-persisted-in-notification-
+        # payload) — the token is recovered from the email the
+        # transport actually sent, like a real mailbox would.
+        self.assertNotIn("reset_url", notes[0]["payload"])
+        self.assertTrue(notes[0]["payload"]["has_reset_link"])
         sent = [c for c in self.transport.calls_to(email)
                 if "/reset?token=" in c["body"]["textContent"]]
         self.assertEqual(len(sent), 1)
+        reset_url = re.search(
+            r"/reset\?token=\S+", sent[0]["body"]["textContent"]
+        ).group(0)
+        raw_token = urllib.parse.parse_qs(
+            urllib.parse.urlparse(reset_url).query)["token"][0]
         self.assertIn("/reset?token=" + raw_token,
                       sent[0]["body"]["textContent"])
 
@@ -880,8 +889,13 @@ class TestMonitoringDb(PgClassMixin, LaneMixin, AccountMixin,
                           body={"email": email}, headers=CSRF)
         tokens = self._token_rows(uid)
         self.assertEqual(len(tokens), 2)
-        fresh_url = self.notifications_for(
-            uid, "password_reset")[1]["payload"]["reset_url"]
+        # The fresh token comes from the second reset EMAIL (the
+        # stored payload is redacted — audit 2026-10-16).
+        sent = [c for c in self.transport.calls_to(email)
+                if "/reset?token=" in c["body"]["textContent"]]
+        fresh_url = re.search(
+            r"/reset\?token=\S+", sent[-1]["body"]["textContent"]
+        ).group(0)
         fresh_token = urllib.parse.parse_qs(
             urllib.parse.urlparse(fresh_url).query)["token"][0]
         with self.pool.connection() as conn:

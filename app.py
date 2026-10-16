@@ -855,9 +855,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._fail(errors.bad_request(
                 "password_too_long", "Password too long"))
 
-        breaches, err = check_email_breaches(email)
-        analytics = breach_analytics(email) if breaches else None
-        pwned = check_password_pwned(password) if password else None
+        # Anonymous lane (audit 2026-10-16): these provider calls
+        # count against the dedicated ":anon" budgets as well as
+        # the shared provider budgets, and the lane refuses first
+        # — rotating IPs cannot exhaust the global provider budget
+        # that signed-in monitoring depends on.
+        from providers import usage as provider_usage
+        with provider_usage.lane("anon"):
+            breaches, err = check_email_breaches(email)
+            analytics = breach_analytics(email) if breaches else None
+            pwned = check_password_pwned(password) if password else None
         score = exposure_score(breaches, analytics, pwned) if breaches is not None else None
         return self._json(200, {
             "email": email,

@@ -292,13 +292,62 @@ class TestBudgetGateClient(unittest.TestCase):
                          (1, 0, 1))
 
 
+class TestAnonymousLaneBudgets(unittest.TestCase):
+    """Audit 2026-10-16 (anon-scan-global-provider-budget-
+    exhaustion): calls inside usage.lane('anon') count against
+    BOTH the provider budget and the '<provider>:anon' lane
+    budget, and the lane refuses first — signed-in work keeps the
+    provider budget the lane never touches."""
+
+    def setUp(self):
+        usage.tracker.reset()
+        self.guard = BudgetGuard({"LaneProbe": 100,
+                                  "LaneProbe:anon": 2})
+        self.guard.__enter__()
+        self.addCleanup(self.guard.__exit__)
+        self.addCleanup(usage.tracker.reset)
+
+    def test_lane_refuses_first_and_counts_both(self):
+        from providers.base import HttpClient
+        from providers.registry import HealthTracker
+
+        def transport(url, headers, timeout):
+            return 200, '{"ok": true}'
+
+        client = HttpClient("LaneProbe", health=HealthTracker(),
+                            transport=transport,
+                            sleep=lambda _s: None)
+        with usage.lane("anon"):
+            self.assertEqual(
+                client.get_json("https://x.invalid").status, "ok")
+            self.assertEqual(
+                client.get_json("https://x.invalid").status, "ok")
+            refused = client.get_json("https://x.invalid")
+            self.assertEqual(refused.error_kind, "budget_exhausted")
+        self.assertEqual(usage.tracker.counts("LaneProbe"), (2, 2, 0))
+        self.assertEqual(usage.tracker.counts("LaneProbe:anon"),
+                         (2, 2, 0))
+        # Outside the lane the provider budget still stands.
+        self.assertEqual(client.get_json("https://x.invalid").status,
+                         "ok")
+        self.assertEqual(usage.tracker.counts("LaneProbe"), (3, 3, 0))
+        self.assertEqual(usage.tracker.counts("LaneProbe:anon"),
+                         (2, 2, 0))
+
+
 class TestBudgetsCoverRegistry(unittest.TestCase):
 
     def test_budgets_match_real_registry_names(self):
         from providers.registry import Registry
 
         names = {p.info.name for p in Registry("real").providers}
-        self.assertEqual(names, set(usage.BUDGETS))
+        base = {k for k in usage.BUDGETS if ":" not in k}
+        self.assertEqual(names, base)
+        # Lane budgets (audit 2026-10-16) name a real provider
+        # plus a lane suffix — never a phantom provider.
+        for key in usage.BUDGETS:
+            if ":" in key:
+                self.assertIn(key.split(":")[0], names)
         for budget in usage.BUDGETS.values():
             self.assertGreater(budget, 0)
 

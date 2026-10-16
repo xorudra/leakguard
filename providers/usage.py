@@ -41,9 +41,12 @@ scan_jobs carries user_id, and the admin metrics block reports
 today's per-user volume in aggregate (jobs, distinct users, max
 jobs per user — counts only, per that module's privacy contract).
 Anonymous traffic has NO user identity in this product by design
-and this module invents none: anonymous volume is governed by
-the per-IP rate limits (core/ratelimit.py), which is the honest
-control for identity-free traffic.
+and this module invents none — but per-IP rate limits alone let
+rotating IPs burn the SHARED provider budgets (audit 2026-10-16),
+so anonymous calls additionally count against dedicated lane
+budgets (BUDGETS' ":anon" entries, via the lane() context the
+/api/scan handler opens): the lane refuses first, and the
+provider budget remains for signed-in work.
 
 ARCHITECTURE. providers/ is a leaf package (tests/
 test_architecture.py): this module imports NO project code. The
@@ -64,6 +67,8 @@ correctness gate, and an outage of the ledger must not become
 an outage of scanning.
 """
 
+import contextlib
+import contextvars
 import threading
 from datetime import datetime, timezone
 
@@ -94,7 +99,45 @@ BUDGETS = {
     "DuckDuckGo Discovery": 1000,
     "Username Platforms": 20000,
     "Domain Intel": 10000,
+    # Anonymous lanes (audit 2026-10-16, anon-scan-global-
+    # provider-budget-exhaustion): calls made inside a lane()
+    # context count against "<provider>:anon" ADDITIONALLY to the
+    # provider's own count, and the lane budget refuses first —
+    # unauthenticated traffic (only a per-IP rate limit stands in
+    # front of it, and IPs rotate) can no longer burn the whole
+    # shared provider budget and blind signed-in monitoring.
+    # 1,000/day ≈ 500 anonymous quick scans (2 calls each) plus
+    # password checks — far above real anonymous traffic.
+    "XposedOrNot:anon": 1000,
+    "Have I Been Pwned Pwned Passwords:anon": 1000,
 }
+
+# The active budget lane for this execution context (set by the
+# anonymous /api/scan handler; worker threads never set it).
+_lane_var = contextvars.ContextVar("leakguard_provider_lane",
+                                   default=None)
+
+
+@contextlib.contextmanager
+def lane(name):
+    """Mark provider calls in this context as belonging to a
+    budget lane (see BUDGETS' ":anon" entries). Fail-open like
+    everything in this module: lane bookkeeping never breaks the
+    call path."""
+    token = _lane_var.set(name)
+    try:
+        yield
+    finally:
+        _lane_var.reset(token)
+
+
+def lane_key(provider):
+    """The ledger key for `provider` under the active lane, or
+    None when no lane is active."""
+    active = _lane_var.get()
+    if not active:
+        return None
+    return "%s:%s" % (provider, active)
 
 # Flush the in-memory counts to the ledger once this many calls
 # are pending (admin metrics and the alert evaluator also flush
@@ -290,10 +333,16 @@ tracker = UsageTracker()
 
 def record_call(provider, ok):
     tracker.record(provider, ok)
+    key = lane_key(provider)
+    if key is not None:
+        tracker.record(key, ok)
 
 
 def is_exhausted(provider):
-    return tracker.is_exhausted(provider)
+    if tracker.is_exhausted(provider):
+        return True
+    key = lane_key(provider)
+    return key is not None and tracker.is_exhausted(key)
 
 
 def flush():

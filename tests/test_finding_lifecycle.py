@@ -691,6 +691,18 @@ class TestLifecycleMigrationUpgrade(PgClassMixin, AccountMixin,
             conn.execute(
                 "INSERT INTO schema_migrations (name) VALUES (%s)",
                 (path21.name,))
+            # 0023 (token-bound pending credentials, run-3) is
+            # likewise pre-applied out of order: current auth code
+            # writes the pending-credential columns whenever a
+            # verification token is minted, including this
+            # fixture's registration, and 0023 is independent of
+            # the 0012 backfill.
+            path23 = [p for p in cls.migrate.migration_files()
+                      if p.name.startswith("0023")][0]
+            conn.execute(path23.read_text(encoding="utf-8"))
+            conn.execute(
+                "INSERT INTO schema_migrations (name) VALUES (%s)",
+                (path23.name,))
         from remediation import registry_seed
 
         registry_seed.seed_brokers()
@@ -762,8 +774,8 @@ class TestLifecycleMigrationUpgrade(PgClassMixin, AccountMixin,
         # nullable column to remediation_attempts only; 0019 adds
         # an index on identifiers only; 0022 widens the
         # scan_jobs status CHECK only).
-        # 0017, 0018, 0020 and 0021 were pre-applied in setUpClass
-        # (see there).
+        # 0017, 0018, 0020, 0021 and 0023 were pre-applied in
+        # setUpClass (see there).
         self.assertEqual(applied, ["0012_finding_lifecycle.sql",
                                    "0013_error_events.sql",
                                    "0014_provider_usage.sql",

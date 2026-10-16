@@ -67,6 +67,23 @@ import urllib.parse
 import urllib.request
 
 
+_tls = threading.local()
+
+
+def _track_connection(conn):
+    """Register a pinned connection on the CURRENT thread's
+    deadline scope (if any): run_with_deadline installs a list
+    on its worker thread, and connect() appends every pinned
+    connection the worker opens — so a deadline expiry can
+    CLOSE the in-flight connections instead of abandoning them
+    (run-3 hunt: an abandoned worker's socket otherwise stays
+    open as long as a slow-drip peer keeps it alive, leaking a
+    thread + file descriptor per timed-out fetch)."""
+    sockets = getattr(_tls, "deadline_sockets", None)
+    if sockets is not None:
+        sockets.append(conn)
+
+
 def run_with_deadline(fn, deadline_seconds):
     """Run fn() under a TOTAL wall-clock deadline (run-2
     revalidation, 2026-10-16): a socket timeout bounds each
@@ -74,23 +91,35 @@ def run_with_deadline(fn, deadline_seconds):
     byte at a time — every byte inside the per-op timeout —
     could hold a fetch open far past its nominal deadline
     before any body-read check ran. fn executes on a daemon
-    worker thread; on expiry TimeoutError is raised to the
-    caller and the abandoned worker is left to die with its
-    socket (daemon threads never block shutdown, and the
-    caller treats the operation as failed). fn's own exception
-    is re-raised unchanged."""
+    worker thread; on expiry the worker's pinned connections
+    are closed (see _track_connection — the blocked read then
+    fails and the worker dies promptly instead of lingering),
+    TimeoutError is raised to the caller, and the caller treats
+    the operation as failed. fn's own exception is re-raised
+    unchanged."""
     box = {}
 
     def target():
+        sockets = []
+        _tls.deadline_sockets = sockets
+        box["sockets"] = sockets
         try:
             box["value"] = fn()
         except BaseException as exc:  # re-raised in the caller
             box["error"] = exc
+        finally:
+            _tls.deadline_sockets = None
 
     worker = threading.Thread(target=target, daemon=True)
     worker.start()
     worker.join(deadline_seconds)
     if worker.is_alive():
+        for conn in list(box.get("sockets") or []):
+            try:
+                conn.close()
+            except Exception:
+                pass
+        worker.join(2)
         raise TimeoutError(
             "operation exceeded its %ss deadline" % deadline_seconds)
     if "error" in box:
@@ -243,6 +272,7 @@ class PinnedHTTPConnection(http.client.HTTPConnection):
 
     def connect(self):
         sys.audit("http.client.connect", self, self.host, self.port)
+        _track_connection(self)
         self.sock = _connect_validated(
             self.host, self.port, self.timeout, self.source_address)
         _tune_socket(self.sock)
@@ -258,6 +288,7 @@ class PinnedHTTPSConnection(http.client.HTTPSConnection):
 
     def connect(self):
         sys.audit("http.client.connect", self, self.host, self.port)
+        _track_connection(self)
         self.sock = _connect_validated(
             self.host, self.port, self.timeout, self.source_address)
         _tune_socket(self.sock)

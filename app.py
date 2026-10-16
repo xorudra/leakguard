@@ -1024,7 +1024,7 @@ class Handler(BaseHTTPRequestHandler):
             self._enforce_rate_limit("reset_password",
                                      "ip:" + self._client_ip())
             self._call(auth_service.verify_email,
-                       payload.get("token"))
+                       payload.get("token"), payload.get("password"))
             return self._json(200, {"ok": True})
 
         if route == "/api/auth/passkey/login/options":

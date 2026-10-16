@@ -250,26 +250,25 @@ def register(email, password, name=None, policy_accepted=False):
             # Run-2 revalidation catch (2026-10-16): resending
             # ALONE left the SQUATTER's password on the row — the
             # real owner would redeem the fresh token and activate
-            # an account whose password the squatter chose. The
-            # re-registrant's credentials REPLACE the pending
-            # row's: whoever proves inbox control next owns the
-            # account with the password THEY just chose, and the
-            # squatter's password dies here, before any token is
-            # redeemed. (Unverified rows cannot hold sessions or
-            # TOTP — login is gated — but clear them anyway.)
-            with pool.connection() as conn:
-                conn.execute(
-                    "UPDATE users SET password_hash = %s,"
-                    " name_ciphertext = %s,"
-                    " totp_secret_ciphertext = NULL,"
-                    " totp_enabled = false"
-                    " WHERE id = %s AND email_verified = false",
-                    (replacement_hash,
-                     crypto.encrypt_value(_master_key(), cleaned_name)
-                     if cleaned_name else None,
-                     existing["id"]))
-            _send_verification(existing["id"], normalized,
-                               cooldown=True)
+            # an account whose password the squatter chose.
+            # Run-3 refinement: the re-registrant's credentials
+            # are NOT written to the user row here (run-2's
+            # in-place replacement was itself last-writer-wins:
+            # any later re-register flipped the password the
+            # outstanding token would activate). They travel as
+            # PENDING credentials on the newly minted token
+            # (migration 0023): verify_email applies them only
+            # when the redeemer presents that same password, in
+            # the same update that verifies the account. The
+            # user row keeps the original hash until redemption,
+            # and when the resend cap blocks minting, no
+            # credential change happens at all.
+            _send_verification(
+                existing["id"], normalized, cooldown=True,
+                pending_password_hash=replacement_hash,
+                pending_name_ciphertext=(
+                    crypto.encrypt_value(_master_key(), cleaned_name)
+                    if cleaned_name else None))
         elif existing is not None:
             from monitoring import notify
 
@@ -286,7 +285,15 @@ def register(email, password, name=None, policy_accepted=False):
         raise errors.conflict(
             "email_taken", "An account with this email already exists")
     audit.record(row["id"], "user", "auth.registered", "user", row["id"])
-    _send_verification(row["id"], normalized)
+    # Fresh registrations bind their credentials to the first
+    # token too (migration 0023): redemption confirms the same
+    # password, uniformly for every verification.
+    _send_verification(
+        row["id"], normalized,
+        pending_password_hash=row["password_hash"],
+        pending_name_ciphertext=(
+            bytes(row["name_ciphertext"])
+            if row["name_ciphertext"] is not None else None))
     return {"pending_verification": True}, None
 
 
@@ -440,7 +447,9 @@ VERIFY_TOKEN_TTL = timedelta(hours=24)
 VERIFY_RESEND_DAILY_CAP = 5
 
 
-def _send_verification(user_id, normalized_email, cooldown=False):
+def _send_verification(user_id, normalized_email, cooldown=False,
+                       pending_password_hash=None,
+                       pending_name_ciphertext=None):
     """Mint a verification token (digest-only storage, previous
     unused tokens superseded) and deliver the link through the
     notification lane as transactional mail (mode='always': the
@@ -475,8 +484,11 @@ def _send_verification(user_id, normalized_email, cooldown=False):
         )
         conn.execute(
             "INSERT INTO email_verification_tokens"
-            " (token_hash, user_id, expires_at) VALUES (%s, %s, %s)",
-            (digest, user_id, now + VERIFY_TOKEN_TTL),
+            " (token_hash, user_id, expires_at,"
+            " pending_password_hash, pending_name_ciphertext)"
+            " VALUES (%s, %s, %s, %s, %s)",
+            (digest, user_id, now + VERIFY_TOKEN_TTL,
+             pending_password_hash, pending_name_ciphertext),
         )
     verify_url = (RESET_URL_BASE.rstrip("/")
                   + "/verify?token=" + raw_token)
@@ -487,24 +499,42 @@ def _send_verification(user_id, normalized_email, cooldown=False):
         mode="always", email=normalized_email)
 
 
-def verify_email(raw_token):
+def verify_email(raw_token, password=None):
     """Redeem a verification token: single-use, expiring, one
     error shape for unknown/used/expired (the _invalid_token
     discipline). Success flips email_verified; sign-in then works
-    with the password chosen at registration."""
+    with the password chosen at registration.
+
+    Token-bound credentials (run-3 hunt, migration 0023): a
+    token minted by a re-register carries the re-registrant's
+    pending password hash ON THE TOKEN ROW. Redemption then
+    requires presenting that same password, and the stored
+    hash is applied in the same update that verifies — so the
+    credential that activates is always the one bound to the
+    exact token being redeemed, never a later writer's
+    overwrite of the shared user row. Tokens with no pending
+    hash (minted before 0023) redeem under the old rules."""
     if not raw_token or not isinstance(raw_token, str):
         raise _invalid_token("verification")
     digest = hashlib.sha256(
         raw_token.strip().encode("utf-8")).digest()
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT id, user_id, expires_at, used_at"
+            "SELECT id, user_id, expires_at, used_at,"
+            " pending_password_hash, pending_name_ciphertext"
             " FROM email_verification_tokens WHERE token_hash = %s",
             (digest,),
         ).fetchone()
     if row is None or row["used_at"] is not None:
         raise _invalid_token("verification")
     if row["expires_at"] <= datetime.now(timezone.utc):
+        raise _invalid_token("verification")
+    if row["pending_password_hash"] is not None and (
+            not password
+            or not passwords.verify_password(
+                row["pending_password_hash"], password)):
+        # Same shape as a dead token: the response must not say
+        # the token was real but the password wrong.
         raise _invalid_token("verification")
     with pool.connection() as conn:
         consumed = conn.execute(
@@ -514,11 +544,24 @@ def verify_email(raw_token):
         ).fetchone()
         if consumed is None:  # a concurrent redeem won the race
             raise _invalid_token("verification")
-        conn.execute(
-            "UPDATE users SET email_verified = true,"
-            " updated_at = now() WHERE id = %s",
-            (row["user_id"],),
-        )
+        if row["pending_password_hash"] is not None:
+            pending_name = row["pending_name_ciphertext"]
+            conn.execute(
+                "UPDATE users SET email_verified = true,"
+                " password_hash = %s, name_ciphertext ="
+                " COALESCE(%s, name_ciphertext),"
+                " updated_at = now() WHERE id = %s",
+                (row["pending_password_hash"],
+                 bytes(pending_name) if pending_name is not None
+                 else None,
+                 row["user_id"]),
+            )
+        else:
+            conn.execute(
+                "UPDATE users SET email_verified = true,"
+                " updated_at = now() WHERE id = %s",
+                (row["user_id"],),
+            )
     audit.record(row["user_id"], "user", "auth.email_verified",
                  "user", row["user_id"])
     return {"ok": True, "verified": True}

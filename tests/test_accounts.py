@@ -542,7 +542,8 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
         self.assertTrue(tokens)
         status, _h, body = self.request_json(
             "POST", "/api/auth/verify-email",
-            body={"token": tokens[-1]}, headers=CSRF)
+            body={"token": tokens[-1], "password": "victim-pass-456"},
+            headers=CSRF)
         self.assertEqual(status, 200, body)
         # The squatter's password no longer opens the account...
         status, _h, body = self.login(
@@ -551,6 +552,91 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
         # ...the victim's does.
         status, _h, body = self.login(email, "victim-pass-456")
         self.assertEqual(status, 200, body)
+
+    def test_reregister_last_writer_cannot_steal_pending_account(self):
+        # Run-3 hunt (reregister-credential-not-bound-to-token):
+        # after the victim re-registers, an ATTACKER re-registers
+        # again with their own password. The token that mails out
+        # binds the ATTACKER's password — but redemption requires
+        # presenting the password bound to the token, so the
+        # victim (who doesn't know it) cannot activate the
+        # attacker's credential, and their own fresh
+        # re-register + redeem activates THEIR password.
+        from monitoring import notify
+
+        email = self.unique_email()
+        sent = []
+
+        def capture(url, headers_, payload, timeout):
+            sent.append(json.loads(payload.decode("utf-8")))
+            return 202
+
+        saved_transport = notify.TRANSPORT
+        saved_env = {k: os.environ.get(k) for k in
+                     ("BREVO_API_KEY", "NOTIFY_FROM_EMAIL")}
+        os.environ["BREVO_API_KEY"] = "test-lane-key"
+        os.environ["NOTIFY_FROM_EMAIL"] = "alerts@example.com"
+        notify.TRANSPORT = capture
+
+        def register_with(pw):
+            status, _h, _b = self.request_json(
+                "POST", "/api/auth/register",
+                body={"email": email, "password": pw,
+                      "policy_accepted": True},
+                headers=CSRF)
+            self.assertEqual(status, 201)
+
+        def last_token():
+            import string as _string
+            allowed = set(_string.ascii_letters
+                          + _string.digits + "-_")
+            text = sent[-1].get("textContent", "")
+            tail = text.split("/verify?token=", 1)[1]
+            token = ""
+            for ch in tail:
+                if ch not in allowed:
+                    break
+                token += ch
+            return token
+
+        try:
+            register_with("squatter-pass-123")
+            register_with("victim-pass-456")
+            register_with("attacker-pass-789")
+            attacker_token = last_token()
+            # The victim cannot activate the attacker's bound
+            # credential — with their own password, or none.
+            for pw in ("victim-pass-456", None):
+                body = {"token": attacker_token}
+                if pw:
+                    body["password"] = pw
+                status, _h, body_r = self.request_json(
+                    "POST", "/api/auth/verify-email",
+                    body=body, headers=CSRF)
+                self.assertEqual(status, 400, body_r)
+                self.assertEqual(body_r["error"]["code"],
+                                 "invalid_token")
+            # The victim re-registers and redeems their own link.
+            register_with("victim-pass-456")
+            status, _h, body = self.request_json(
+                "POST", "/api/auth/verify-email",
+                body={"token": last_token(),
+                      "password": "victim-pass-456"},
+                headers=CSRF)
+            self.assertEqual(status, 200, body)
+        finally:
+            notify.TRANSPORT = saved_transport
+            for key, value in saved_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+        status, _h, body = self.login(email, "victim-pass-456")
+        self.assertEqual(status, 200, body)
+        self.user_ids.append(body["user"]["id"])
+        for pw in ("attacker-pass-789", "squatter-pass-123"):
+            status, _h, body = self.login(email, pw)
+            self.assertEqual(status, 401, body)
 
     def test_registration_mail_cannot_be_flooded(self):
         # Run-2 hunt (registration-notification-mail-flooding +
@@ -692,15 +778,26 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
             body={"token": tokens[0]}, headers=CSRF)
         self.assertEqual(status, 400)
         self.assertEqual(body["error"]["code"], "invalid_token")
-        # The fresh token redeems — exactly once.
+        # The fresh token redeems — exactly once, and only with
+        # the password chosen at registration (run-3: credentials
+        # are bound to the token; a wrong password is the same
+        # invalid_token shape as a dead link).
         status, _h, body = self.request_json(
             "POST", "/api/auth/verify-email",
-            body={"token": tokens[1]}, headers=CSRF)
+            body={"token": tokens[1], "password": "wrong-password-1"},
+            headers=CSRF)
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "invalid_token")
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/verify-email",
+            body={"token": tokens[1], "password": self.PASSWORD},
+            headers=CSRF)
         self.assertEqual(status, 200)
         self.assertEqual(body, {"ok": True})
         status, _h, body = self.request_json(
             "POST", "/api/auth/verify-email",
-            body={"token": tokens[1]}, headers=CSRF)
+            body={"token": tokens[1], "password": self.PASSWORD},
+            headers=CSRF)
         self.assertEqual(status, 400)
         # And now the password signs in.
         status, headers, body = self.login(email)

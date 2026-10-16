@@ -147,7 +147,12 @@
 
     <div id="verifyBox" hidden>
       <h3 class="authWelcome">Confirm your email</h3>
-      <p id="vfStatus" class="hint" aria-live="polite">Confirming your email…</p>
+      <p class="hint">Type the password you chose when you signed up — this proves the account being confirmed is yours.</p>
+      <label>Password <input type="password" id="vfPassword" autocomplete="current-password"></label>
+      <p id="vfStatus" class="hint" aria-live="polite"></p>
+      <div class="rowBtns">
+        <button type="button" id="vfConfirmBtn" class="btnPrimary">Confirm email</button>
+      </div>
     </div>
 
     <div id="privacyCenter" hidden>

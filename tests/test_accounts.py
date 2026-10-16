@@ -21,6 +21,7 @@ Run:  python3 -m unittest discover -s tests
 """
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -159,6 +160,56 @@ class TestTotpAndPasswordsUnit(unittest.TestCase):
         self.assertIsNone(totp.verify(secret, "000000"))
         self.assertIsNone(totp.verify(secret, "abcdef"))
         self.assertIsNone(totp.verify(secret, ""))
+
+    def test_breached_password_screen(self):
+        # Audit 2026-10-16 (register-weak-password-no-breach-
+        # screening): the k-anonymity lane's verdict gates password
+        # acceptance; a lane that cannot answer fails OPEN.
+        from accounts import auth as auth_service
+        from accounts import passwords
+        from core import errors
+        from providers import registry as provider_registry
+
+        digest = hashlib.sha1(
+            "hunter2-hunter2".encode("utf-8")).hexdigest().upper()
+
+        class _Result:
+            status = "ok"
+            data = "%s:42" % digest[5:]
+
+        class _Provider:
+            def check_range(self, prefix):
+                return _Result()
+
+        class _Registry:
+            def get_providers(self, capability):
+                return [_Provider()]
+
+        saved = provider_registry.get_registry
+        provider_registry.get_registry = lambda: _Registry()
+        try:
+            self.assertEqual(
+                passwords.breached_count("hunter2-hunter2"), 42)
+            self.assertEqual(
+                passwords.breached_count("never-seen-pass-9"), 0)
+            with self.assertRaises(errors.ApiError) as ctx:
+                auth_service._validate_password("hunter2-hunter2")
+            self.assertEqual(ctx.exception.code, "breached_password")
+        finally:
+            provider_registry.get_registry = saved
+
+        class _DownRegistry:
+            def get_providers(self, capability):
+                raise RuntimeError("lane down")
+
+        provider_registry.get_registry = lambda: _DownRegistry()
+        try:
+            self.assertIsNone(
+                passwords.breached_count("hunter2-hunter2"))
+            # Fail-open: validation passes when the lane is silent.
+            auth_service._validate_password("hunter2-hunter2")
+        finally:
+            provider_registry.get_registry = saved
 
     def test_argon2id_hashes(self):
         from accounts import passwords

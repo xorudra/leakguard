@@ -6,7 +6,16 @@ The plaintext password exists only for the duration of one request.
 argon2-cffi is imported lazily so importing this module never fails;
 hashing is only reachable when accounts are configured, and
 requirements.txt carries the dependency.
+
+breached_count() below is the k-anonymity breach screen (audit
+2026-10-16, leakguard.accounts.register-weak-password-no-breach-
+screening): the same lane the visitor password checker uses, so a
+password already circulating in breach dumps is refused at
+registration / change / reset. Only the first 5 characters of the
+password's SHA-1 ever leave the server.
 """
+
+import hashlib
 
 # A real Argon2id hash of a throwaway value. Login attempts for an
 # UNKNOWN email verify against this dummy so they cost the same time
@@ -24,6 +33,40 @@ def _hasher():
     from argon2 import PasswordHasher
 
     return PasswordHasher()  # argon2-cffi defaults ARE Argon2id
+
+
+def breached_count(password):
+    """How many times this password appears in the HIBP Pwned
+    Passwords corpus, via the registry's password_range providers
+    (k-anonymity: only the SHA-1 prefix is sent; the suffix match
+    is computed here). None when the lane cannot answer (provider
+    down, budget exhausted, registry unavailable) — callers FAIL
+    OPEN on None: screening is defence in depth behind the length
+    floor and the credential rate limiter, and the lane's
+    availability must never decide who can register."""
+    try:
+        from providers import registry as provider_registry
+
+        digest = hashlib.sha1(password.encode("utf-8")).hexdigest().upper()
+        prefix, suffix = digest[:5], digest[5:]
+        reg = provider_registry.get_registry()
+        for provider in reg.get_providers("password_range"):
+            result = provider.check_range(prefix)
+            if result.status != "ok" or not result.data:
+                continue
+            for line in str(result.data).splitlines():
+                parts = line.strip().split(":")
+                if len(parts) != 2:
+                    continue
+                if parts[0].strip().upper() == suffix:
+                    try:
+                        return int(parts[1])
+                    except ValueError:
+                        return 1
+            return 0
+    except Exception:
+        return None
+    return None
 
 
 def hash_password(password):

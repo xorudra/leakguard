@@ -122,6 +122,16 @@ def _validate_password(password):
             "weak_password",
             "Password must be at least %d characters"
             % passwords.MIN_PASSWORD_LENGTH)
+    # Breach screen (audit 2026-10-16): a password already
+    # circulating in breach corpora is refused even at full length.
+    # breached_count() returns None when the lane cannot answer and
+    # the screen fails OPEN (documented at the helper) — length,
+    # Argon2id and the credential limiter remain the floor.
+    if passwords.breached_count(password):
+        raise errors.bad_request(
+            "breached_password",
+            "That password has appeared in known data breaches — "
+            "please choose a different one")
 
 
 # ---------------------------------------------------------------------------

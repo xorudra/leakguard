@@ -112,6 +112,11 @@ ALLOWLISTED_LITERALS = {
     # tests/test_accounts.py — fixture password for the
     # change-password flow; never a real credential.
     "brand-new-password-2",
+    # tests/test_accounts.py — fixture passwords for the run-2
+    # re-register-replaces-squatter-password regression test;
+    # throwaway test values, never real credentials.
+    "squatter-pass-123",
+    "victim-pass-456",
     # README.md — the documented placeholder a user replaces with
     # their own LeakGuard API token; the value itself grants nothing.
     "lg_REPLACE_WITH_YOUR_TOKEN",

@@ -238,6 +238,27 @@ def register(email, password, name=None, policy_accepted=False):
         # owner's confirmation.
         existing = _get_user_by_email(normalized)
         if existing is not None and not existing["email_verified"]:
+            # Run-2 revalidation catch (2026-10-16): resending
+            # ALONE left the SQUATTER's password on the row — the
+            # real owner would redeem the fresh token and activate
+            # an account whose password the squatter chose. The
+            # re-registrant's credentials REPLACE the pending
+            # row's: whoever proves inbox control next owns the
+            # account with the password THEY just chose, and the
+            # squatter's password dies here, before any token is
+            # redeemed. (Unverified rows cannot hold sessions or
+            # TOTP — login is gated — but clear them anyway.)
+            with pool.connection() as conn:
+                conn.execute(
+                    "UPDATE users SET password_hash = %s,"
+                    " name_ciphertext = %s,"
+                    " totp_secret_ciphertext = NULL,"
+                    " totp_enabled = false"
+                    " WHERE id = %s AND email_verified = false",
+                    (passwords.hash_password(password),
+                     crypto.encrypt_value(_master_key(), cleaned_name)
+                     if cleaned_name else None,
+                     existing["id"]))
             _send_verification(existing["id"], normalized)
         elif existing is not None:
             from monitoring import notify

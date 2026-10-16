@@ -82,6 +82,12 @@ def is_admin(user_id):
     row = auth_service._get_user_by_id(user_id)
     if row is None:
         return False
+    # Run-2 revalidation: the email bootstrap must never select
+    # an UNVERIFIED row — a pre-verification squat of a listed
+    # address is not the owner, and admin_user_ids() (engineering
+    # alerts) resolves through this same check.
+    if not row["email_verified"]:
+        return False
     try:
         email = auth_service.reveal_email(row)
     except Exception:

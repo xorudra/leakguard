@@ -481,6 +481,77 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
                 (digest,)).fetchone()
         self.assertEqual(notes["n"], 2)
 
+    def test_reregister_replaces_squatters_password(self):
+        # Run-2 revalidation (register-unverified-email-prehijack
+        # residual): a squatter pre-registers the victim's address
+        # with the SQUATTER's password. The victim re-registers
+        # with their OWN password and redeems the fresh token
+        # mailed to them. The activated account must belong to
+        # the victim's password — the squatter's is dead.
+        from monitoring import notify
+
+        email = self.unique_email()
+        sent = []
+
+        def capture(url, headers_, payload, timeout):
+            sent.append(json.loads(payload.decode("utf-8")))
+            return 202
+
+        saved_transport = notify.TRANSPORT
+        saved_env = {k: os.environ.get(k) for k in
+                     ("BREVO_API_KEY", "NOTIFY_FROM_EMAIL")}
+        os.environ["BREVO_API_KEY"] = "test-lane-key"
+        os.environ["NOTIFY_FROM_EMAIL"] = "alerts@example.com"
+        notify.TRANSPORT = capture
+        try:
+            status, _h, _b = self.request_json(
+                "POST", "/api/auth/register",
+                body={"email": email,
+                      "password": "squatter-pass-123",
+                      "policy_accepted": True},
+                headers=CSRF)
+            self.assertEqual(status, 201)
+            status, _h, _b = self.request_json(
+                "POST", "/api/auth/register",
+                body={"email": email,
+                      "password": "victim-pass-456",
+                      "policy_accepted": True},
+                headers=CSRF)
+            self.assertEqual(status, 201)
+        finally:
+            notify.TRANSPORT = saved_transport
+            for key, value in saved_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+        import string as _string
+        allowed = set(_string.ascii_letters + _string.digits + "-_")
+        tokens = []
+        for payload in sent:
+            text = payload.get("textContent", "")
+            if "/verify?token=" in text:
+                tail = text.split("/verify?token=", 1)[1]
+                token = ""
+                for ch in tail:
+                    if ch not in allowed:
+                        break
+                    token += ch
+                if token:
+                    tokens.append(token)
+        self.assertTrue(tokens)
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/verify-email",
+            body={"token": tokens[-1]}, headers=CSRF)
+        self.assertEqual(status, 200, body)
+        # The squatter's password no longer opens the account...
+        status, _h, body = self.login(
+            email, "squatter-pass-123")
+        self.assertEqual(status, 401, body)
+        # ...the victim's does.
+        status, _h, body = self.login(email, "victim-pass-456")
+        self.assertEqual(status, 200, body)
+
     def test_email_verification_flow(self):
         # Audit 2026-10-16 (register-unverified-email-prehijack):
         # no session and no login until the emailed token redeems;

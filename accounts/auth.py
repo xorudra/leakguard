@@ -18,7 +18,7 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from accounts import audit, passwords, sessions, totp
+from accounts import audit, passwords, ratelimit, sessions, totp
 from core import errors
 from db import pool
 from vault import crypto, store as vault_store
@@ -400,7 +400,8 @@ def reset_password(raw_token, new_password):
         raise _invalid_token()
     if row["expires_at"] <= datetime.now(timezone.utc):
         raise _invalid_token()
-    if _get_user_by_id(row["user_id"]) is None:
+    owner = _get_user_by_id(row["user_id"])
+    if owner is None:
         raise _invalid_token()
     _validate_password(new_password)
     with pool.connection() as conn:
@@ -411,14 +412,32 @@ def reset_password(raw_token, new_password):
         ).fetchone()
         if consumed is None:  # a concurrent reset won the race
             raise _invalid_token()
+        # RECOVERY DECISION (audit 2026-10-16, leakguard.accounts.
+        # totp-enroll-no-stepup): a completed reset CLEARS TOTP.
+        # The reset proves inbox control — the strongest ownership
+        # proof available — and leaving a second factor in force
+        # would let a factor planted from a stolen session (or by
+        # a pre-hijack squatter) lock the real owner out forever:
+        # totp_disable demands the planted code. The owner is told
+        # (audit + email) and can re-enroll, now behind the
+        # enrollment password step-up.
         conn.execute(
-            "UPDATE users SET password_hash = %s, updated_at = now()"
+            "UPDATE users SET password_hash = %s,"
+            " totp_enabled = false, totp_secret_ciphertext = NULL,"
+            " totp_last_step = NULL, updated_at = now()"
             " WHERE id = %s",
             (passwords.hash_password(new_password), row["user_id"]),
         )
     sessions.revoke_all_sessions(row["user_id"])
     audit.record(row["user_id"], "user",
                  "auth.password_reset_completed", "user", row["user_id"])
+    if owner["totp_enabled"]:
+        audit.record(row["user_id"], "user", "auth.totp_cleared",
+                     "user", row["user_id"], {"via": "password_reset"})
+        from monitoring import notify
+
+        notify.create_notification(
+            row["user_id"], "totp_cleared", {}, mode="always")
     return {"ok": True}
 
 
@@ -426,13 +445,27 @@ def reset_password(raw_token, new_password):
 # TOTP management (authenticated)
 # ---------------------------------------------------------------------------
 
-def totp_enroll(user_id):
+def totp_enroll(user_id, password, client_ip):
     """Start enrollment: generate a secret, store it ENCRYPTED and
     still disabled. Returns the one-time otpauth URI + a masked hint.
-    The full secret is only ever visible inside this one response."""
+    The full secret is only ever visible inside this one response.
+
+    PASSWORD STEP-UP (audit 2026-10-16, leakguard.accounts.
+    totp-enroll-no-stepup): enrollment demands the account
+    password, counted by the credential rate limiter exactly like
+    passkey registration (accounts/webauthn.py) — a stolen session
+    alone must never be enough to plant a second factor the owner
+    cannot remove."""
     row = _get_user_by_id(user_id)
     if row is None:
         raise errors.unauthorized()
+    buckets = ("ip:" + str(client_ip),
+               "email:" + bytes(row["email_hmac"]).hex())
+    if not ratelimit.allow(buckets):
+        raise errors.too_many_requests()
+    if not passwords.verify_password(row["password_hash"],
+                                     password or ""):
+        raise _invalid_credentials()
     if row["totp_enabled"]:
         raise errors.bad_request(
             "totp_already_enabled",
@@ -445,6 +478,7 @@ def totp_enroll(user_id):
             " updated_at = now() WHERE id = %s",
             (crypto.encrypt_value(_master_key(), secret), user_id),
         )
+    audit.record(user_id, "user", "auth.totp_enrolled", "user", user_id)
     return {
         "otpauth_uri": totp.otpauth_uri(secret, reveal_email(row)),
         "secret_hint": totp.secret_hint(secret),
@@ -474,6 +508,14 @@ def totp_activate(user_id, code):
             " updated_at = now() WHERE id = %s",
             (matched, user_id),
         )
+    audit.record(user_id, "user", "auth.totp_activated", "user", user_id)
+    # The owner hears about a new second factor out-of-band, like a
+    # password reset: transactional security mail, not an alert
+    # governed by the 'notifications' consent.
+    from monitoring import notify
+
+    notify.create_notification(user_id, "totp_activated", {},
+                               mode="always")
     return {"totp_enabled": True}
 
 

@@ -2686,14 +2686,18 @@ function renderTotp() {
   const on = !!(meUser && meUser.totp_enabled);
   $("totpStatus").textContent = on ? "On" : "Off";
   $("totpEnrollBtn").style.display = on ? "none" : "";
+  $("totpEnrollPwWrap").style.display = on ? "none" : "";
+  $("totpEnrollPwHint").style.display = on ? "none" : "";
   if (on) $("totpEnrollBox").hidden = true;
   $("totpDisableBox").hidden = !on;
 }
 
 $("totpEnrollBtn").addEventListener("click", async () => {
   const r = await apiJson("/api/auth/totp/enroll", {
-    method: "POST", headers: AH, body: "{}",
+    method: "POST", headers: AH,
+    body: JSON.stringify({ password: $(\"totpEnrollPw\").value }),
   });
+  $(\"totpEnrollPw\").value = "";
   if (r.ok) {
     $("totpUri").value = r.data.otpauth_uri;
     $("totpEnrollBox").hidden = false;

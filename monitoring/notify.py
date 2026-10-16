@@ -60,7 +60,8 @@ _LANE_TIMEOUT_SECONDS = 15
 DEDUPE_WINDOW_DAYS = 7
 KINDS = ("new_finding", "finding_resolved", "removal_verified",
          "reappeared", "password_reset", "scan_summary",
-         "engineering_alert")
+         "engineering_alert", "email_verification",
+         "registration_attempt", "totp_activated", "totp_cleared")
 
 # Injectable transport for tests: callable
 # (url, headers, body_bytes, timeout) -> (status_code, text).
@@ -251,6 +252,46 @@ def render_email(kind, payload):
             "If it wasn't you, ignore this email — your password "
             "has not changed and the link expires on its own."
             % (payload.get("reset_url") or ""))
+    elif kind == "email_verification":
+        subject = "Verify your LeakGuard email"
+        body = (
+            "Welcome to LeakGuard. Confirm that this email address "
+            "is yours by opening this link within 24 hours:\n\n%s\n\n"
+            "Your account becomes usable the moment you confirm. "
+            "If you did not create a LeakGuard account, ignore this "
+            "email — the unconfirmed account can never be signed "
+            "in to and no further mail will follow."
+            % (payload.get("verify_url") or ""))
+    elif kind == "registration_attempt":
+        subject = "Someone tried to register with your email"
+        body = (
+            "Someone just tried to create a NEW LeakGuard account "
+            "with this email address — but this address already has "
+            "an account, so nothing was created and nothing about "
+            "your account changed.\n\n"
+            "If that was you, just sign in as usual. If it wasn't, "
+            "no action is needed: the attempt reveals nothing and "
+            "grants nothing." + _FOOTER)
+    elif kind == "totp_activated":
+        subject = "Two-factor authentication is now ON"
+        body = (
+            "Two-factor authentication (authenticator app) was "
+            "switched ON for this LeakGuard account.\n\n"
+            "If that was you, no action is needed. If it was NOT "
+            "you, your account may be compromised: reset your "
+            "password from the sign-in page right away — a password "
+            "reset also switches two-factor back off so you can "
+            "set it up again yourself." + _FOOTER)
+    elif kind == "totp_cleared":
+        subject = "Two-factor authentication was switched OFF"
+        body = (
+            "As part of the password reset you just completed, "
+            "two-factor authentication for this LeakGuard account "
+            "was switched OFF and its authenticator setup was "
+            "erased. This is deliberate: it guarantees a reset can "
+            "always recover the account.\n\n"
+            "You can switch two-factor back on from your Privacy "
+            "Center whenever you're ready." + _FOOTER)
     else:  # pragma: no cover - kinds are constrained by the schema
         subject = "LeakGuard update"
         body = "Open LeakGuard to see the latest update." + _FOOTER

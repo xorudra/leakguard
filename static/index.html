@@ -334,6 +334,9 @@
       <h3>Two-factor authentication</h3>
       <p class="hint">Status: <b id="totpStatus">–</b>. Use any authenticator app (Google Authenticator,
       Authy, your password manager). Codes are single-use — a code that worked once never works again.</p>
+      <label id="totpEnrollPwWrap">Password <input type="password" id="totpEnrollPw" autocomplete="current-password"></label>
+      <p class="hint" id="totpEnrollPwHint">Your password is asked once more to start two-factor setup, so a
+      borrowed session cannot change how you sign in.</p>
       <div class="rowBtns">
         <button type="button" id="totpEnrollBtn" class="btnGhost">Set up two-factor</button>
       </div>

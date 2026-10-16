@@ -105,6 +105,10 @@ ALLOWLISTED_LITERALS = {
     # prove failed logins behave identically to unknown accounts.
     "wrong-password-1",
     # tests/test_accounts.py — fixture password for the
+    # reset-clears-TOTP recovery test (audit 2026-10-16 fix wave);
+    # a throwaway test account's password, never a real credential.
+    "reset-replacement-pass-7",
+    # tests/test_accounts.py — fixture password for the
     # change-password flow; never a real credential.
     "brand-new-password-2",
     # README.md — the documented placeholder a user replaces with

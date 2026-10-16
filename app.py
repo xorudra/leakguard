@@ -1039,7 +1039,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True}, extra_headers=[
                 ("Set-Cookie", sessions_mod.clear_cookie_header())])
         if route == "/api/auth/totp/enroll":
-            result = self._call(auth_service.totp_enroll, user["id"])
+            # Password step-up (audit 2026-10-16): enrollment takes
+            # the account password in the body, verified inside the
+            # service under the credential rate limiter — the same
+            # shape as passkey register/options.
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            result = self._call(auth_service.totp_enroll, user["id"],
+                                payload.get("password"),
+                                self._client_ip())
             return self._json(200, result)
         if route == "/api/auth/totp/activate":
             payload = self._read_json_body()

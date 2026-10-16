@@ -23,6 +23,7 @@ Run:  python3 -m unittest discover -s tests
 import base64
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -626,7 +627,8 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
         cookie = self.session_cookie(headers)
 
         status, _h, body = self.request_json(
-            "POST", "/api/auth/totp/enroll", body={}, headers=CSRF,
+            "POST", "/api/auth/totp/enroll",
+            body={"password": self.PASSWORD}, headers=CSRF,
             cookie=cookie)
         self.assertEqual(status, 200)
         uri = body["otpauth_uri"]
@@ -669,7 +671,8 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
         status, headers, _b = self.login(email)
         cookie = self.session_cookie(headers)
         status, _h, body = self.request_json(
-            "POST", "/api/auth/totp/enroll", body={}, headers=CSRF,
+            "POST", "/api/auth/totp/enroll",
+            body={"password": self.PASSWORD}, headers=CSRF,
             cookie=cookie)
         self.assertEqual(status, 200)
         secret = self._secret_from_uri(body["otpauth_uri"])
@@ -703,6 +706,107 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
                           headers=CSRF, cookie=cookie2)
         status, _h, body = self.login(email, totp_code=fresh)
         self.assertEqual(status, 401)
+
+    def test_totp_enroll_requires_password_stepup(self):
+        # Audit 2026-10-16 (leakguard.accounts.totp-enroll-no-stepup):
+        # a session alone must never plant a second factor.
+        email = self.unique_email()
+        _s, headers, _b = self.register(email)
+        cookie = self.session_cookie(headers)
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/totp/enroll", body={}, headers=CSRF,
+            cookie=cookie)
+        self.assertEqual(status, 401)
+        self.assertEqual(body["error"]["code"], "invalid_credentials")
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/totp/enroll",
+            body={"password": "wrong-password-1"}, headers=CSRF,
+            cookie=cookie)
+        self.assertEqual(status, 401)
+        self.assertEqual(body["error"]["code"], "invalid_credentials")
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/totp/enroll",
+            body={"password": self.PASSWORD}, headers=CSRF,
+            cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertIn("otpauth_uri", body)
+
+    def test_password_reset_clears_totp(self):
+        # The documented recovery decision: a completed reset clears
+        # TOTP (with audit + owner email) so a planted factor can
+        # never lock the real owner out.
+        from monitoring import notify
+
+        email = self.unique_email()
+        _s, headers, reg = self.register(email)
+        uid = reg["user"]["id"]
+        cookie = self.session_cookie(headers)
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/totp/enroll",
+            body={"password": self.PASSWORD}, headers=CSRF,
+            cookie=cookie)
+        secret = self._secret_from_uri(body["otpauth_uri"])
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/totp/activate",
+            body={"code": totp.code_for_step(secret,
+                                             totp.current_step())},
+            headers=CSRF, cookie=cookie)
+        self.assertEqual(status, 200)
+
+        sent = []
+
+        def capture(url, headers_, payload, timeout):
+            sent.append(json.loads(payload.decode("utf-8")))
+            return 202
+
+        saved_transport = notify.TRANSPORT
+        saved_env = {k: os.environ.get(k) for k in
+                     ("BREVO_API_KEY", "NOTIFY_FROM_EMAIL")}
+        os.environ["BREVO_API_KEY"] = "test-lane-key"
+        os.environ["NOTIFY_FROM_EMAIL"] = "alerts@example.com"
+        notify.TRANSPORT = capture
+        try:
+            status, _h, _b = self.request_json(
+                "POST", "/api/auth/forgot-password",
+                body={"email": email}, headers=CSRF)
+            self.assertEqual(status, 200)
+        finally:
+            notify.TRANSPORT = saved_transport
+            for key, value in saved_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+        bodies = [p["textContent"] for p in sent
+                  if "/reset?token=" in p.get("textContent", "")]
+        self.assertEqual(len(bodies), 1)
+        found = re.search(r"/reset\?token=([A-Za-z0-9_-]+)", bodies[0])
+        self.assertIsNotNone(found)
+        raw_token = found.group(1)
+
+        new_password = "reset-replacement-pass-7"
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/reset-password",
+            body={"token": raw_token, "new_password": new_password},
+            headers=CSRF)
+        self.assertEqual(status, 200, body)
+        # TOTP is gone: password-only login works, and the account
+        # reports two-factor off.
+        status, headers, body = self.login(email, new_password)
+        self.assertEqual(status, 200)
+        self.assertIn("user", body)
+        self.assertFalse(body["user"]["totp_enabled"])
+        with self.pool.connection() as conn:
+            cleared = conn.execute(
+                "SELECT COUNT(*) AS n FROM audit_log"
+                " WHERE action = 'auth.totp_cleared'"
+                " AND actor_user_id = %s", (uid,)).fetchone()
+            notes = conn.execute(
+                "SELECT COUNT(*) AS n FROM notifications"
+                " WHERE kind = 'totp_cleared' AND user_id = %s",
+                (uid,)).fetchone()
+        self.assertEqual(cleared["n"], 1)
+        self.assertEqual(notes["n"], 1)
 
     def test_rate_limit_trips(self):
         email = self.unique_email()

@@ -690,7 +690,8 @@ class TestWebauthnDb(ServerMixin, unittest.TestCase):
         self.assertEqual(status, 200, body)
         # Turn TOTP on.
         status, _h, enroll = self.request_json(
-            "POST", "/api/auth/totp/enroll", body={}, headers=CSRF,
+            "POST", "/api/auth/totp/enroll",
+            body={"password": self.PASSWORD}, headers=CSRF,
             cookie=cookie)
         self.assertEqual(status, 200, enroll)
         query = urllib.parse.parse_qs(

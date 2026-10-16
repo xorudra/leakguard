@@ -1124,6 +1124,10 @@ class Handler(BaseHTTPRequestHandler):
             payload = self._read_json_body()
             if payload is None:
                 return self._fail(errors.invalid_json())
+            # Per-user add cap (audit 2026-10-16): probing the
+            # vault with dictionaries must stay slow.
+            self._enforce_rate_limit("identifier_add",
+                                     "user:" + user["id"])
             record = self._call(identifiers_service.add_identifier,
                                 user["id"], payload.get("kind"),
                                 payload.get("value"),

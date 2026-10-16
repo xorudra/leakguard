@@ -680,6 +680,17 @@ class TestLifecycleMigrationUpgrade(PgClassMixin, AccountMixin,
             conn.execute(
                 "INSERT INTO schema_migrations (name) VALUES (%s)",
                 (path20.name,))
+            # 0021 (per-user identifier uniqueness, audit 2026-10-16)
+            # is likewise pre-applied out of order: current vault
+            # code names the per-user index in its ON CONFLICT
+            # arbiter when this class's fixture adds an identifier,
+            # and 0021 is independent of the 0012 backfill.
+            path21 = [p for p in cls.migrate.migration_files()
+                      if p.name.startswith("0021")][0]
+            conn.execute(path21.read_text(encoding="utf-8"))
+            conn.execute(
+                "INSERT INTO schema_migrations (name) VALUES (%s)",
+                (path21.name,))
         from remediation import registry_seed
 
         registry_seed.seed_brokers()

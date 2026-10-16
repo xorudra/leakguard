@@ -42,6 +42,7 @@ DEFAULT_LIMITS = {
     "register": (10, 3600),             # POST /api/auth/register, per IP
     "user_scans": (10, 3600),           # POST /api/scans, per user
     "user_remediation_run": (6, 3600),  # POST /api/remediation/run, per user
+    "identifier_add": (30, 3600),       # POST /api/identifiers, per user (audit 2026-10-16: vault probing stays slow)
 }
 
 _lock = threading.Lock()

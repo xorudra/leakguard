@@ -611,6 +611,40 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
             raw_headers={"Origin": "https://evil.example.com"})
         self.assertEqual(status, 403)
 
+    def test_identifier_add_is_not_an_existence_oracle(self):
+        # Audit 2026-10-16 (identifier-existence-oracle-and-
+        # squatting-409): two accounts can both save the same
+        # value; the second save succeeds exactly like the first,
+        # and each account sees only its own row.
+        value = "shared-%s@example.com" % uuid.uuid4().hex[:8]
+        _s, headers_a, _b = self.register()
+        cookie_a = self.session_cookie(headers_a)
+        status, _h, body = self.request_json(
+            "POST", "/api/identifiers",
+            body={"kind": "email", "value": value},
+            headers=CSRF, cookie=cookie_a)
+        self.assertEqual(status, 201, body)
+        first_id = body["identifier"]["id"]
+
+        _s, headers_b, _b = self.register()
+        cookie_b = self.session_cookie(headers_b)
+        status, _h, body = self.request_json(
+            "POST", "/api/identifiers",
+            body={"kind": "email", "value": value},
+            headers=CSRF, cookie=cookie_b)
+        self.assertEqual(status, 201, body)  # never a 409 oracle
+        self.assertNotEqual(body["identifier"]["id"], first_id)
+        self.assertEqual(body["identifier"]["masked"],
+                         "s•••@example.com")
+        # Each list shows exactly its owner's row.
+        for cookie, own_id in ((cookie_a, first_id),
+                               (cookie_b, body["identifier"]["id"])):
+            status, _h, listing = self.request_json(
+                "GET", "/api/identifiers", cookie=cookie)
+            mine = [i for i in listing["identifiers"]
+                    if i["masked"] == "s•••@example.com"]
+            self.assertEqual([i["id"] for i in mine], [own_id])
+
     def test_identifiers_crud_and_idor(self):
         _s, headers_a, _b = self.register()
         cookie_a = self.session_cookie(headers_a)

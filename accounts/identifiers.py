@@ -6,13 +6,22 @@ operation is scoped to the authenticated user, list views only ever
 see the caller's rows, and deleting someone else's identifier id
 answers the same 404 as a nonexistent id (never a 403 leak).
 
-One vault invariant shapes add(): a live (kind, value) pair exists at
-most once globally (0001's partial unique index). Re-adding your own
-identifier is idempotent. A legacy unowned row (user_id NULL, from
-the pre-accounts vault) is claimed by the first account that adds it.
-A row owned by a DIFFERENT user cannot be taken over — that is a 409,
-and the other user's data stays untouched.
+One vault invariant shapes add(): since migration 0021 a live
+(kind, value) pair is unique PER USER, never globally — the old
+global index made this endpoint a cross-account existence oracle
+and let a squatter block the real owner (audit 2026-10-16,
+identifier-existence-oracle-and-squatting-409). Re-adding your own
+identifier is idempotent, and whether or not another account
+holds the same value is neither revealed nor blocking. A legacy
+unowned row (user_id NULL, from the pre-accounts vault) is
+claimed by the first account that adds it. A per-user count cap
+and the route's per-user rate limit bound bulk probing.
 """
+
+# The per-account ceiling on live identifiers: generous for a
+# person plus household members (a handful of kinds each), small
+# enough that scripted squatting/probing runs out of room fast.
+MAX_IDENTIFIERS_PER_USER = 100
 
 import uuid
 
@@ -64,6 +73,17 @@ def add_identifier(user_id, kind, value, member_id=None):
     household members (whose detail this is); without one, a re-add
     keeps whatever assignment the row already has."""
     member_id = _validate_member(user_id, member_id)
+    with pool.connection() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) AS n FROM identifiers"
+            " WHERE user_id = %s AND deleted_at IS NULL",
+            (user_id,),
+        ).fetchone()
+    if count["n"] >= MAX_IDENTIFIERS_PER_USER:
+        raise errors.bad_request(
+            "identifier_limit_reached",
+            "You have saved the maximum of %d details — remove one "
+            "before adding another" % MAX_IDENTIFIERS_PER_USER)
     try:
         record = vault_store.put(kind, value, user_id=user_id)
     except ValueError:
@@ -84,10 +104,10 @@ def add_identifier(user_id, kind, value, member_id=None):
                 (user_id, record["id"]),
             )
         record["user_id"] = str(user_id)
-    elif record["user_id"] != str(user_id):
-        raise errors.conflict(
-            "identifier_taken",
-            "That identifier is already saved on another account")
+    # No foreign-owner branch remains: put() scopes to the caller,
+    # so a value another account holds simply creates the caller's
+    # own row — the response is identical either way (audit
+    # 2026-10-16: no existence oracle, no squatting block).
     # The row is the caller's now. Apply a requested member
     # assignment, and report the assignment the row actually has
     # (the vault's own record shape predates members).

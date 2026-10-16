@@ -182,9 +182,12 @@ def _public(row):
 
 def put(kind, value, user_id=None):
     """Store an identifier (idempotently). Returns the public record
-    (masked — never plaintext). Re-adding a live identifier returns the
-    existing record. Raises VaultNotConfiguredError when unconfigured,
-    ValueError for an empty value or unknown kind."""
+    (masked — never plaintext). Re-adding a live identifier returns
+    the caller's existing record — since migration 0021 uniqueness
+    is per-user, another account holding the same value neither
+    blocks nor is revealed by this call. Raises
+    VaultNotConfiguredError when unconfigured, ValueError for an
+    empty value or unknown kind."""
     kind = _check_kind(kind)
     master_key, lookup_key = _require_configured()
     if value is None or not str(value).strip():
@@ -195,19 +198,49 @@ def put(kind, value, user_id=None):
     stored_value = str(value).strip()
     blob = crypto.encrypt_value(master_key, stored_value)
     masked = mask(kind, value)
+    # Uniqueness is PER-USER since migration 0021 (audit
+    # 2026-10-16): an account's live row never collides with
+    # another account's, so the conflict arbiter — and the
+    # already-present lookup below — scope to the caller's own
+    # rows. Unowned (legacy) rows keep their own global arbiter,
+    # which is what the claim path in accounts/identifiers.py
+    # relies on: at most one claimable row per value.
+    if user_id is not None:
+        conflict = (" ON CONFLICT (user_id, kind, hmac_lookup)"
+                    " WHERE deleted_at IS NULL AND user_id IS NOT NULL"
+                    " DO NOTHING")
+        scope, scope_params = "user_id = %s AND ", (user_id,)
+    else:
+        conflict = (" ON CONFLICT (kind, hmac_lookup)"
+                    " WHERE deleted_at IS NULL AND user_id IS NULL"
+                    " DO NOTHING")
+        scope, scope_params = "user_id IS NULL AND ", ()
     with pool.connection() as conn:
+        if user_id is not None:
+            # A legacy unowned row for this value is returned as-is
+            # so the caller's claim path (accounts/identifiers.py)
+            # adopts it instead of duplicating the value.
+            legacy = conn.execute(
+                "SELECT " + _PUBLIC_COLUMNS + " FROM identifiers"
+                " WHERE user_id IS NULL AND kind = %s"
+                " AND hmac_lookup = %s AND deleted_at IS NULL",
+                (kind, digest),
+            ).fetchone()
+            if legacy is not None:
+                return _public(legacy)
         row = conn.execute(
             "INSERT INTO identifiers (user_id, kind, hmac_lookup, ciphertext, masked)"
             " VALUES (%s, %s, %s, %s, %s)"
-            " ON CONFLICT (kind, hmac_lookup) WHERE deleted_at IS NULL"
-            " DO NOTHING RETURNING " + _PUBLIC_COLUMNS,
+            + conflict +
+            " RETURNING " + _PUBLIC_COLUMNS,
             (user_id, kind, digest, blob, masked),
         ).fetchone()
         if row is None:  # already present — return the live record
             row = conn.execute(
                 "SELECT " + _PUBLIC_COLUMNS + " FROM identifiers"
-                " WHERE kind = %s AND hmac_lookup = %s AND deleted_at IS NULL",
-                (kind, digest),
+                " WHERE " + scope + "kind = %s AND hmac_lookup = %s"
+                " AND deleted_at IS NULL",
+                scope_params + (kind, digest),
             ).fetchone()
     return _public(row)
 
@@ -221,7 +254,11 @@ def get_by_lookup(kind, value):
     with pool.connection() as conn:
         row = conn.execute(
             "SELECT " + _PUBLIC_COLUMNS + " FROM identifiers"
-            " WHERE kind = %s AND hmac_lookup = %s AND deleted_at IS NULL",
+            " WHERE kind = %s AND hmac_lookup = %s AND deleted_at IS NULL"
+            # Per-user uniqueness (0021) means several accounts can
+            # hold the same value; the legacy unowned row, when one
+            # exists, stays the canonical answer.
+            " ORDER BY (user_id IS NOT NULL), created_at, id",
             (kind, digest),
         ).fetchone()
     return _public(row)

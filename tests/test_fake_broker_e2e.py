@@ -317,10 +317,10 @@ class TestFakeBrokerWorkflowDb(ServerMixin, unittest.TestCase):
     # -- account/case helpers -----------------------------------------
     def register_person(self, tag):
         email = "p2f-%s-%s@example.com" % (tag, self._run_tag)
-        # Identifiers are globally unique by lookup hash (an
-        # identifier owned by another account is a 409 by design),
-        # so the fixture person is per-test AND per-run unique —
-        # still the suites' obviously-fake Zztest Personman.
+        # The fixture person is per-test AND per-run unique (its
+        # identifiers double as broker-listing fixtures, so runs
+        # must never collide) — still the suites' obviously-fake
+        # Zztest Personman.
         self.person_name = "Zztest Personman %s %s" % (
             tag, self._run_tag[:4])
         status, headers, body = self.request_json(

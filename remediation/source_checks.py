@@ -11,7 +11,18 @@ last page actually seen). Only the hash is stored, never the page.
 
 Rules:
 * At most one sweep per 24h — the checks table is its own stamp:
-  a sweep is skipped while max(checked_at) is younger than that.
+  a sweep is due unless EVERY registry broker carries a row
+  younger than 24h. The gate reads the OLDEST row (audit
+  2026-10-16, remediation.source-sweep-partial-run-poisons-24h-
+  gate): the old max(checked_at) reading let one fast broker's
+  fresh stamp certify a sweep that had died before reaching the
+  other 39, leaving their change detection dark for a day.
+* Every fetch has a per-broker total deadline and the sweep an
+  aggregate budget (audit 2026-10-16,
+  remediation.source-sweep-no-total-deadline): slow or hanging
+  pages cannot stretch the daily pass without bound; brokers
+  past the budget are recorded as skipped in the summary and
+  keep their old stamps, so the next tick retries them.
 * Fetches go through the SSRF guard (core/ssrf.py): an opt-out URL
   from data may not point this server at a non-public address. A
   guard refusal reads as 'unreachable', never as an error.
@@ -26,6 +37,7 @@ Rules:
 """
 
 import hashlib
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -38,6 +50,10 @@ from remediation import registry_seed
 FETCH_TIMEOUT_SECONDS = 10
 MAX_BODY_BYTES = 64 * 1024
 SWEEP_INTERVAL = timedelta(hours=24)
+# The whole sweep's budget: 40 brokers at a 10s worst case would
+# be ~7 minutes of a hanging pass; four minutes still covers a
+# healthy registry many times over (a normal fetch is ~1s).
+SWEEP_BUDGET_SECONDS = 240
 
 _armed = False
 
@@ -49,13 +65,33 @@ def arm():
     _armed = True
 
 
+def _read_deadline(resp, deadline):
+    """Read up to MAX_BODY_BYTES in chunks under a TOTAL deadline:
+    the per-operation socket timeout alone lets a slow-drip page
+    hold the sweep open indefinitely (audit 2026-10-16)."""
+    chunks = []
+    total = 0
+    while total < MAX_BODY_BYTES:
+        if time.monotonic() > deadline:
+            raise TimeoutError("source fetch exceeded its deadline")
+        chunk = resp.read(min(16 * 1024, MAX_BODY_BYTES - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
+
+
 def _default_fetcher(url):
     """GET `url` -> (status, body bytes capped at MAX_BODY_BYTES).
 
     HTTP error statuses are answers too (the page exists; its body
     is hashed like any other). Transport failures and SSRF-guard
-    refusals RAISE — the caller records them as 'unreachable'."""
+    refusals RAISE — the caller records them as 'unreachable'.
+    The fetch has a total deadline (FETCH_TIMEOUT_SECONDS across
+    connect + read), not just a per-operation timeout."""
     ssrf.assert_public_url(url)
+    deadline = time.monotonic() + FETCH_TIMEOUT_SECONDS
     req = urllib.request.Request(url, headers=agent_engine.UA)
     try:
         # Connection-pinned fetch (Phase 70): the pinned connection
@@ -64,10 +100,10 @@ def _default_fetcher(url):
         # refusal raises here exactly like a transport failure.
         with ssrf.pinned_urlopen(
                 req, timeout=FETCH_TIMEOUT_SECONDS) as resp:
-            return resp.status, resp.read(MAX_BODY_BYTES)
+            return resp.status, _read_deadline(resp, deadline)
     except urllib.error.HTTPError as exc:
         try:
-            return exc.code, exc.read(MAX_BODY_BYTES)
+            return exc.code, _read_deadline(exc, deadline)
         except Exception:
             return exc.code, b""
 
@@ -96,13 +132,28 @@ def _last_sweep_at(conn):
     return row["last"] if row else None
 
 
+def _all_fresh(conn, now):
+    """True only when EVERY registry broker has a check row from
+    the last SWEEP_INTERVAL (audit 2026-10-16): freshness is a
+    property of the whole registry, never of its freshest row —
+    a never-checked broker is due, and so is a stale one."""
+    rows = conn.execute(
+        "SELECT slug, checked_at FROM broker_source_checks",
+    ).fetchall()
+    stamps = {row["slug"]: row["checked_at"] for row in rows}
+    for broker in brokers_to_check():
+        stamp = stamps.get(broker["slug"])
+        if stamp is None or (now - stamp) >= SWEEP_INTERVAL:
+            return False
+    return True
+
+
 def sweep_due(now=None):
-    """True when no sweep has run in the last 24h (the checks table
-    is the stamp)."""
+    """True unless every registry broker was checked within the
+    last 24h (the checks table is the stamp)."""
     now = now or datetime.now(timezone.utc)
     with pool.connection() as conn:
-        last = _last_sweep_at(conn)
-    return last is None or (now - last) >= SWEEP_INTERVAL
+        return not _all_fresh(conn, now)
 
 
 def check_broker_sources(fetcher=None, now=None, force=False):
@@ -115,11 +166,10 @@ def check_broker_sources(fetcher=None, now=None, force=False):
     if fetcher is None:
         fetcher = _default_fetcher
     with pool.connection() as conn:
-        if not force:
+        if not force and _all_fresh(conn, now):
             last = _last_sweep_at(conn)
-            if last is not None and (now - last) < SWEEP_INTERVAL:
-                return {"skipped": True, "reason": "recent",
-                        "last_checked_at": last.isoformat()}
+            return {"skipped": True, "reason": "recent",
+                    "last_checked_at": last.isoformat() if last else None}
         previous = {
             row["slug"]: row for row in conn.execute(
                 "SELECT slug, content_hash FROM broker_source_checks",
@@ -127,9 +177,19 @@ def check_broker_sources(fetcher=None, now=None, force=False):
         }
     summary = {"skipped": False, "checked": 0, "ok": 0, "changed": 0,
                "unreachable": 0, "changed_slugs": [],
-               "unreachable_slugs": []}
+               "unreachable_slugs": [], "skipped_budget": 0,
+               "skipped_slugs": []}
+    sweep_started = time.monotonic()
     for broker in brokers_to_check():
         slug = broker["slug"]
+        if time.monotonic() - sweep_started > SWEEP_BUDGET_SECONDS:
+            # Aggregate budget spent (audit 2026-10-16): the
+            # remaining brokers keep their old stamps — the gate
+            # reads the oldest, so the next tick retries them
+            # instead of certifying a partial sweep.
+            summary["skipped_budget"] += 1
+            summary["skipped_slugs"].append(slug)
+            continue
         prev_hash = (previous.get(slug) or {}).get("content_hash")
         try:
             status, body = fetcher(broker["url"])
@@ -142,6 +202,9 @@ def check_broker_sources(fetcher=None, now=None, force=False):
             stored_hash = digest
         except Exception:
             status, stored_hash, state = None, prev_hash, "unreachable"
+        # Each row is stamped with ITS OWN check time, never the
+        # sweep's start time — freshness claims stay per-broker.
+        checked_at = datetime.now(timezone.utc)
         with pool.connection() as conn:
             conn.execute(
                 "INSERT INTO broker_source_checks"
@@ -151,7 +214,8 @@ def check_broker_sources(fetcher=None, now=None, force=False):
                 " url = EXCLUDED.url, status = EXCLUDED.status,"
                 " content_hash = EXCLUDED.content_hash,"
                 " state = EXCLUDED.state, checked_at = EXCLUDED.checked_at",
-                (slug, broker["url"], status, stored_hash, state, now))
+                (slug, broker["url"], status, stored_hash, state,
+                 checked_at))
         summary["checked"] += 1
         summary[state] += 1
         if state == "changed":
@@ -178,7 +242,12 @@ def maybe_run():
 def source_health():
     """The admin overview's per-broker source health: counts of
     brokers by their LATEST sweep state, the flagged slug lists,
-    and when the last sweep ran. Empty table -> zeros + None."""
+    and when the last sweep ran. Empty table -> zeros + None.
+
+    'stale' names the brokers whose change detection is dark
+    (audit 2026-10-16): no row at all, or a row older than the
+    sweep interval — the overview must never present a partial
+    or long-dead sweep as full knowledge."""
     with pool.connection() as conn:
         rows = conn.execute(
             "SELECT slug, state, checked_at FROM broker_source_checks"
@@ -186,8 +255,11 @@ def source_health():
         ).fetchall()
     health = {"ok": 0, "changed": 0, "unreachable": 0,
               "changed_slugs": [], "unreachable_slugs": [],
+              "stale": 0, "stale_slugs": [],
               "last_checked_at": None}
     last = None
+    now = datetime.now(timezone.utc)
+    stamps = {}
     for row in rows:
         state = row["state"]
         if state in ("ok", "changed", "unreachable"):
@@ -197,8 +269,14 @@ def source_health():
         elif state == "unreachable":
             health["unreachable_slugs"].append(row["slug"])
         checked = row["checked_at"]
+        stamps[row["slug"]] = checked
         if checked is not None and (last is None or checked > last):
             last = checked
+    for broker in brokers_to_check():
+        stamp = stamps.get(broker["slug"])
+        if stamp is None or (now - stamp) >= SWEEP_INTERVAL:
+            health["stale"] += 1
+            health["stale_slugs"].append(broker["slug"])
     if last is not None:
         health["last_checked_at"] = (
             last.isoformat() if hasattr(last, "isoformat") else last)

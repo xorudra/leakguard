@@ -585,6 +585,73 @@ class TestBatchCDb(ServerMixin, unittest.TestCase):
         self.assertEqual(health["ok"], total - 1)
         self.assertIsNotNone(health["last_checked_at"])
 
+    def test_partial_sweep_does_not_satisfy_the_gate(self):
+        # Audit 2026-10-16 (source-sweep-partial-run-poisons-24h-
+        # gate): freshness is per-broker — one stale or missing
+        # row makes the sweep due even when every other stamp is
+        # fresh, and source_health calls the stale brokers out.
+        from remediation import source_checks
+
+        self.db_exec("DELETE FROM broker_source_checks")
+
+        def stub(url):
+            return 200, b"page"
+
+        total = len(source_checks.brokers_to_check())
+        summary = source_checks.check_broker_sources(
+            fetcher=stub, force=True)
+        self.assertEqual(summary["checked"], total)
+        self.assertFalse(source_checks.sweep_due())
+        # Age ONE broker past the interval: the whole sweep is
+        # due again, and a non-forced run is NOT gated off.
+        victim = source_checks.brokers_to_check()[0]["slug"]
+        self.db_exec(
+            "UPDATE broker_source_checks SET checked_at ="
+            " now() - interval '25 hours' WHERE slug = %s",
+            (victim,))
+        self.assertTrue(source_checks.sweep_due())
+        gated = source_checks.check_broker_sources(fetcher=stub)
+        self.assertFalse(gated["skipped"])
+        health = source_checks.source_health()
+        self.assertEqual(health["stale"], 0)  # just re-swept
+        # Age it again: health names the dark broker.
+        self.db_exec(
+            "UPDATE broker_source_checks SET checked_at ="
+            " now() - interval '25 hours' WHERE slug = %s",
+            (victim,))
+        health = source_checks.source_health()
+        self.assertEqual(health["stale"], 1)
+        self.assertEqual(health["stale_slugs"], [victim])
+
+    def test_sweep_budget_records_the_rest_as_skipped(self):
+        # Audit 2026-10-16 (source-sweep-no-total-deadline): past
+        # the aggregate budget the remaining brokers are recorded
+        # skipped in the summary and keep NO fresh stamp.
+        import time as _time
+
+        from remediation import source_checks
+
+        self.db_exec("DELETE FROM broker_source_checks")
+
+        def slow(url):
+            _time.sleep(0.05)
+            return 200, b"page"
+
+        saved = source_checks.SWEEP_BUDGET_SECONDS
+        source_checks.SWEEP_BUDGET_SECONDS = 0.12
+        try:
+            summary = source_checks.check_broker_sources(
+                fetcher=slow, force=True)
+        finally:
+            source_checks.SWEEP_BUDGET_SECONDS = saved
+        total = len(source_checks.brokers_to_check())
+        self.assertGreater(summary["skipped_budget"], 0)
+        self.assertEqual(
+            summary["checked"] + summary["skipped_budget"], total)
+        rows = self.db_all("SELECT slug FROM broker_source_checks")
+        self.assertEqual(len(rows), summary["checked"])
+        self.assertTrue(source_checks.sweep_due())
+
     # ---------- admin overview: source health + security events --
     def test_admin_overview_source_health_and_security_events(self):
         from accounts import audit

@@ -41,6 +41,7 @@ run ends with one PII-free log line of counts and one audit row
 """
 
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 from core import logging_setup
@@ -273,13 +274,18 @@ def _run_source_sweep():
 
 def _loop():
     while not _stop.is_set():
+        # The cadence anchors to the tick's START (audit
+        # 2026-10-16): the old loop waited a full TICK after the
+        # work finished, so every pass pushed the next one later
+        # by the work's own duration, drifting without bound.
+        started = time.monotonic()
         try:
             run_once()
         except Exception as exc:
             logging_setup.log_error(
                 None, "retention run failed: " + type(exc).__name__)
         _run_source_sweep()
-        _stop.wait(TICK_SECONDS)
+        _stop.wait(max(0.0, TICK_SECONDS - (time.monotonic() - started)))
 
 
 def start_retention():

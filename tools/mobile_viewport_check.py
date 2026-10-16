@@ -39,6 +39,18 @@ PAGES = ("/", "/privacy", "/terms", "/support", "/trust", "/reset")
 # phone, 768 = tablet, 1280 = desktop.
 VIEWPORTS = ((320, 700), (360, 740), (768, 1024), (1280, 800))
 RELAY_PORT = 8899
+
+def _proxy_config():
+    """Playwright proxy dict for the local relay. When
+    LEAKGUARD_RELAY_TOKEN is set, the relay demands it as the
+    proxy password (audit 2026-10-16) — pass it through."""
+    cfg = {"server": "http://127.0.0.1:%d" % RELAY_PORT}
+    token = os.environ.get("LEAKGUARD_RELAY_TOKEN")
+    if token:
+        cfg["username"] = "leakguard"
+        cfg["password"] = token
+    return cfg
+
 MOBILE_UA = (
     "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36")
@@ -137,8 +149,7 @@ def main():
         with sync_playwright() as pw:
             launch = {"headless": True,
                       "args": ["--no-sandbox", "--disable-dev-shm-usage"],
-                      "proxy": {"server": "http://127.0.0.1:%d"
-                                % RELAY_PORT}}
+                      "proxy": _proxy_config()}
             chrome = _find_chrome()
             if chrome:
                 launch["executable_path"] = chrome

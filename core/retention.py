@@ -107,6 +107,20 @@ def _purge_reset_tokens(conn, now):
         (cutoff, cutoff))
 
 
+def _purge_verification_tokens(conn, now):
+    # Run-2 hunt: migration 0020's token table shipped without a
+    # purge — used/superseded/expired verification digests would
+    # rest forever, breaking the same retention contract the
+    # reset tokens above live under. Same shape, same grace.
+    cutoff = now - timedelta(days=RESET_TOKEN_GRACE_DAYS)
+    return _delete(
+        conn,
+        "DELETE FROM email_verification_tokens"
+        " WHERE (used_at IS NOT NULL AND used_at < %s)"
+        " OR expires_at < %s",
+        (cutoff, cutoff))
+
+
 def _purge_notifications(conn, now):
     return _delete(
         conn,
@@ -206,6 +220,7 @@ _CATEGORIES = (
     ("sessions", _purge_sessions),
     ("webauthn_challenges", _purge_webauthn_challenges),
     ("reset_tokens", _purge_reset_tokens),
+    ("verification_tokens", _purge_verification_tokens),
     ("credential_notifications", _purge_credential_notifications),
     ("notifications", _purge_notifications),
     ("error_events", _purge_error_events),
@@ -237,7 +252,7 @@ def run_once(now=None):
     _log("retention_purge " + " ".join(
         "%s=%s" % (k, counts[k]) for k in (
             "sessions", "webauthn_challenges", "reset_tokens",
-            "credential_notifications",
+            "verification_tokens", "credential_notifications",
             "notifications", "error_events", "users_purged")))
     try:
         from accounts import audit

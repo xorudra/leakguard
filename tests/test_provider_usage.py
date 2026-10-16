@@ -292,6 +292,36 @@ class TestBudgetGateClient(unittest.TestCase):
                          (1, 0, 1))
 
 
+class TestRegisterLaneBudget(unittest.TestCase):
+    """Run-2 hunt: the registration breach screen meters against
+    its own HIBP sub-budget, never the shared global pool."""
+
+    def test_register_lane_has_a_budget(self):
+        self.assertIn("Have I Been Pwned Pwned Passwords:register",
+                      usage.BUDGETS)
+
+    def test_register_lane_refuses_at_its_cap(self):
+        usage.tracker.reset()
+        guard = BudgetGuard(
+            {"Have I Been Pwned Pwned Passwords": 5000,
+             "Have I Been Pwned Pwned Passwords:register": 2})
+        guard.__enter__()
+        try:
+            with usage.lane("register"):
+                usage.record_call(
+                    "Have I Been Pwned Pwned Passwords", True)
+                usage.record_call(
+                    "Have I Been Pwned Pwned Passwords", True)
+                self.assertTrue(usage.is_exhausted(
+                    "Have I Been Pwned Pwned Passwords"))
+            # Outside the lane the global budget (5000) still stands.
+            self.assertFalse(usage.is_exhausted(
+                "Have I Been Pwned Pwned Passwords"))
+        finally:
+            guard.__exit__()
+            usage.tracker.reset()
+
+
 class TestAnonymousLaneBudgets(unittest.TestCase):
     """Audit 2026-10-16 (anon-scan-global-provider-budget-
     exhaustion): calls inside usage.lane('anon') count against

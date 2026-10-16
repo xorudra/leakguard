@@ -552,6 +552,84 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
         status, _h, body = self.login(email, "victim-pass-456")
         self.assertEqual(status, 200, body)
 
+    def test_registration_mail_cannot_be_flooded(self):
+        # Run-2 hunt (registration-notification-mail-flooding +
+        # register timing oracle): duplicate registers against a
+        # VERIFIED address mail at most one registration_attempt
+        # notice per dedupe window, and the taken path still pays
+        # one Argon2 hash (no existence timing oracle). Resends
+        # to a PENDING address are cooldown-limited.
+        from unittest import mock
+
+        from accounts import passwords as pw_module
+        from monitoring import notify
+
+        sent = []
+
+        def capture(url, headers_, payload, timeout):
+            sent.append(json.loads(payload.decode("utf-8")))
+            return 202
+
+        saved_transport = notify.TRANSPORT
+        saved_env = {k: os.environ.get(k) for k in
+                     ("BREVO_API_KEY", "NOTIFY_FROM_EMAIL")}
+        os.environ["BREVO_API_KEY"] = "test-lane-key"
+        os.environ["NOTIFY_FROM_EMAIL"] = "alerts@example.com"
+        notify.TRANSPORT = capture
+        try:
+            # A verified owner (register helper verifies + logs in).
+            email = self.unique_email()
+            status, _h, _b = self.register(email)
+            self.assertEqual(status, 200)
+            sent.clear()
+            real_hash = pw_module.hash_password
+            with mock.patch.object(
+                    pw_module, "hash_password",
+                    side_effect=lambda p: real_hash(p)) as hash_spy:
+                for _ in range(3):
+                    status, _h, _b = self.request_json(
+                        "POST", "/api/auth/register",
+                        body={"email": email,
+                              "password": "another-pass-123",
+                              "policy_accepted": True},
+                        headers=CSRF)
+                    self.assertEqual(status, 201)
+            # Timing discipline: every taken attempt burned a hash.
+            self.assertEqual(hash_spy.call_count, 3)
+            attempts = [p for p in sent
+                        if p.get("subject") ==
+                        "Someone tried to register with your email"]
+            self.assertEqual(len(attempts), 1, sent)
+            # A pending address: resends are capped per day —
+            # seven registers produce exactly the cap's worth of
+            # verification emails (1 fresh + 4 resends), never 7.
+            pending = self.unique_email()
+            sent.clear()
+            for i in range(7):
+                # Rotating edge IPs: the per-IP register bucket
+                # is shared across this class's tests and would
+                # 429 the loop for reasons unrelated to this test.
+                status, _h, _b = self.request_json(
+                    "POST", "/api/auth/register",
+                    body={"email": pending,
+                          "password": "pending-pass-123",
+                          "policy_accepted": True},
+                    headers=CSRF,
+                    raw_headers={"X-Forwarded-For":
+                                 "10.8.0.%d" % (i + 1)})
+                self.assertEqual(status, 201)
+            verify_mails = [p for p in sent
+                            if "/verify?token=" in
+                            p.get("textContent", "")]
+            self.assertEqual(len(verify_mails), 5, sent)
+        finally:
+            notify.TRANSPORT = saved_transport
+            for key, value in saved_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
     def test_email_verification_flow(self):
         # Audit 2026-10-16 (register-unverified-email-prehijack):
         # no session and no login until the emailed token redeems;

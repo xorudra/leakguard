@@ -49,7 +49,15 @@ from remediation import registry_seed
 
 FETCH_TIMEOUT_SECONDS = 10
 MAX_BODY_BYTES = 64 * 1024
-SWEEP_INTERVAL = timedelta(hours=24)
+# 23h, deliberately NOT the retention tick's 24h (run-2 hunt):
+# the gate compares stamp ages against this interval at a check
+# that runs inside a 24h-anchored tick — with a 24h interval,
+# any tick whose sweep step starts slightly earlier than the
+# previous tick's (purge volumes vary) finds every stamp a hair
+# under 24h old, skips the sweep, and the next chance is a full
+# tick later: a systematic ~48h cadence. One hour of slack
+# absorbs the offset jitter.
+SWEEP_INTERVAL = timedelta(hours=23)
 # The whole sweep's budget: 40 brokers at a 10s worst case would
 # be ~7 minutes of a hanging pass; four minutes still covers a
 # healthy registry many times over (a normal fetch is ~1s).

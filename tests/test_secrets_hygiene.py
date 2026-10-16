@@ -117,6 +117,11 @@ ALLOWLISTED_LITERALS = {
     # throwaway test values, never real credentials.
     "squatter-pass-123",
     "victim-pass-456",
+    # tests/test_accounts.py — fixture passwords for the run-2
+    # registration-mail-flooding regression test; throwaway
+    # test values, never real credentials.
+    "another-pass-123",
+    "pending-pass-123",
     # README.md — the documented placeholder a user replaces with
     # their own LeakGuard API token; the value itself grants nothing.
     "lg_REPLACE_WITH_YOUR_TOKEN",

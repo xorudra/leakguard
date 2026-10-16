@@ -716,6 +716,37 @@ class TestBatchCDb(ServerMixin, unittest.TestCase):
         self.assertEqual([r["h"] for r in rows], ["02"])
 
     # ---------- retention tick hosts the sweep (armed + gated) ----
+    def test_retention_purges_verification_tokens(self):
+        # Run-2 hunt (verification-tokens-no-retention): the
+        # 0020 table gets the reset tokens' purge discipline —
+        # used/expired rows older than the grace go, fresh
+        # outstanding tokens stay.
+        from core import retention
+
+        _cookie, uid, _email = self.register()
+        self.db_exec(
+            "INSERT INTO email_verification_tokens"
+            " (token_hash, user_id, expires_at, used_at, created_at)"
+            " VALUES (decode('01', 'hex'), %s, now() - interval '8 days',"
+            " now() - interval '8 days', now() - interval '8 days')",
+            (uid,))
+        self.db_exec(
+            "INSERT INTO email_verification_tokens"
+            " (token_hash, user_id, expires_at, created_at)"
+            " VALUES (decode('02', 'hex'), %s, now() + interval '1 day',"
+            " now())",
+            (uid,))
+        counts = retention.run_once()
+        self.assertEqual(counts["verification_tokens"], 1)
+        # The aged row is gone; the fresh one (plus the token the
+        # register helper itself minted) survives.
+        rows = self.db_all(
+            "SELECT encode(token_hash, 'hex') AS h"
+            " FROM email_verification_tokens WHERE user_id = %s",
+            (uid,))
+        self.assertNotIn("01", [r["h"] for r in rows])
+        self.assertIn("02", [r["h"] for r in rows])
+
     def test_retention_loop_step_runs_the_armed_sweep(self):
         from core import retention
         from remediation import source_checks

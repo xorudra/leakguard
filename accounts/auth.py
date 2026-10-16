@@ -237,6 +237,15 @@ def register(email, password, name=None, policy_accepted=False):
         # confirm an address they don't control nor block the real
         # owner's confirmation.
         existing = _get_user_by_email(normalized)
+        # Run-2 hunt: burn one Argon2 hash on EVERY taken path.
+        # The fresh path pays hash_password for the INSERT; a
+        # taken path that skips it answers measurably faster,
+        # rebuilding the account-existence timing oracle the
+        # uniform 201 exists to close (login burns a dummy
+        # verify for the same reason). The unverified branch
+        # USES this hash for the credential replacement below;
+        # the verified branch discards it.
+        replacement_hash = passwords.hash_password(password)
         if existing is not None and not existing["email_verified"]:
             # Run-2 revalidation catch (2026-10-16): resending
             # ALONE left the SQUATTER's password on the row — the
@@ -255,17 +264,25 @@ def register(email, password, name=None, policy_accepted=False):
                     " totp_secret_ciphertext = NULL,"
                     " totp_enabled = false"
                     " WHERE id = %s AND email_verified = false",
-                    (passwords.hash_password(password),
+                    (replacement_hash,
                      crypto.encrypt_value(_master_key(), cleaned_name)
                      if cleaned_name else None,
                      existing["id"]))
-            _send_verification(existing["id"], normalized)
+            _send_verification(existing["id"], normalized,
+                               cooldown=True)
         elif existing is not None:
             from monitoring import notify
 
+            # dedupe_key (run-2 hunt): without it every duplicate
+            # register mailed the owner a fresh notice — an
+            # unauthenticated mail-bombing / shared-quota-burn
+            # primitive. One notice per account per dedupe
+            # window (7 days) is the signal; the rest are
+            # recorded suppressed.
             notify.create_notification(
                 existing["id"], "registration_attempt", {},
-                mode="always", email=normalized)
+                mode="always", email=normalized,
+                dedupe_key="registration_attempt")
         raise errors.conflict(
             "email_taken", "An account with this email already exists")
     audit.record(row["id"], "user", "auth.registered", "user", row["id"])
@@ -420,11 +437,33 @@ def delete_account(user_id, password):
 VERIFY_TOKEN_TTL = timedelta(hours=24)
 
 
-def _send_verification(user_id, normalized_email):
+VERIFY_RESEND_DAILY_CAP = 5
+
+
+def _send_verification(user_id, normalized_email, cooldown=False):
     """Mint a verification token (digest-only storage, previous
     unused tokens superseded) and deliver the link through the
     notification lane as transactional mail (mode='always': the
-    address itself is the recipient, consent or not)."""
+    address itself is the recipient, consent or not).
+
+    cooldown=True (the re-register/resend path, run-2 hunt):
+    resends are capped at VERIFY_RESEND_DAILY_CAP minted tokens
+    per account per 24h — re-registering stays the instant
+    resend path the product promises (a lost first mail is one
+    re-register away), but unauthenticated resend spam can no
+    longer mail-bomb a pending address or burn the shared
+    sending quota through it. Past the cap the newest
+    outstanding token simply stays the valid one."""
+    if cooldown:
+        with pool.connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM email_verification_tokens"
+                " WHERE user_id = %s AND created_at > %s",
+                (user_id,
+                 datetime.now(timezone.utc) - timedelta(hours=24)),
+            ).fetchone()
+        if row and row["n"] >= VERIFY_RESEND_DAILY_CAP:
+            return
     raw_token = secrets.token_urlsafe(32)
     digest = hashlib.sha256(raw_token.encode("utf-8")).digest()
     now = datetime.now(timezone.utc)

@@ -110,6 +110,13 @@ BUDGETS = {
     # password checks — far above real anonymous traffic.
     "XposedOrNot:anon": 1000,
     "Have I Been Pwned Pwned Passwords:anon": 1000,
+    # The registration lane (run-2 hunt): the breach screen on
+    # register/change/reset draws on the same global HIBP pool;
+    # unauthenticated register traffic gets its own sub-budget
+    # so it cannot starve the product's password checks. The
+    # register route wraps its service call in lane("register");
+    # the screen fails OPEN when this lane is spent.
+    "Have I Been Pwned Pwned Passwords:register": 1000,
 }
 
 # The active budget lane for this execution context (set by the

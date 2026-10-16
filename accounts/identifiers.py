@@ -98,12 +98,24 @@ def add_identifier(user_id, kind, value, member_id=None):
     if record["user_id"] is None:
         # Claim a legacy unowned vault row for this account.
         with pool.connection() as conn:
-            conn.execute(
+            claimed = conn.execute(
                 "UPDATE identifiers SET user_id = %s, updated_at = now()"
-                " WHERE id = %s AND user_id IS NULL AND deleted_at IS NULL",
+                " WHERE id = %s AND user_id IS NULL AND deleted_at IS NULL"
+                " RETURNING id",
                 (user_id, record["id"]),
-            )
-        record["user_id"] = str(user_id)
+            ).fetchone()
+        if claimed is None:
+            # Run-2 hunt: the claim raced another account and
+            # LOST — the old code set user_id on the response
+            # anyway, telling (and audit-logging) this user that
+            # they own a row they do not; their value would never
+            # be scanned for them. Fall through to put(): under
+            # migration 0021 it now inserts the caller's OWN row
+            # for the same value.
+            record = _public(vault_store.put(kind, value,
+                                             user_id=user_id))
+        else:
+            record["user_id"] = str(user_id)
     # No foreign-owner branch remains: put() scopes to the caller,
     # so a value another account holds simply creates the caller's
     # own row — the response is identical either way (audit

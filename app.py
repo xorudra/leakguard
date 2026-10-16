@@ -941,10 +941,17 @@ class Handler(BaseHTTPRequestHandler):
             self._enforce_rate_limit("register", "ip:" + self._client_ip())
             self._rate_limit_credentials(payload.get("email"))
             try:
-                self._call(
-                    auth_service.register,
-                    payload.get("email"), payload.get("password"),
-                    payload.get("name"), payload.get("policy_accepted"))
+                # The breach screen inside register draws on the
+                # register lane's own provider sub-budget (run-2
+                # hunt) — unauthenticated sign-up traffic must
+                # not spend the shared HIBP pool.
+                from providers import usage as provider_usage
+
+                with provider_usage.lane("register"):
+                    self._call(
+                        auth_service.register,
+                        payload.get("email"), payload.get("password"),
+                        payload.get("name"), payload.get("policy_accepted"))
             except errors.ApiError as exc:
                 if exc.code != "email_taken":
                     raise

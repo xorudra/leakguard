@@ -250,7 +250,25 @@ class OrgsDbBase(ServerMixin):
             body={"email": email, "password": PASSWORD, "policy_accepted": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
-        return self.session_cookie(headers), body["user"]["id"], email
+        # Audit 2026-10-16 fixes: registration returns a uniform
+        # {"ok": true} and NO session — the account must verify its
+        # email first. Tests flip the flag directly in the DB (the
+        # token flow itself is covered end-to-end in
+        # test_accounts.py) and log in for the session.
+        from accounts import auth as _auth_service
+        _digest = _auth_service.account_email_hmac(
+            _auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            _uid = str(conn.execute(
+                "UPDATE users SET email_verified = true"
+                " WHERE email_hmac = %s AND deleted_at IS NULL"
+                " RETURNING id", (_digest,)).fetchone()["id"])
+        status, headers, body = self.request_json(
+            "POST", "/api/auth/login",
+            body={"email": email, "password": PASSWORD},
+            headers=CSRF)
+        self.assertEqual(status, 200, body)
+        return self.session_cookie(headers), _uid, email
 
     def login(self, email, password=None):
         status, headers, body = self.request_json(
@@ -461,7 +479,9 @@ class TestAuditDb(OrgsDbBase, unittest.TestCase):
                          {"reason": "invalid_credentials"})
         ok = self.audit_rows(
             "WHERE action = 'auth.login' AND actor_user_id = %s", (uid,))
-        self.assertEqual(len(ok), 1)
+        # Two: the register helper's post-verification login plus
+        # this test's own explicit login above.
+        self.assertEqual(len(ok), 2)
         # Consent change carries purpose + granted, nothing else.
         self.set_consent(cookie, "scanning", True)
         rows = self.audit_rows("WHERE action = 'consent.changed'")
@@ -591,6 +611,40 @@ class TestAuditResilienceDb(OrgsDbBase, unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestAdminDb(OrgsDbBase, unittest.TestCase):
+
+    def test_admin_user_ids_take_over_from_emails(self):
+        # Audit 2026-10-16 (register-admin-email-impersonation):
+        # once ADMIN_USER_IDS is set, an email listing confers
+        # NOTHING — only the immutable account UUID does.
+        saved = os.environ.get("ADMIN_USER_IDS")
+        admin_cookie, admin_uid, admin_email = self.register()
+        user_cookie, user_uid, _e = self.register()
+        os.environ["ADMIN_EMAILS"] = admin_email
+        try:
+            # Bootstrap still works while ADMIN_USER_IDS is unset.
+            status, _h, body = self.request_json(
+                "GET", "/api/auth/me", cookie=admin_cookie)
+            self.assertTrue(body["is_admin"])
+            # The switch: ids configured -> email inert, id rules.
+            os.environ["ADMIN_USER_IDS"] = user_uid
+            status, _h, body = self.request_json(
+                "GET", "/api/auth/me", cookie=admin_cookie)
+            self.assertFalse(body["is_admin"])
+            status, _h, _b = self.request_json(
+                "GET", "/api/admin/overview", cookie=admin_cookie)
+            self.assertEqual(status, 404)
+            status, _h, body = self.request_json(
+                "GET", "/api/auth/me", cookie=user_cookie)
+            self.assertTrue(body["is_admin"])
+            status, _h, _b = self.request_json(
+                "GET", "/api/admin/overview", cookie=user_cookie)
+            self.assertEqual(status, 200)
+        finally:
+            if saved is None:
+                os.environ.pop("ADMIN_USER_IDS", None)
+            else:
+                os.environ["ADMIN_USER_IDS"] = saved
+            os.environ.pop("ADMIN_EMAILS", None)
 
     def test_no_admins_configured_means_404(self):
         cookie, _uid, _email = self.register()

@@ -2,11 +2,16 @@
 Phases 106–114).
 
 There is exactly ONE admin concept in this product: the owner.
-Access is gated by the ADMIN_EMAILS environment variable
-(comma-separated addresses, matched against the account email via
-the same vault decryption the owner-only export uses — emails are
-never stored in plaintext, so the check decrypts in memory and
-compares; nothing is logged or returned).
+Access is gated by the ADMIN_USER_IDS environment variable
+(comma-separated account UUIDs — an immutable identity), with
+ADMIN_EMAILS kept only as a bootstrap for deployments that have
+not made the switch yet: while ADMIN_USER_IDS is unset, addresses
+match against the account email via the same vault decryption the
+owner-only export uses (emails are never stored in plaintext, so
+the check decrypts in memory and compares; nothing is logged or
+returned). The moment ADMIN_USER_IDS is set, the email list stops
+conferring admin — an address alone must never confer it again
+(audit 2026-10-16, register-admin-email-impersonation).
 
 PRIVACY CONTRACT: the admin sees AGGREGATES ONLY — platform counts,
 status breakdowns, provider health and the PII-free audit trail.
@@ -44,12 +49,35 @@ def _admin_emails():
     return configured
 
 
+def _admin_user_ids():
+    """The configured admin account UUIDs (ADMIN_USER_IDS,
+    comma-separated)."""
+    ids = set()
+    for part in os.environ.get("ADMIN_USER_IDS", "").split(","):
+        part = part.strip()
+        if part:
+            ids.add(part)
+    return ids
+
+
 def is_admin(user_id):
-    """True when the account's email is in ADMIN_EMAILS. With no
-    addresses configured, nobody is an admin — the panel stays dark
+    """True when this account is the product owner.
+
+    Durable rule (audit 2026-10-16): the account's UUID is in
+    ADMIN_USER_IDS. Bootstrap: while ADMIN_USER_IDS is unset,
+    ADMIN_EMAILS membership confers admin as before, so an
+    existing deployment keeps its owner until the operator sets
+    ADMIN_USER_IDS to the owner's account UUID (visible in the
+    admin overview) — after which the email list is inert. With
+    neither configured, nobody is an admin: the panel stays dark
     until the owner opts in on the server."""
+    if user_id is None:
+        return False
+    configured_ids = _admin_user_ids()
+    if configured_ids:
+        return str(user_id) in configured_ids
     configured = _admin_emails()
-    if not configured or user_id is None:
+    if not configured:
         return False
     row = auth_service._get_user_by_id(user_id)
     if row is None:
@@ -62,10 +90,19 @@ def is_admin(user_id):
 
 
 def admin_user_ids():
-    """The user ids of every live account whose email is in
-    ADMIN_EMAILS — the recipients of owner-only operational mail
-    (Phase 77 engineering alerts). Empty when ADMIN_EMAILS is
-    unset: with no owner configured there is nobody to alert."""
+    """The user ids of the owner accounts — the recipients of
+    owner-only operational mail (Phase 77 engineering alerts).
+    Resolved from ADMIN_USER_IDS when set (live accounts only),
+    else from ADMIN_EMAILS as the bootstrap. Empty when neither
+    is configured: with no owner there is nobody to alert."""
+    configured_ids = _admin_user_ids()
+    if configured_ids:
+        with db_pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT id FROM users WHERE deleted_at IS NULL",
+            ).fetchall()
+        live = {str(row["id"]) for row in rows}
+        return [uid for uid in configured_ids if uid in live]
     if not _admin_emails():
         return []
     with db_pool.connection() as conn:

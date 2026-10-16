@@ -1203,6 +1203,12 @@ class Handler(BaseHTTPRequestHandler):
             payload = self._read_json_body()
             if payload is None:
                 return self._fail(errors.invalid_json())
+            # Per-user cap (audit 2026-10-16): the analyzer's URL
+            # mode fetches arbitrary public pages through the
+            # server — it was the one outbound fetch with no
+            # rate-limit class at all.
+            self._enforce_rate_limit("user_policy_analyzer",
+                                     "user:" + user["id"])
             return self._json(200, self._call(
                 policy_analyzer_service.analyze_payload, payload))
         if route == "/api/scans":

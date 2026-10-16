@@ -43,6 +43,7 @@ DEFAULT_LIMITS = {
     "user_scans": (10, 3600),           # POST /api/scans, per user
     "user_remediation_run": (6, 3600),  # POST /api/remediation/run, per user
     "identifier_add": (30, 3600),       # POST /api/identifiers, per user (audit 2026-10-16: vault probing stays slow)
+    "user_policy_analyzer": (30, 3600),  # POST /api/tools/policy-analyzer, per user (audit 2026-10-16: was the one unbounded outbound fetch)
 }
 
 _lock = threading.Lock()

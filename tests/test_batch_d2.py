@@ -208,6 +208,26 @@ class TestPolicyAnalyzer(unittest.TestCase):
         self.assertEqual(by_id["advertising_tracking"]["status"],
                          "not_found")
 
+    def test_fetch_read_has_a_total_deadline(self):
+        # Audit 2026-10-16 (policy-fetch-no-total-deadline): a
+        # slow-drip response returns bytes forever, each read
+        # inside any per-operation timeout — only the total
+        # deadline ends the fetch; the byte cap still applies
+        # when the deadline has not passed.
+        import time as _time
+
+        class Drip:
+            def read(self, _n):
+                return b"x"
+
+        with self.assertRaises(errors.ApiError) as ctx:
+            policy_analyzer._read_capped(
+                Drip(), _time.monotonic() - 1)
+        self.assertEqual(ctx.exception.code, "policy_fetch_failed")
+        raw = policy_analyzer._read_capped(
+            Drip(), _time.monotonic() + 60)
+        self.assertEqual(len(raw), policy_analyzer.MAX_FETCH_BYTES + 1)
+
     def test_url_resolving_to_a_private_address_is_refused(self):
         def fetcher(url):  # pragma: no cover - must never run
             raise AssertionError("fetcher ran for a private address")

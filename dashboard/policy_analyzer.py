@@ -9,14 +9,18 @@ does NOT prove that a right or practice is absent in law or in the
 full document.
 
 For a URL, the fetch is deliberately narrow: the SSRF guard runs
-before the request, redirects are re-checked, the timeout is five
-seconds, and at most 256 KiB is read. HTML is reduced to text with
-the standard-library parser; script/style content is discarded.
-Only short matched key phrases (never more than eight words) are
-returned, never passages from the supplied policy.
+before the request, redirects are re-checked, each network
+operation times out at five seconds, the whole fetch has a
+ten-second total deadline (a slow-drip page cannot hold the
+worker — audit 2026-10-16), and at most 256 KiB is read. HTML is
+reduced to text with the standard-library parser; script/style
+content is discarded. Only short matched key phrases (never
+more than eight words) are returned, never passages from the
+supplied policy.
 """
 
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,6 +35,7 @@ DISCLAIMER = (
 MAX_TEXT_BYTES = 64 * 1024
 MAX_FETCH_BYTES = 256 * 1024
 FETCH_TIMEOUT_SECONDS = 5
+TOTAL_FETCH_DEADLINE_SECONDS = 10
 _USER_AGENT = {"User-Agent": "LeakGuard Policy Analyzer/1.0"}
 
 
@@ -239,6 +244,28 @@ class _GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
 _FETCH_OPENER = ssrf.pinned_opener(_GuardedRedirectHandler())
 
 
+def _read_capped(resp, deadline):
+    """Read up to MAX_FETCH_BYTES + 1 under a TOTAL deadline
+    (audit 2026-10-16, policy-fetch-no-total-deadline): chunked
+    reads, with the deadline re-checked between chunks — the
+    per-operation socket timeout alone lets a slow-drip server
+    hold the worker for minutes while staying under every
+    individual timeout."""
+    chunks = []
+    total = 0
+    while total <= MAX_FETCH_BYTES:
+        if time.monotonic() > deadline:
+            raise errors.bad_request(
+                "policy_fetch_failed",
+                "That policy page took too long to fetch")
+        chunk = resp.read(min(64 * 1024, MAX_FETCH_BYTES + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
+
+
 def fetch_url(url):
     """Fetch `url` under the Phase 102 limits.
 
@@ -252,11 +279,12 @@ def fetch_url(url):
     if it were a policy.
     """
     ssrf.assert_public_url(url)
+    deadline = time.monotonic() + TOTAL_FETCH_DEADLINE_SECONDS
     req = urllib.request.Request(url, headers=_USER_AGENT)
     try:
         with _FETCH_OPENER.open(
                 req, timeout=FETCH_TIMEOUT_SECONDS) as resp:
-            raw = resp.read(MAX_FETCH_BYTES + 1)
+            raw = _read_capped(resp, deadline)
             status = resp.status
             charset = "utf-8"
             try:
@@ -265,7 +293,7 @@ def fetch_url(url):
                 pass
     except urllib.error.HTTPError as exc:
         try:
-            raw = exc.read(MAX_FETCH_BYTES + 1)
+            raw = _read_capped(exc, deadline)
         except Exception:
             raw = b""
         status = exc.code

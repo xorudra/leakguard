@@ -112,7 +112,7 @@ Accepted off values are `0`, `false`, `off`, `no` (case-insensitive); unset mean
 
 **Backups:** the database lives on Neon's free plan. Point-in-time restore is a Neon platform feature and restores are run by the owner from the Neon console; the free plan's restore history is limited, and LeakGuard keeps no second backup copy — the encrypted vault means a database copy alone exposes no identifier values (the master key lives only in the server environment).
 
-**Supply chain:** runtime installs use `requirements.txt` (three version-ranged dependencies; everything else is the Python standard library). `requirements.lock` is the audited snapshot: the exact versions that file — plus `pgserver`, the test-only Postgres — resolved to when last generated, produced by `pip freeze` from a clean throwaway venv so the tested dependency set is reviewable and reproducible. The lock is a snapshot, not the install source; refresh it after any `requirements.txt` change by following the regeneration commands in its header, and expect the weekly CI run (`.github/workflows/tests.yml`) to surface resolution drift in between.
+**Supply chain:** all installs (production build, CI, local setup) use `requirements.lock` — the exact pinned versions (since the 2026-10-16 security audit; `requirements.txt`'s three version ranges are the human-edited input, never what a build resolves). The lock — those ranges plus `pgserver`, the test-only Postgres, resolved and frozen from a clean throwaway venv — is the audited, deployable set; refresh it after any `requirements.txt` change by following the regeneration commands in its header.
 
 ## 🔌 API
 

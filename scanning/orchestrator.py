@@ -56,6 +56,7 @@ Failure semantics (the worker owns retries):
 
 import json
 
+from accounts import consents as consents_service
 from accounts import domains as domains_service
 from accounts import identifiers as identifiers_service
 from db import pool
@@ -71,6 +72,24 @@ DISCOVERY_BUDGET = 6
 
 class JobNotFoundError(Exception):
     """The job id does not exist (the worker drops it silently)."""
+
+
+class JobCancelledError(Exception):
+    """The job must not run: its owner was deleted, or withdrew
+    the lane's consent, after the job was queued (audit 2026-10-16,
+    scanning.worker-no-liveness-or-consent-recheck). The worker
+    marks the job 'cancelled' — terminal, never retried, never
+    dead-lettered, never provider-called. error_kind carries the
+    stable reason ('owner_deleted' / 'consent_withdrawn')."""
+
+    def __init__(self, error_kind):
+        super().__init__(error_kind)
+        self.error_kind = error_kind
+
+
+# The monitoring scheduler's key prefix (scanning/worker.py owns
+# the same constant): the lane marker for consent purposes.
+_MONITOR_KEY_PREFIX = "monitor-"
 
 
 class ScanFailedError(Exception):
@@ -90,12 +109,41 @@ def _provider(capability):
 def _load_job(job_id):
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT id, user_id, status FROM scan_jobs WHERE id = %s",
+            "SELECT id, user_id, status, idempotency_key"
+            " FROM scan_jobs WHERE id = %s",
             (job_id,),
         ).fetchone()
     if row is None:
         raise JobNotFoundError(str(job_id))
     return row
+
+
+def _raise_if_owner_gone_or_unconsented(job):
+    """Execution-time re-check (audit 2026-10-16): create-time
+    consent is not enough — the owner may have deleted the
+    account or withdrawn the lane's consent while the job sat in
+    the queue, and their identifiers may have been erased (a scan
+    would then return empty findings and overwrite the previous
+    score with a misleading perfect 0). Raises JobCancelledError;
+    the worker terminally cancels the job."""
+    user_id = str(job["user_id"])
+    with pool.connection() as conn:
+        owner = conn.execute(
+            "SELECT deleted_at FROM users WHERE id = %s",
+            (user_id,),
+        ).fetchone()
+    if owner is None or owner["deleted_at"] is not None:
+        raise JobCancelledError("owner_deleted")
+    purpose = ("monitoring"
+               if str(job["idempotency_key"]).startswith(
+                   _MONITOR_KEY_PREFIX)
+               else "scanning")
+    for entry in consents_service.current_consents(user_id):
+        if entry["purpose"] == purpose:
+            if not entry["granted"]:
+                raise JobCancelledError("consent_withdrawn")
+            return
+    raise JobCancelledError("consent_withdrawn")
 
 
 def _scan_email(record, value):
@@ -314,6 +362,7 @@ def run_scan_job(job_id):
     JobNotFoundError, ScanFailedError, or an infrastructure error
     (the worker's retry policy handles the latter two)."""
     job = _load_job(job_id)
+    _raise_if_owner_gone_or_unconsented(job)
     user_id = str(job["user_id"])
     records = identifiers_service.list_identifiers(user_id)
 

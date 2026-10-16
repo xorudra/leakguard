@@ -644,6 +644,65 @@ class TestScanningDb(ServerMixin, unittest.TestCase):
         with self.pool.connection() as conn:
             conn.execute("DELETE FROM scan_jobs WHERE id = %s", (job_id,))
 
+    def test_worker_cancels_job_when_consent_withdrawn_mid_queue(self):
+        # Audit 2026-10-16 (scanning.worker-no-liveness-or-
+        # consent-recheck): consent is re-checked at execution
+        # time; a withdrawal parks the job 'cancelled' terminally
+        # — no retries, no provider calls, no score overwrite.
+        cookie, uid = self.register()
+        self.add_identifier(cookie, "email",
+                            self.unique_detail_email())
+        self.grant_scanning(cookie)
+        status, _h, body = self.create_job(cookie, key="recheck-1")
+        self.assertEqual(status, 201, body)
+        job_id = body["job"]["id"]
+        # Withdraw after queueing, before the worker runs.
+        status, _h, body = self.request_json(
+            "POST", "/api/consents",
+            body={"purpose": "scanning", "granted": False},
+            headers=CSRF, cookie=cookie)
+        self.assertEqual(status, 200, body)
+        self.assertTrue(self.worker.run_once())
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                "SELECT status, error_kind, attempts FROM scan_jobs"
+                " WHERE id = %s", (job_id,)).fetchone()
+        self.assertEqual(row["status"], "cancelled")
+        self.assertEqual(row["error_kind"], "consent_withdrawn")
+        self.assertEqual(row["attempts"], 0)  # never a failure
+
+    def test_worker_never_claims_deleted_owners_job(self):
+        cookie, uid = self.register()
+        self.add_identifier(cookie, "email",
+                            self.unique_detail_email())
+        self.grant_scanning(cookie)
+        status, _h, body = self.create_job(cookie, key="recheck-2")
+        self.assertEqual(status, 201, body)
+        job_id = body["job"]["id"]
+        with self.pool.connection() as conn:
+            conn.execute(
+                "UPDATE users SET deleted_at = now() WHERE id = %s",
+                (uid,))
+        # The claim itself excludes the job...
+        claimed = self.worker.claim_job()
+        while claimed is not None:
+            self.assertNotEqual(claimed[0], job_id)
+            with self.pool.connection() as conn:
+                conn.execute(
+                    "UPDATE scan_jobs SET status = 'done'"
+                    " WHERE id = %s", (claimed[0],))
+            claimed = self.worker.claim_job()
+        # ...and if a row is forced into 'running', the
+        # orchestrator's re-check refuses to execute it.
+        from scanning import orchestrator
+        with self.assertRaises(orchestrator.JobCancelledError):
+            orchestrator.run_scan_job(job_id)
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                "SELECT status FROM scan_jobs WHERE id = %s",
+                (job_id,)).fetchone()
+        self.assertEqual(row["status"], "queued")
+
     def test_worker_retries_then_dead(self):
         # Drain anything queued so the poison patch can only hit
         # this test's own job.

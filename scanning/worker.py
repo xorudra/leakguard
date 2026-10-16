@@ -81,9 +81,16 @@ def claim_job():
             " started_at = now(), error_kind = NULL"
             " WHERE j.id = ("
             "   SELECT id FROM scan_jobs"
-            "   WHERE status = 'queued'"
+            "   WHERE (status = 'queued'"
             "      OR (status = 'failed' AND next_attempt_at IS NOT NULL"
-            "          AND next_attempt_at <= now())"
+            "          AND next_attempt_at <= now()))"
+            # A soft-deleted owner's jobs are never claimed
+            # (audit 2026-10-16, scanning.worker-no-liveness-or-
+            # consent-recheck); the orchestrator's execution-time
+            # re-check is the second layer.
+            "   AND EXISTS (SELECT 1 FROM users"
+            "   WHERE users.id = scan_jobs.user_id"
+            "   AND users.deleted_at IS NULL)"
             "   ORDER BY CASE WHEN idempotency_key LIKE %s THEN 1"
             "                 ELSE 0 END,"
             "            created_at, id"
@@ -122,6 +129,21 @@ def _record_failure(job_id, attempts_before, exc):
          % (job_id, outcome, attempts, error_kind))
 
 
+def _mark_cancelled(job_id, reason):
+    """Terminal-cancel a claimed job (audit 2026-10-16): the owner
+    is gone or withdrew the lane's consent after queueing. NOT a
+    failure — no retries, no backoff, no dead letter."""
+    with pool.connection() as conn:
+        conn.execute(
+            "UPDATE scan_jobs SET status = 'cancelled',"
+            " error_kind = %s, next_attempt_at = NULL,"
+            " finished_at = now() WHERE id = %s",
+            (reason, job_id),
+        )
+    _log("scan_worker job=%s outcome=cancelled kind=%s"
+         % (job_id, reason))
+
+
 def run_once():
     """Claim and process one job. Returns True when a job was
     claimed (whatever its outcome), False when the queue is empty.
@@ -134,6 +156,9 @@ def run_once():
         orchestrator.run_scan_job(job_id)
     except orchestrator.JobNotFoundError:
         _log("scan_worker job=%s outcome=gone" % job_id)
+        return True
+    except orchestrator.JobCancelledError as exc:
+        _mark_cancelled(job_id, exc.error_kind)
         return True
     except Exception as exc:  # retry policy owns every failure
         _record_failure(job_id, attempts, exc)

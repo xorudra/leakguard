@@ -114,12 +114,18 @@ def run_with_deadline(fn, deadline_seconds):
     worker.start()
     worker.join(deadline_seconds)
     if worker.is_alive():
-        for conn in list(box.get("sockets") or []):
-            try:
-                conn.close()
-            except Exception:
-                pass
-        worker.join(2)
+        # Two sweeps (run-4): the second catches a connection
+        # that was still in its connect phase during the first
+        # (registered, but with no socket yet) and finished
+        # connecting during the grace join.
+        for _sweep in range(2):
+            for conn in list(box.get("sockets") or []):
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            if _sweep == 0:
+                worker.join(2)
         raise TimeoutError(
             "operation exceeded its %ss deadline" % deadline_seconds)
     if "error" in box:
@@ -248,10 +254,18 @@ def _connect_validated(host, port, timeout, source_address=None):
     last_error = None
     for ip in _validated_addresses(host):
         try:
-            return socket.create_connection(
+            sock = socket.create_connection(
                 (str(ip), port), timeout, source_address)
         except OSError as exc:
             last_error = exc
+            continue
+        # Track the RAW socket the moment it exists (run-4): a
+        # deadline expiring mid-connect finds the connection
+        # object registered but its .sock still None, and
+        # HTTPConnection.close() is then a no-op — the raw
+        # socket is the handle that always closes the FD.
+        _track_connection(sock)
+        return sock
     raise last_error
 
 

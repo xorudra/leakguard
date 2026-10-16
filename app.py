@@ -1023,6 +1023,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._fail(errors.invalid_json())
             self._enforce_rate_limit("reset_password",
                                      "ip:" + self._client_ip())
+            # Run-4: redemption also guesses a PASSWORD now
+            # (token-bound credentials) — throttle per token as
+            # well as per IP, so rotating source IPs cannot
+            # distribute guesses against one leaked link. The
+            # principal is the token's digest, never the raw
+            # token, and carries no personal data.
+            raw_token = payload.get("token")
+            if isinstance(raw_token, str) and raw_token:
+                token_key = "verify-token:" + hashlib.sha256(
+                    raw_token.strip().encode("utf-8")).hexdigest()
+                self._enforce_rate_limit("reset_password", token_key)
             self._call(auth_service.verify_email,
                        payload.get("token"), payload.get("password"))
             return self._json(200, {"ok": True})

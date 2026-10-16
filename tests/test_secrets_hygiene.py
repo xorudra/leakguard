@@ -126,6 +126,10 @@ ALLOWLISTED_LITERALS = {
     # last-writer re-register regression test; throwaway test
     # value, never a real credential.
     "attacker-pass-789",
+    # tests/test_accounts.py — fixture password for the run-4
+    # reset-supersedes-verification regression test; throwaway
+    # test value, never a real credential.
+    "replacement-pass-9",
     # README.md — the documented placeholder a user replaces with
     # their own LeakGuard API token; the value itself grants nothing.
     "lg_REPLACE_WITH_YOUR_TOKEN",

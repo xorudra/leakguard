@@ -228,6 +228,36 @@ class TestPolicyAnalyzer(unittest.TestCase):
             Drip(), _time.monotonic() + 60)
         self.assertEqual(len(raw), policy_analyzer.MAX_FETCH_BYTES + 1)
 
+    def test_deadline_closes_tracked_connections(self):
+        # Run-3/run-4 (deadline-abandoned-worker-socket-leak): a
+        # timed-out worker must not keep its connections — the
+        # deadline sweep closes everything the worker registered
+        # (pinned connections and their raw sockets register via
+        # core.ssrf._track_connection).
+        from core import ssrf as _ssrf
+        import threading as _threading
+
+        class FakeConn:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        fake = FakeConn()
+        release = _threading.Event()
+
+        def fn():
+            _ssrf._track_connection(fake)
+            release.wait(30)
+
+        try:
+            with self.assertRaises(TimeoutError):
+                _ssrf.run_with_deadline(fn, 0.2)
+            self.assertTrue(fake.closed)
+        finally:
+            release.set()
+
     def test_url_resolving_to_a_private_address_is_refused(self):
         def fetcher(url):  # pragma: no cover - must never run
             raise AssertionError("fetcher ran for a private address")

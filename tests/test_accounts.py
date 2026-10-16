@@ -638,6 +638,143 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
             status, _h, body = self.login(email, pw)
             self.assertEqual(status, 401, body)
 
+    def _capture_mail(self):
+        from monitoring import notify
+
+        sent = []
+
+        def capture(url, headers_, payload, timeout):
+            sent.append(json.loads(payload.decode("utf-8")))
+            return 202
+
+        saved = (notify.TRANSPORT, os.environ.get("BREVO_API_KEY"),
+                 os.environ.get("NOTIFY_FROM_EMAIL"))
+        os.environ["BREVO_API_KEY"] = "test-lane-key"
+        os.environ["NOTIFY_FROM_EMAIL"] = "alerts@example.com"
+        notify.TRANSPORT = capture
+
+        def restore():
+            notify.TRANSPORT = saved[0]
+            for key, value in (("BREVO_API_KEY", saved[1]),
+                               ("NOTIFY_FROM_EMAIL", saved[2])):
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+        return sent, restore
+
+    @staticmethod
+    def _token_from(text, marker):
+        import string as _string
+        allowed = set(_string.ascii_letters + _string.digits + "-_")
+        tail = text.split(marker, 1)[1]
+        token = ""
+        for ch in tail:
+            if ch not in allowed:
+                break
+            token += ch
+        return token
+
+    def test_reset_supersedes_pending_verification(self):
+        # Run-4 hunt: completing a password reset must kill any
+        # outstanding verification token — since run-3 those
+        # carry a pending credential, and redeeming a pre-reset
+        # token would roll the password back to the pre-reset
+        # one, undoing the reset.
+        sent, restore = self._capture_mail()
+        email = self.unique_email()
+        try:
+            status, _h, _b = self.request_json(
+                "POST", "/api/auth/register",
+                body={"email": email, "password": "pending-pass-123",
+                      "policy_accepted": True}, headers=CSRF)
+            self.assertEqual(status, 201)
+            verify_token = self._token_from(
+                sent[-1].get("textContent", ""), "/verify?token=")
+            status, _h, _b = self.request_json(
+                "POST", "/api/auth/forgot-password",
+                body={"email": email}, headers=CSRF)
+            self.assertEqual(status, 200)
+            reset_token = self._token_from(
+                sent[-1].get("textContent", ""), "/reset?token=")
+            status, _h, body = self.request_json(
+                "POST", "/api/auth/reset-password",
+                body={"token": reset_token,
+                      "new_password": "replacement-pass-9"},
+                headers=CSRF)
+            self.assertEqual(status, 200, body)
+            # The pre-reset verification token is dead now.
+            status, _h, body = self.request_json(
+                "POST", "/api/auth/verify-email",
+                body={"token": verify_token,
+                      "password": "pending-pass-123"}, headers=CSRF)
+            self.assertEqual(status, 400, body)
+            self.assertEqual(body["error"]["code"], "invalid_token")
+            # Re-registering with the NEW password mints a fresh
+            # token bound to it; redemption verifies the account.
+            status, _h, _b = self.request_json(
+                "POST", "/api/auth/register",
+                body={"email": email,
+                      "password": "replacement-pass-9",
+                      "policy_accepted": True}, headers=CSRF)
+            self.assertEqual(status, 201)
+            fresh = self._token_from(
+                sent[-1].get("textContent", ""), "/verify?token=")
+            status, _h, body = self.request_json(
+                "POST", "/api/auth/verify-email",
+                body={"token": fresh,
+                      "password": "replacement-pass-9"}, headers=CSRF)
+            self.assertEqual(status, 200, body)
+        finally:
+            restore()
+        status, _h, body = self.login(email, "replacement-pass-9")
+        self.assertEqual(status, 200, body)
+        self.user_ids.append(body["user"]["id"])
+
+    def test_verify_password_guessing_is_capped_per_token(self):
+        # Run-4 hunt: redemption guesses are throttled per token
+        # (digest principal), not only per IP — eleven wrong
+        # passwords from eleven different source IPs against one
+        # token must end in 429, not eleven free guesses.
+        sent, restore = self._capture_mail()
+        email = self.unique_email()
+        try:
+            status, _h, _b = self.request_json(
+                "POST", "/api/auth/register",
+                body={"email": email, "password": "pending-pass-123",
+                      "policy_accepted": True}, headers=CSRF)
+            self.assertEqual(status, 201)
+            token = self._token_from(
+                sent[-1].get("textContent", ""), "/verify?token=")
+            statuses = []
+            for i in range(11):
+                status, _h, _b = self.request_json(
+                    "POST", "/api/auth/verify-email",
+                    body={"token": token,
+                          "password": "wrong-password-1"},
+                    headers=CSRF,
+                    raw_headers=[("X-Forwarded-For",
+                                  "198.51.100.%d" % (50 + i))])
+                statuses.append(status)
+            self.assertEqual(statuses[:10], [400] * 10, statuses)
+            self.assertEqual(statuses[10], 429, statuses)
+            # The spent bucket blocks even the RIGHT password
+            # until it refills — the owner re-registers for a
+            # fresh token instead. The guessing never verified
+            # the account.
+            from accounts import auth as auth_service
+            from db import pool as db_pool
+            with db_pool.connection() as conn:
+                row = conn.execute(
+                    "SELECT email_verified FROM users"
+                    " WHERE email_hmac = %s",
+                    (auth_service.account_email_hmac(email),),
+                ).fetchone()
+            self.assertFalse(row["email_verified"])
+        finally:
+            restore()
+
     def test_registration_mail_cannot_be_flooded(self):
         # Run-2 hunt (registration-notification-mail-flooding +
         # register timing oracle): duplicate registers against a

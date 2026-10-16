@@ -14,6 +14,6 @@
 -- update that flips email_verified. Tokens minted before this
 -- migration carry NULLs and redeem under the old rules.
 ALTER TABLE email_verification_tokens
-    ADD COLUMN pending_password_hash text;
+    ADD COLUMN IF NOT EXISTS pending_password_hash text;
 ALTER TABLE email_verification_tokens
-    ADD COLUMN pending_name_ciphertext bytea;
+    ADD COLUMN IF NOT EXISTS pending_name_ciphertext bytea;

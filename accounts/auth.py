@@ -526,8 +526,16 @@ def verify_email(raw_token, password=None):
             (digest,),
         ).fetchone()
     if row is None or row["used_at"] is not None:
+        # Timing discipline (run-4): a live password-bound token
+        # costs an Argon2 verify below; burn the same cost on
+        # the miss paths so response timing cannot reveal
+        # whether a presented token is live.
+        passwords.verify_password(passwords.DUMMY_HASH,
+                                  password or "")
         raise _invalid_token("verification")
     if row["expires_at"] <= datetime.now(timezone.utc):
+        passwords.verify_password(passwords.DUMMY_HASH,
+                                  password or "")
         raise _invalid_token("verification")
     if row["pending_password_hash"] is not None and (
             not password
@@ -683,6 +691,18 @@ def reset_password(raw_token, new_password):
             " totp_last_step = NULL, updated_at = now()"
             " WHERE id = %s",
             (passwords.hash_password(new_password), row["user_id"]),
+        )
+        # Run-4 hunt (2026-10-16): a reset must also supersede
+        # outstanding VERIFICATION tokens. Since run-3 those
+        # tokens carry a pending credential — redeeming a
+        # pre-reset token would silently roll the account's
+        # password back to the pre-reset one, undoing the
+        # reset. The owner re-registers to get a fresh token
+        # bound to the new password.
+        conn.execute(
+            "UPDATE email_verification_tokens SET used_at = now()"
+            " WHERE user_id = %s AND used_at IS NULL",
+            (row["user_id"],),
         )
     sessions.revoke_all_sessions(row["user_id"])
     audit.record(row["user_id"], "user",

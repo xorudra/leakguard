@@ -628,6 +628,26 @@ class TestBatchCDb(ServerMixin, unittest.TestCase):
             "GET", "/api/admin/overview", cookie=cookie2)
         self.assertEqual(status, 404)
 
+    def test_retention_purges_expired_webauthn_challenges(self):
+        # Audit 2026-10-16 (webauthn-challenges-never-purged):
+        # abandoned ceremony challenges are deleted once past
+        # the grace window; fresh ones survive.
+        from core import retention
+
+        _cookie, uid, _email = self.register()
+        self.db_exec(
+            "INSERT INTO webauthn_challenges"
+            " (user_id, challenge_hash, purpose, expires_at) VALUES"
+            " (%s, '\\x01', 'authentication', now() - interval '8 days'),"
+            " (%s, '\\x02', 'authentication', now() + interval '4 minutes')",
+            (uid, uid))
+        counts = retention.run_once()
+        self.assertEqual(counts["webauthn_challenges"], 1)
+        rows = self.db_all(
+            "SELECT encode(challenge_hash, 'hex') AS h"
+            " FROM webauthn_challenges")
+        self.assertEqual([r["h"] for r in rows], ["02"])
+
     # ---------- retention tick hosts the sweep (armed + gated) ----
     def test_retention_loop_step_runs_the_armed_sweep(self):
         from core import retention

@@ -83,6 +83,19 @@ def _purge_sessions(conn, now):
     return expired + revoked
 
 
+def _purge_webauthn_challenges(conn, now):
+    """Passkey ceremony challenges (audit 2026-10-16,
+    webauthn-challenges-never-purged): rows live five minutes,
+    are consumed on use, and until now were never deleted when
+    abandoned — the table grew one row per ceremony attempt
+    forever. The expiry index (0011) exists for exactly this
+    pass; the 7-day grace matches the sessions pass."""
+    return _delete(
+        conn,
+        "DELETE FROM webauthn_challenges WHERE expires_at < %s",
+        (now - timedelta(days=SESSION_GRACE_DAYS),))
+
+
 def _purge_reset_tokens(conn, now):
     cutoff = now - timedelta(days=RESET_TOKEN_GRACE_DAYS)
     return _delete(
@@ -190,6 +203,7 @@ def _purge_deleted_users(now):
 
 _CATEGORIES = (
     ("sessions", _purge_sessions),
+    ("webauthn_challenges", _purge_webauthn_challenges),
     ("reset_tokens", _purge_reset_tokens),
     ("credential_notifications", _purge_credential_notifications),
     ("notifications", _purge_notifications),
@@ -221,7 +235,8 @@ def run_once(now=None):
             None, "retention users failed: " + type(exc).__name__)
     _log("retention_purge " + " ".join(
         "%s=%s" % (k, counts[k]) for k in (
-            "sessions", "reset_tokens", "credential_notifications",
+            "sessions", "webauthn_challenges", "reset_tokens",
+            "credential_notifications",
             "notifications", "error_events", "users_purged")))
     try:
         from accounts import audit

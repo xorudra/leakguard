@@ -772,6 +772,40 @@ class TestPolicyDb(ServerMixin, unittest.TestCase):
         status, _h, _b = self.replay(admin_cookie, "scan_job", job_id)
         self.assertEqual(status, 200)
 
+    def test_job_replay_deleted_owner_is_refused(self):
+        # Audit 2026-10-16 (admin-replay-deleted-owner): consent
+        # rows survive deletion, so a dead job of a soft-deleted
+        # owner must stay dead even with consent still granted.
+        admin_cookie, _auid, _ae = self.make_admin()
+        cookie, uid = self._job_owner()
+        job_id = self._create_job(cookie)
+        self._kill_job(job_id)
+        self.sql_one(
+            "UPDATE users SET deleted_at = now() WHERE id = %s",
+            (uid,))
+        status, _h, body = self.replay(admin_cookie, "scan_job", job_id)
+        self.assertEqual(status, 403, body)
+        self.assertEqual(body["error"]["code"], "owner_deleted")
+        row = self.sql_one("SELECT status FROM scan_jobs WHERE id = %s",
+                           (job_id,))
+        self.assertEqual(row["status"], "dead")
+        self.assertEqual(self.replay_audit_rows(job_id), [])
+
+    def test_case_replay_deleted_owner_is_refused(self):
+        admin_cookie, _auid, _ae = self.make_admin()
+        cookie, uid, case = self._failed_spokeo_case()
+        self.sql_one(
+            "UPDATE users SET deleted_at = now() WHERE id = %s",
+            (uid,))
+        status, _h, body = self.replay(admin_cookie,
+                                       "remediation_case", case["id"])
+        self.assertEqual(status, 403, body)
+        self.assertEqual(body["error"]["code"], "owner_deleted")
+        row = self.sql_one(
+            "SELECT status FROM remediation_cases WHERE id = %s",
+            (case["id"],))
+        self.assertEqual(row["status"], "failed")
+
     def test_monitor_job_replay_uses_monitoring_consent(self):
         admin_cookie, _auid, _ae = self.make_admin()
         cookie, uid = self._job_owner()

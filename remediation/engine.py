@@ -85,6 +85,13 @@ def _try_agent_send(letter, profile):
     falls back to parking the letter for the user."""
     if _agent_mailer is None or not letter.get("to"):
         return False
+    # Hard precondition (audit 2026-10-16): never agent-send a
+    # letter whose data subject is missing — an account whose
+    # identifiers were deleted assembles an empty profile, and a
+    # placeholder letter to a broker is worse than none.
+    if not (profile.get("email") or "").strip() \
+            or not (profile.get("full_name") or "").strip():
+        return False
     body = letter["body"] + _AGENT_FOOTER.format(
         name=profile.get("full_name") or "the data subject",
         email=profile.get("email") or "")
@@ -690,6 +697,23 @@ def process_case(case_id, executor=None):
     broker = registry_seed.get_broker(case["broker_slug"])
     if broker is None:
         _apply_decision(case_id, policy.decide_unknown_broker(), {})
+        return load_case(case_id)
+
+    # Owner liveness is re-checked first (audit 2026-10-16,
+    # remediation.deleted-account-cases-still-processed): a
+    # soft-deleted account's case is parked for good — its
+    # identifiers are deleted, so anything the engine produced
+    # would be a degenerate letter to a broker about nobody.
+    with pool.connection() as conn:
+        owner = conn.execute(
+            "SELECT deleted_at FROM users WHERE id = %s",
+            (case["user_id"],),
+        ).fetchone()
+    if owner is None or owner["deleted_at"] is not None:
+        _apply_decision(case_id, {
+            "status": "blocked", "reason": "account_deleted",
+            "attempt": ("liveness_check", "owner_deleted"),
+            "mark_submitted": False}, {})
         return load_case(case_id)
 
     # Consent is re-checked at execution time, before ANY external

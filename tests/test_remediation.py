@@ -912,6 +912,54 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
         self.assertEqual(
             [c for c in stub.probe_calls if c[1] == email], [])
 
+    def test_deleted_account_cases_cancelled_and_never_processed(self):
+        # Audit 2026-10-16 (remediation.deleted-account-cases-
+        # still-processed): deletion cancels queued cases and
+        # withdraws every consent in its own transaction; the
+        # worker never claims a deleted owner's case, and a direct
+        # process call parks it as account_deleted.
+        cookie, uid, _acct = self.register()
+        _name, email = self.add_full_profile(cookie, self.uniq())
+        self.set_consent(cookie, "automated_remediation", True)
+        self.run_removal(cookie)
+        self.assertTrue(self.list_cases(cookie))
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/delete-account",
+            body={"password": self.PASSWORD}, headers=CSRF,
+            cookie=cookie)
+        self.assertEqual(status, 200, body)
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT status, reason FROM remediation_cases"
+                " WHERE user_id = %s", (uid,)).fetchall()
+        self.assertTrue(rows)
+        self.assertTrue(all(r["status"] == "blocked" for r in rows))
+        self.assertTrue(all(r["reason"] == "account_deleted"
+                            for r in rows))
+        from accounts import consents as consents_service
+        states = consents_service.current_consents(uid)
+        self.assertTrue(all(not e["granted"] for e in states))
+        # One cancelled case forced back to queued by hand (the
+        # pre-fix row shape): never claimed...
+        with self.pool.connection() as conn:
+            ghost = conn.execute(
+                "SELECT id FROM remediation_cases WHERE user_id = %s"
+                " AND status = 'blocked' LIMIT 1", (uid,)).fetchone()
+            conn.execute(
+                "UPDATE remediation_cases SET status = 'queued',"
+                " reason = NULL WHERE id = %s", (ghost["id"],))
+        stub = StubExecutor()
+        self.drain(stub)
+        row = self.db_row(
+            "SELECT status FROM remediation_cases WHERE id = %s",
+            (str(ghost["id"]),))
+        self.assertEqual(row["status"], "queued")
+        self.assertEqual(stub.submits_for(email), [])
+        # ...and a direct engine call parks it terminally.
+        result = engine_mod.process_case(str(ghost["id"]), stub)
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason"], "account_deleted")
+
     def test_missing_field_names_the_field(self):
         cookie, _uid, _acct = self.register()
         tag = self.uniq()

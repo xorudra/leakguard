@@ -360,6 +360,30 @@ def delete_account(user_id, password):
             " WHERE user_id = %s AND deleted_at IS NULL",
             (user_id,),
         )
+        # Defence in depth (audit 2026-10-16, admin-replay-deleted-
+        # owner + remediation.deleted-account-cases-still-
+        # processed): deletion withdraws EVERY capability consent
+        # in the append-only ledger, so any consumer that reads
+        # consent state sees the withdrawal even if it forgets to
+        # check the account's liveness — and the account's queued
+        # or running removal cases are cancelled in the same
+        # transaction, so no worker can pick them up afterwards.
+        from accounts import consents as consents_service
+
+        for purpose in consents_service.PURPOSES:
+            conn.execute(
+                "INSERT INTO consents (user_id, purpose, version,"
+                " granted) SELECT %s, %s,"
+                " COALESCE(MAX(version), 0) + 1, false FROM consents"
+                " WHERE user_id = %s AND purpose = %s",
+                (user_id, purpose, user_id, purpose),
+            )
+        conn.execute(
+            "UPDATE remediation_cases SET status = 'blocked',"
+            " reason = 'account_deleted', updated_at = now()"
+            " WHERE user_id = %s AND status IN ('queued', 'running')",
+            (user_id,),
+        )
     sessions.revoke_all_sessions(user_id)
     # The audit row outlives the account on purpose: actor_user_id
     # carries no FK, so "this account existed and was deleted" stays

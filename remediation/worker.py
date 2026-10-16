@@ -82,8 +82,16 @@ def claim_case():
             "UPDATE remediation_cases AS c SET status = 'running',"
             " updated_at = now()"
             " WHERE c.id = ("
-            "   SELECT id FROM remediation_cases"
+            "   SELECT id FROM remediation_cases AS c2"
             "   WHERE status = 'queued'"
+            # A soft-deleted owner's cases are never claimed
+            # (audit 2026-10-16, remediation.deleted-account-
+            # cases-still-processed): deletion cancels them, and
+            # this EXISTS guard keeps even a pre-fix queued row
+            # from being picked up.
+            "   AND EXISTS (SELECT 1 FROM users"
+            "   WHERE users.id = c2.user_id"
+            "   AND users.deleted_at IS NULL)"
             "   ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)"
             " RETURNING c.id",
         ).fetchone()

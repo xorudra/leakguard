@@ -595,6 +595,13 @@ def list_audit(admin_user_id, limit=100):
 #     replay time: a row whose consent was revoked after it died
 #     is refused and stays dead — replay never resurrects work
 #     the owner has withdrawn permission for;
+#   * the owner's LIVENESS is checked the same way (audit
+#     2026-10-16, admin-replay-deleted-owner): a soft-deleted
+#     owner's rows are refused with 'owner_deleted' — consent
+#     rows survive deletion by design, so consent alone was
+#     never a liveness proof. The re-queue UPDATEs carry the
+#     same EXISTS-live-user guard, so the check and the write
+#     cannot race;
 #   * a second replay of the same row is a typed refusal
 #     ('already_active'), never a second queue entry: the row IS
 #     the queue entry, and it is already queued.
@@ -611,12 +618,29 @@ def _purpose_granted(user_id, purpose):
     return False
 
 
+def _owner_live(user_id):
+    """True when the account exists and is not soft-deleted. A
+    deleted owner's consent rows survive (append-only ledger), so
+    consent can never double as a liveness check (audit
+    2026-10-16, admin-replay-deleted-owner)."""
+    row = auth_service._get_user_by_id(user_id)
+    return row is not None and row["deleted_at"] is None
+
+
+def _owner_deleted():
+    return errors.forbidden(
+        "owner_deleted",
+        "The account that owns this work has been deleted — its "
+        "jobs and cases are never replayed")
+
+
 def replay_dead_letter(admin_user_id, kind, target_id):
     """Return ONE dead scan job or removal case to the queue.
 
     Typed refusals (core/errors.py): invalid_kind (400) for a kind
     outside the two lanes; not_found (404) for an unknown or
-    malformed id; consent_required (403) when the owner's current
+    malformed id; owner_deleted (403) when the owning account has
+    been deleted; consent_required (403) when the owner's current
     consent for the lane is not granted; already_active (409) when
     the row is queued/running (including a replay repeated);
     not_dead_letter (409) when the row is in any other state;
@@ -663,6 +687,8 @@ def _replay_scan_job(admin_user_id, job_id):
                    _MONITOR_JOB_PREFIX)
                else "scanning")
     owner_id = str(row["user_id"])
+    if not _owner_live(owner_id):
+        raise _owner_deleted()
     if not _purpose_granted(owner_id, purpose):
         raise errors.forbidden(
             "consent_required",
@@ -680,10 +706,15 @@ def _replay_scan_job(admin_user_id, job_id):
             "UPDATE scan_jobs SET status = 'queued', attempts = 0,"
             " error_kind = NULL, next_attempt_at = NULL,"
             " started_at = NULL, finished_at = NULL"
-            " WHERE id = %s AND status = 'dead' RETURNING id",
+            " WHERE id = %s AND status = 'dead'"
+            " AND EXISTS (SELECT 1 FROM users"
+            " WHERE users.id = scan_jobs.user_id"
+            " AND users.deleted_at IS NULL) RETURNING id",
             (job_id,),
         ).fetchone()
     if updated is None:  # raced with another replay or drain
+        if not _owner_live(owner_id):
+            raise _owner_deleted()
         raise errors.conflict(
             "already_active",
             "That scan job is already queued or running — it does "
@@ -718,6 +749,8 @@ def _replay_case(admin_user_id, case_id):
             "Only a failed removal case can be replayed — this "
             "one is %s" % status)
     owner_id = str(row["user_id"])
+    if not _owner_live(owner_id):
+        raise _owner_deleted()
     if not _purpose_granted(owner_id, "automated_remediation"):
         raise errors.forbidden(
             "consent_required",
@@ -749,10 +782,15 @@ def _replay_case(admin_user_id, case_id):
         updated = conn.execute(
             "UPDATE remediation_cases SET status = 'queued',"
             " reason = NULL, updated_at = now()"
-            " WHERE id = %s AND status = 'failed' RETURNING id",
+            " WHERE id = %s AND status = 'failed'"
+            " AND EXISTS (SELECT 1 FROM users"
+            " WHERE users.id = remediation_cases.user_id"
+            " AND users.deleted_at IS NULL) RETURNING id",
             (case_id,),
         ).fetchone()
     if updated is None:  # raced with another replay
+        if not _owner_live(owner_id):
+            raise _owner_deleted()
         raise errors.conflict(
             "already_active",
             "That removal case is already queued or running — it "

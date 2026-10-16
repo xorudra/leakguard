@@ -59,12 +59,13 @@ SECRET_FILENAMES = [
     ".staging-vault-lookup-key",   # staging vault lookup key
     ".siteguard-github-token",     # GitHub PAT (lives outside the repo)
     ".env",                        # generic dotenv
+    ".rwv-test-accounts",          # REAL_WORLD_VALIDATION scratch accounts (audit 2026-10-16)
 ]
 
 # Substrings that mark a tracked path as a secret file. None may ever
 # appear in `git ls-files`.
 SECRET_PATH_MARKERS = (".neon-", ".vault-", ".brevo-", ".staging-vault-",
-                       ".siteguard-")
+                       ".siteguard-", ".rwv-")
 
 # Strong credential shapes. These are never legitimate in source,
 # fixtures included — no allowlist applies.

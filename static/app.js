@@ -2710,9 +2710,9 @@ function renderTotp() {
 $("totpEnrollBtn").addEventListener("click", async () => {
   const r = await apiJson("/api/auth/totp/enroll", {
     method: "POST", headers: AH,
-    body: JSON.stringify({ password: $(\"totpEnrollPw\").value }),
+    body: JSON.stringify({ password: $("totpEnrollPw").value }),
   });
-  $(\"totpEnrollPw\").value = "";
+  $("totpEnrollPw").value = "";
   if (r.ok) {
     $("totpUri").value = r.data.otpauth_uri;
     $("totpEnrollBox").hidden = false;
@@ -3056,19 +3056,26 @@ loadMe();
     $("vfStatus").textContent = "This verification link is missing its token — register again to get a fresh one.";
     return;
   }
-  apiJson("/api/auth/verify-email", {
-    method: "POST", headers: AH, body: JSON.stringify({ token }),
-  }).then((r) => {
-    if (r.ok) {
-      lgVerifyMode = false;
-      history.replaceState(null, "", "/");
-      $("verifyBox").hidden = true;
-      renderAccount();
-      $("acStatus").textContent = "Email confirmed ✓ — sign in with your password to finish.";
-      $("account").scrollIntoView({ behavior: "smooth", block: "start" });
-    } else {
-      $("vfStatus").textContent = errMsg(r.data, "That verification link is not valid or has expired — register again to get a fresh one.");
-    }
+  // Redemption is a deliberate, password-confirmed action
+  // (run-3): the link alone never activates an account, so a
+  // stray click (or a mail scanner's prefetch) cannot confirm
+  // an account with credentials somebody else chose.
+  $("vfConfirmBtn").addEventListener("click", () => {
+    apiJson("/api/auth/verify-email", {
+      method: "POST", headers: AH,
+      body: JSON.stringify({ token, password: $("vfPassword").value }),
+    }).then((r) => {
+      if (r.ok) {
+        lgVerifyMode = false;
+        history.replaceState(null, "", "/");
+        $("verifyBox").hidden = true;
+        renderAccount();
+        $("acStatus").textContent = "Email confirmed ✓ — sign in with your password to finish.";
+        $("account").scrollIntoView({ behavior: "smooth", block: "start" });
+      } else {
+        $("vfStatus").textContent = errMsg(r.data, "That verification link is not valid or has expired — register again to get a fresh one.");
+      }
+    });
   });
   panel.scrollIntoView();
 })();

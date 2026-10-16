@@ -144,7 +144,15 @@ def case_detail(user_id, case_id):
         "attempt_no": int(arow["attempt_no"]),
         "action": arow["action"],
         "result": arow["result"],
-        "detail": arow["detail"],
+        # Letter attempts carry the full erasure letter (the
+        # user's name/address/email) in their detail. The case
+        # detail is readable with a bearer API token, so the
+        # letter body never leaves through it (audit 2026-10-16,
+        # remediation.case-detail-bearer-letter-plaintext): the
+        # session-only human queue reads the letter straight from
+        # the attempts table (_next_step), unaffected.
+        "detail": ({} if arow["action"] == "letter"
+                   else arow["detail"]),
         "workflow_version": arow["workflow_version"],
         "created_at": _iso(arow["created_at"]),
     } for arow in arows]

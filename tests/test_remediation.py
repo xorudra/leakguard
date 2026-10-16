@@ -895,6 +895,20 @@ class TestRemediationDb(ServerMixin, unittest.TestCase):
         self.assertIn(email, item["body"])
         self.assertIn("Digital Personal Data Protection Act",
                       item["body"])
+        # Case detail — readable with a bearer API token — never
+        # carries the letter body (audit 2026-10-16): letter
+        # attempts project to an empty detail there, while the
+        # session-only queue above keeps the user's own letter.
+        status, _h, body = self.request_json(
+            "GET", "/api/remediation/cases/%s" % bv["id"],
+            cookie=cookie)
+        self.assertEqual(status, 200)
+        letter_attempts = [a for a in body["case"]["attempts"]
+                           if a["action"] == "letter"]
+        self.assertTrue(letter_attempts)
+        for attempt in letter_attempts:
+            self.assertEqual(attempt["detail"], {})
+        self.assertNotIn(email, json.dumps(body["case"]["attempts"]))
         # The CAPTCHA case is in the queue too, pointing at the page.
         self.assertEqual(queue["ThatsThem"]["action"], "open_optout")
         self.assertIn("thatsthem.com",

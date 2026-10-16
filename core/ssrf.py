@@ -63,6 +63,7 @@ import ipaddress
 import socket
 import sys
 import threading
+import time
 import urllib.parse
 import urllib.request
 
@@ -114,18 +115,25 @@ def run_with_deadline(fn, deadline_seconds):
     worker.start()
     worker.join(deadline_seconds)
     if worker.is_alive():
-        # Two sweeps (run-4): the second catches a connection
-        # that was still in its connect phase during the first
-        # (registered, but with no socket yet) and finished
-        # connecting during the grace join.
-        for _sweep in range(2):
+        # Sweep-and-join loop (run-4/run-5): each sweep closes
+        # everything the worker has registered (connections and
+        # their raw sockets — the raw socket is tracked from
+        # creation because a mid-connect connection object has
+        # no socket to close yet); the join between sweeps
+        # catches connections that finish connecting during the
+        # grace, and the loop repeats until the worker dies or
+        # a short hard cap elapses, so no straggler registered
+        # after an earlier snapshot survives the raise.
+        cap_end = time.monotonic() + 2.5
+        while True:
             for conn in list(box.get("sockets") or []):
                 try:
                     conn.close()
                 except Exception:
                     pass
-            if _sweep == 0:
-                worker.join(2)
+            if not worker.is_alive() or time.monotonic() >= cap_end:
+                break
+            worker.join(0.25)
         raise TimeoutError(
             "operation exceeded its %ss deadline" % deadline_seconds)
     if "error" in box:

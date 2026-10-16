@@ -537,13 +537,19 @@ def verify_email(raw_token, password=None):
         passwords.verify_password(passwords.DUMMY_HASH,
                                   password or "")
         raise _invalid_token("verification")
-    if row["pending_password_hash"] is not None and (
-            not password
-            or not passwords.verify_password(
-                row["pending_password_hash"], password)):
-        # Same shape as a dead token: the response must not say
-        # the token was real but the password wrong.
-        raise _invalid_token("verification")
+    if row["pending_password_hash"] is not None:
+        if not password:
+            # Run-5: the falsy-password short-circuit skipped
+            # the Argon2 verify entirely, so a live bound token
+            # answered FASTER than the (burned) dead-token paths
+            # — the liveness oracle in reverse. Burn first.
+            passwords.verify_password(passwords.DUMMY_HASH, "")
+            raise _invalid_token("verification")
+        if not passwords.verify_password(
+                row["pending_password_hash"], password):
+            # Same shape as a dead token: the response must not
+            # say the token was real but the password wrong.
+            raise _invalid_token("verification")
     with pool.connection() as conn:
         consumed = conn.execute(
             "UPDATE email_verification_tokens SET used_at = now()"

@@ -433,7 +433,7 @@ def verify_email(raw_token):
     discipline). Success flips email_verified; sign-in then works
     with the password chosen at registration."""
     if not raw_token or not isinstance(raw_token, str):
-        raise _invalid_token()
+        raise _invalid_token("verification")
     digest = hashlib.sha256(
         raw_token.strip().encode("utf-8")).digest()
     with pool.connection() as conn:
@@ -443,9 +443,9 @@ def verify_email(raw_token):
             (digest,),
         ).fetchone()
     if row is None or row["used_at"] is not None:
-        raise _invalid_token()
+        raise _invalid_token("verification")
     if row["expires_at"] <= datetime.now(timezone.utc):
-        raise _invalid_token()
+        raise _invalid_token("verification")
     with pool.connection() as conn:
         consumed = conn.execute(
             "UPDATE email_verification_tokens SET used_at = now()"
@@ -453,7 +453,7 @@ def verify_email(raw_token):
             (row["id"],),
         ).fetchone()
         if consumed is None:  # a concurrent redeem won the race
-            raise _invalid_token()
+            raise _invalid_token("verification")
         conn.execute(
             "UPDATE users SET email_verified = true,"
             " updated_at = now() WHERE id = %s",
@@ -521,13 +521,15 @@ def forgot_password(email):
                  "user", row["id"])
 
 
-def _invalid_token():
+def _invalid_token(kind="reset"):
     # One shape for unknown, expired, used and superseded tokens —
-    # the response must never say WHICH check failed.
+    # the response must never say WHICH check failed. `kind` only
+    # names the link in the message (reset vs verification — the
+    # shared shape must not call a verification link a reset link).
     return errors.bad_request(
         "invalid_token",
-        "That reset link is not valid or has expired — "
-        "request a new one")
+        "That %s link is not valid or has expired — "
+        "request a new one" % kind)
 
 
 def reset_password(raw_token, new_password):

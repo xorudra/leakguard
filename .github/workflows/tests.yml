@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r requirements.txt pgserver
+        run: pip install -r requirements.lock
       - name: Syntax-check the frontend
         run: node --check static/app.js
       - name: Run the test suite

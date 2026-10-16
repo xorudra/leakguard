@@ -3,9 +3,12 @@
 # GENERATED FILE — do not edit by hand. It pins the exact versions
 # that requirements.txt (+ pgserver, the test-only Postgres) resolve
 # to, so the tested dependency set is reviewable at a glance and
-# reproducible bit-for-bit. Runtime installs still use
-# requirements.txt (see README → Operations → Supply chain); this
-# lock is the snapshot CI and audits compare against.
+# reproducible bit-for-bit. ALL install paths use THIS file
+# (render.yaml build command, CI workflow) since the 2026-10-16
+# security audit (ci.unbound-production-dependencies): the open
+# ranges in requirements.txt are the input to regeneration, never
+# what a build resolves. requirements.txt stays the human-edited
+# source of the intended ranges.
 #
 # Regenerate (from the repo root):
 #   python3 -m venv /tmp/lg-lock-venv

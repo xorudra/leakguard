@@ -93,3 +93,19 @@ def test_every_direct_dependency_is_locked():
         f"requirements.txt packages missing from requirements.lock: "
         f"{sorted(missing)} — regenerate the lock so the audited set "
         f"equals the deployable set")
+
+
+def test_install_paths_use_the_lock_not_the_ranges():
+    # Audit 2026-10-16 (ci.unbound-production-dependencies): a
+    # build that installs from requirements.txt resolves open
+    # ranges at build time — the scanned set stops being the
+    # deployed set. Every install path must name the lock.
+    render = (REPO / "render.yaml").read_text()
+    workflow = (REPO / ".github" / "workflows" / "tests.yml").read_text()
+    for label, text in (("render.yaml", render),
+                        ("tests.yml", workflow)):
+        assert "requirements.lock" in text, (
+            f"{label} does not install from requirements.lock")
+        assert "requirements.txt" not in text, (
+            f"{label} still references requirements.txt — installs "
+            f"must resolve the pinned lock, not open ranges")

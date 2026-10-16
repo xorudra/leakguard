@@ -55,7 +55,7 @@ The agent does the boring work with plain deterministic scripts. **No AI tokens 
 Three small runtime dependencies (a Postgres driver, AES-GCM, Argon2 — see `requirements.txt` for why each exists); everything else is the Python 3.12 standard library.
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.lock
 python3 app.py
 # open http://localhost:8000
 ```
@@ -66,7 +66,7 @@ Environment: `PORT` (default 8000) · `HOST` (default 0.0.0.0). For the account 
 
 **🧩 Optional browser probe layer:** `pip install -r requirements-optional.txt` plus any Chromium/Chrome. On proxy-locked networks run `python3 proxy_relay.py` and set `LEAKGUARD_BROWSER_PROXY=http://127.0.0.1:8899`. Disable with `LEAKGUARD_NO_BROWSER=1`.
 
-**☁️ Deploy:** `render.yaml` is included — create a Web Service from this repo on Render's free tier (or use Blueprint). Build command `pip install -r requirements.txt`, start command `python3 app.py` (both already in `render.yaml`). Note: Render keeps the dashboard-stored build command — if a deploy behaves like an old configuration, check Settings → Build & Deploy on the service itself.
+**☁️ Deploy:** `render.yaml` is included — create a Web Service from this repo on Render's free tier (or use Blueprint). Build command `pip install -r requirements.lock`, start command `python3 app.py` (both already in `render.yaml`). Note: Render keeps the dashboard-stored build command — if a deploy behaves like an old configuration, check Settings → Build & Deploy on the service itself.
 
 ## ⚙️ Operations
 

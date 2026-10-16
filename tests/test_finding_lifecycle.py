@@ -760,14 +760,17 @@ class TestLifecycleMigrationUpgrade(PgClassMixin, AccountMixin,
         # they touch no findings lifecycle state (0015 adds
         # default-false dq flag columns only; 0016 adds a
         # nullable column to remediation_attempts only; 0019 adds
-        # an index on identifiers only).
-        # 0017 was pre-applied in setUpClass (see there).
+        # an index on identifiers only; 0022 widens the
+        # scan_jobs status CHECK only).
+        # 0017, 0018, 0020 and 0021 were pre-applied in setUpClass
+        # (see there).
         self.assertEqual(applied, ["0012_finding_lifecycle.sql",
                                    "0013_error_events.sql",
                                    "0014_provider_usage.sql",
                                    "0015_data_quality.sql",
                                    "0016_attempt_workflow_version.sql",
-                                   "0019_identifiers_user_idx.sql"])
+                                   "0019_identifiers_user_idx.sql",
+                                   "0022_scan_jobs_cancelled_status.sql"])
 
         self.assertEqual(self.identity_state(uid, iid, "BreachX"),
                          ("open", None))

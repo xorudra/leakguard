@@ -79,7 +79,7 @@ def validate_session(token):
         row = conn.execute(
             "SELECT s.expires_at, s.last_seen_at,"
             " u.id, u.email_masked, u.name_ciphertext, u.totp_enabled, u.created_at,"
-            " u.deleted_at AS user_deleted_at"
+            " u.email_verified, u.deleted_at AS user_deleted_at"
             " FROM sessions s JOIN users u ON u.id = s.user_id"
             " WHERE s.token_hash = %s AND s.revoked_at IS NULL",
             (digest,),

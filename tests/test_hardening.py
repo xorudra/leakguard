@@ -362,6 +362,7 @@ class TestRouteLimitsDb(PgMixin, ServerMixin, unittest.TestCase):
 
     def register(self):
         email = "hard-%s@example.com" % self.uniq()
+        self._last_register_email = email
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
             body={"email": email, "password": self.PASSWORD, "policy_accepted": True}, headers=CSRF)
@@ -430,7 +431,23 @@ class TestRouteLimitsDb(PgMixin, ServerMixin, unittest.TestCase):
     def _register_user(self):
         status, headers, body = self.register()
         self.assertEqual(status, 201, body)
-        return self.session_cookie(headers), body["user"]["id"]
+        # Audit 2026-10-16: register returns no user/session now —
+        # verify the address in the DB, then log in.
+        from accounts import auth as auth_service
+        email = self._last_register_email
+        digest = auth_service.account_email_hmac(
+            auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            uid = str(conn.execute(
+                "UPDATE users SET email_verified = true"
+                " WHERE email_hmac = %s AND deleted_at IS NULL"
+                " RETURNING id", (digest,)).fetchone()["id"])
+        status, headers, body = self.request_json(
+            "POST", "/api/auth/login",
+            body={"email": email, "password": self.PASSWORD},
+            headers=CSRF)
+        self.assertEqual(status, 200, body)
+        return self.session_cookie(headers), uid
 
     def _prepare_scannable(self, cookie):
         status, _h, body = self.request_json(

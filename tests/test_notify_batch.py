@@ -289,10 +289,15 @@ class TestNotifyBatchDb(unittest.TestCase):
     def test_hook_falls_back_to_per_item_when_batch_raises(self):
         from accounts import auth, consents
 
-        user, _token = auth.register(
-            "batch-%s@example.com" % uuid.uuid4().hex[:12],
-            "correct-horse-9", policy_accepted=True)
-        uid = user["id"]
+        email = "batch-%s@example.com" % uuid.uuid4().hex[:12]
+        # Audit 2026-10-16: service register returns a pending
+        # marker, not a user — fetch the new account's id.
+        auth.register(email, "correct-horse-9", policy_accepted=True)
+        uid = str(self._db(
+            "SELECT id FROM users WHERE email_hmac = %s"
+            " AND deleted_at IS NULL",
+            (auth.account_email_hmac(auth.normalize_email(email)),)
+        ).fetchone()["id"])
         consents.set_consent(uid, "notifications", True)
         ident = self._insert_identifier(uid)
         now = datetime.now(timezone.utc)
@@ -327,8 +332,9 @@ class TestNotifyBatchDb(unittest.TestCase):
         self.assertEqual(len(summaries), 2)
         self.assertTrue(all(r["status"] == "sent" for r in summaries))
         # Fallback cycle emails: the finding + its summary (the
-        # baseline summary was the first call).
-        self.assertEqual(len(self.transport.calls), 3)
+        # baseline summary was the first call), plus the
+        # registration verification email from account creation.
+        self.assertEqual(len(self.transport.calls), 4)
 
 
 if __name__ == "__main__":

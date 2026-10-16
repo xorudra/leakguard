@@ -136,7 +136,7 @@ def authenticate_token(raw):
         row = conn.execute(
             "SELECT t.id AS token_id, t.last_used_at,"
             " u.id, u.email_masked, u.name_ciphertext, u.totp_enabled, u.created_at,"
-            " u.deleted_at AS user_deleted_at"
+            " u.email_verified, u.deleted_at AS user_deleted_at"
             " FROM api_tokens t JOIN users u ON u.id = t.user_id"
             " WHERE t.token_hash = %s AND t.revoked_at IS NULL",
             (digest,),

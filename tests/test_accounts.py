@@ -345,6 +345,14 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
         return "acct-%s@example.com" % uuid.uuid4().hex[:16]
 
     def register(self, email=None, password=None, name=None):
+        """Register + verify + log in, returning the LOGIN triple —
+        the shape this suite's flows always consumed (user object +
+        session cookie). Registration itself now answers a uniform
+        201 {"ok": true} with no session (audit 2026-10-16); the
+        register-response contract has its own dedicated test
+        below, and this helper flips email_verified directly in
+        the DB (the token redemption flow is covered end-to-end
+        by test_email_verification_flow)."""
         email = email or self.unique_email()
         payload = {"email": email, "password": password or self.PASSWORD,
                    "policy_accepted": True}
@@ -354,9 +362,20 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
             "POST", "/api/auth/register",
             body=payload,
             headers=CSRF)
-        if status == 201:
-            self.user_ids.append(body["user"]["id"])
-        return status, headers, body
+        if status != 201:
+            return status, headers, body
+        self.assertEqual(body, {"ok": True})
+        self.assertIsNone(self.session_cookie(headers))
+        from accounts import auth as auth_service
+        digest = auth_service.account_email_hmac(
+            auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            uid = str(conn.execute(
+                "UPDATE users SET email_verified = true"
+                " WHERE email_hmac = %s AND deleted_at IS NULL"
+                " RETURNING id", (digest,)).fetchone()["id"])
+        self.user_ids.append(uid)
+        return self.login(email, password)
 
     def login(self, email, password=None, totp_code=None, cookie=None):
         payload = {"email": email, "password": password or self.PASSWORD}
@@ -372,7 +391,7 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
     def test_register_login_me_logout_flow(self):
         email = self.unique_email()
         status, headers, body = self.register(email)
-        self.assertEqual(status, 201)
+        self.assertEqual(status, 200)
         user = body["user"]
         self.assertEqual(user["email_masked"], "a•••@example.com")
         self.assertFalse(user["totp_enabled"])
@@ -408,7 +427,7 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
         # on the register response and on /me; whitespace is
         # normalised.
         status, _headers, body = self.register(name="  Rudra   Singh ")
-        self.assertEqual(status, 201)
+        self.assertEqual(status, 200)
         self.assertEqual(body["user"]["name"], "Rudra Singh")
         cookie = self.session_cookie(_headers)
         status, _h, me = self.me(cookie)
@@ -417,7 +436,7 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
 
     def test_register_without_name_still_works(self):
         status, _headers, body = self.register()
-        self.assertEqual(status, 201)
+        self.assertEqual(status, 200)
         self.assertIsNone(body["user"]["name"])
 
     def test_register_rejects_bad_name(self):
@@ -428,13 +447,117 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(body["error"]["code"], "invalid_name")
 
-    def test_duplicate_email_409(self):
+    def test_duplicate_email_uniform_answer(self):
+        # Audit 2026-10-16 (register-email-enumeration): a duplicate
+        # registration is indistinguishable from a fresh one — same
+        # 201 {"ok": true}, no cookie; the service still refuses
+        # with email_taken internally and the owner is notified
+        # out-of-band instead.
+        from accounts import auth as auth_service
+        from core import errors
+
         email = self.unique_email()
         status, _h, _b = self.register(email)
+        self.assertEqual(status, 200)
+        status, headers, body = self.request_json(
+            "POST", "/api/auth/register",
+            body={"email": email, "password": self.PASSWORD,
+                  "policy_accepted": True},
+            headers=CSRF)
         self.assertEqual(status, 201)
-        status, _h, body = self.register(email)
-        self.assertEqual(status, 409)
-        self.assertEqual(body["error"]["code"], "email_taken")
+        self.assertEqual(body, {"ok": True})
+        self.assertIsNone(self.session_cookie(headers))
+        with self.assertRaises(errors.ApiError) as ctx:
+            auth_service.register(email, self.PASSWORD, None, True)
+        self.assertEqual(ctx.exception.code, "email_taken")
+        digest = auth_service.account_email_hmac(
+            auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            notes = conn.execute(
+                "SELECT COUNT(*) AS n FROM notifications n"
+                " JOIN users u ON u.id = n.user_id"
+                " WHERE u.email_hmac = %s"
+                " AND n.kind = 'registration_attempt'",
+                (digest,)).fetchone()
+        self.assertEqual(notes["n"], 2)
+
+    def test_email_verification_flow(self):
+        # Audit 2026-10-16 (register-unverified-email-prehijack):
+        # no session and no login until the emailed token redeems;
+        # re-registering an unverified address resends a FRESH
+        # token and kills the old one.
+        from monitoring import notify
+
+        email = self.unique_email()
+        sent = []
+
+        def capture(url, headers_, payload, timeout):
+            sent.append(json.loads(payload.decode("utf-8")))
+            return 202
+
+        saved_transport = notify.TRANSPORT
+        saved_env = {k: os.environ.get(k) for k in
+                     ("BREVO_API_KEY", "NOTIFY_FROM_EMAIL")}
+        os.environ["BREVO_API_KEY"] = "test-lane-key"
+        os.environ["NOTIFY_FROM_EMAIL"] = "alerts@example.com"
+        notify.TRANSPORT = capture
+        try:
+            status, headers, body = self.request_json(
+                "POST", "/api/auth/register",
+                body={"email": email, "password": self.PASSWORD,
+                      "policy_accepted": True},
+                headers=CSRF)
+            self.assertEqual(status, 201)
+            self.assertEqual(body, {"ok": True})
+            self.assertIsNone(self.session_cookie(headers))
+            # Login is refused while unverified — but only AFTER
+            # the password checks out (no enumeration oracle).
+            status, _h, body = self.login(email)
+            self.assertEqual(status, 403)
+            self.assertEqual(body["error"]["code"],
+                             "email_not_verified")
+            # Re-register: uniform answer + a fresh link.
+            status, _h, body = self.request_json(
+                "POST", "/api/auth/register",
+                body={"email": email, "password": self.PASSWORD,
+                      "policy_accepted": True},
+                headers=CSRF)
+            self.assertEqual(status, 201)
+        finally:
+            notify.TRANSPORT = saved_transport
+            for key, value in saved_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+        tokens = []
+        for payload in sent:
+            found = re.search(r"/verify\?token=([A-Za-z0-9_-]+)",
+                              payload.get("textContent", ""))
+            if found:
+                tokens.append(found.group(1))
+        self.assertEqual(len(tokens), 2)
+        # The superseded first token is dead.
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/verify-email",
+            body={"token": tokens[0]}, headers=CSRF)
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "invalid_token")
+        # The fresh token redeems — exactly once.
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/verify-email",
+            body={"token": tokens[1]}, headers=CSRF)
+        self.assertEqual(status, 200)
+        self.assertEqual(body, {"ok": True})
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/verify-email",
+            body={"token": tokens[1]}, headers=CSRF)
+        self.assertEqual(status, 400)
+        # And now the password signs in.
+        status, headers, body = self.login(email)
+        self.assertEqual(status, 200)
+        self.assertTrue(body["user"]["email_verified"])
+        self.user_ids.append(body["user"]["id"])
 
     def test_wrong_password_and_unknown_email_identical(self):
         email = self.unique_email()
@@ -655,7 +778,7 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
             self.assertIsNotNone(row["deleted_at"])
         # The address can be registered again (partial unique index).
         status, _h, body = self.register(email)
-        self.assertEqual(status, 201)
+        self.assertEqual(status, 200)
 
     @staticmethod
     def _wait_next_step():

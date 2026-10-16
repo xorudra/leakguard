@@ -192,7 +192,24 @@ class DbServerMixin(ServerMixin):
         status, headers, body = self.request_json(
             "POST", "/api/auth/register", body=payload, headers=CSRF)
         if status == 201:
-            self.user_ids.append(body["user"]["id"])
+            # Audit 2026-10-16: register returns no user/session —
+            # verify the address in the DB, then log in and hand
+            # callers the login triple they always consumed.
+            from accounts import auth as auth_service
+            digest = auth_service.account_email_hmac(
+                auth_service.normalize_email(email))
+            with self.pool.connection() as conn:
+                uid = str(conn.execute(
+                    "UPDATE users SET email_verified = true"
+                    " WHERE email_hmac = %s AND deleted_at IS NULL"
+                    " RETURNING id", (digest,)).fetchone()["id"])
+            self.user_ids.append(uid)
+            status, headers, body = self.request_json(
+                "POST", "/api/auth/login",
+                body={"email": email, "password": PASSWORD},
+                headers=CSRF)
+            self.assertEqual(status, 200, body)
+            return 201, headers, body, email
         return status, headers, body, email
 
     def export(self, cookie, fmt="json"):
@@ -408,7 +425,16 @@ class TestPolicyAcceptance(DbServerMixin, unittest.TestCase):
                   "name": "Wave One", "policy_accepted": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
-        self.user_ids.append(body["user"]["id"])
+        # Register returns no user object any more (audit
+        # 2026-10-16) — fetch the id from the DB for cleanup.
+        from accounts import auth as auth_service
+        digest = auth_service.account_email_hmac(
+            auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                "SELECT id FROM users WHERE email_hmac = %s"
+                " AND deleted_at IS NULL", (digest,)).fetchone()
+        self.user_ids.append(str(row["id"]))
 
     def test_service_layer_refuses_without_agreement(self):
         from accounts import auth
@@ -545,9 +571,12 @@ class TestExportCompleteness(DbServerMixin, unittest.TestCase):
         self.assertEqual(len(document["remediation_cases"]), 1)
         self.assertEqual(document["remediation_cases"][0]["broker_slug"],
                          "zz-wave1")
-        self.assertEqual(len(document["notifications"]), 1)
-        self.assertEqual(document["notifications"][0]["payload"],
-                         '{"score": 42}')
+        # The export also carries the registration verification
+        # notice (audit 2026-10-16); the seeded row is the one with
+        # the fixture payload.
+        seeded = [n for n in document["notifications"]
+                  if n["payload"] == '{"score": 42}']
+        self.assertEqual(len(seeded), 1)
         self.assertEqual(document["settings"]["monitor_cadence_days"], 14)
         self.assertEqual([m["label"] for m in
                           document["household_members"]],

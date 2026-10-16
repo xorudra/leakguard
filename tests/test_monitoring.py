@@ -374,7 +374,25 @@ class AccountMixin:
             body={"email": email, "password": self.PASSWORD, "policy_accepted": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
-        return self.session_cookie(headers), body["user"]["id"], email
+        # Audit 2026-10-16 fixes: registration returns a uniform
+        # {"ok": true} and NO session — the account must verify its
+        # email first. Tests flip the flag directly in the DB (the
+        # token flow itself is covered end-to-end in
+        # test_accounts.py) and log in for the session.
+        from accounts import auth as _auth_service
+        _digest = _auth_service.account_email_hmac(
+            _auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            _uid = str(conn.execute(
+                "UPDATE users SET email_verified = true"
+                " WHERE email_hmac = %s AND deleted_at IS NULL"
+                " RETURNING id", (_digest,)).fetchone()["id"])
+        status, headers, body = self.request_json(
+            "POST", "/api/auth/login",
+            body={"email": email, "password": self.PASSWORD},
+            headers=CSRF)
+        self.assertEqual(status, 200, body)
+        return self.session_cookie(headers), _uid, email
 
     def add_identifier(self, cookie, kind, value):
         status, _h, body = self.request_json(
@@ -478,11 +496,13 @@ class TestMonitoringDb(PgClassMixin, LaneMixin, AccountMixin,
         result = self.run_until_done(cookie, job1)
         self.assertEqual(result["job"]["status"], "done")
         self.assertEqual(len(result["findings"]), 2)
-        rows = self.notifications_for(uid)
+        rows = [r for r in self.notifications_for(uid)
+                if r["kind"] != "email_verification"]
         self.assertEqual([r["kind"] for r in rows], ["scan_summary"])
         self.assertEqual(rows[0]["status"], "sent")
         self.assertTrue(rows[0]["payload"]["baseline"])
-        self.assertEqual(self.transport.calls_to(email).__len__(), 1)
+        # 1 verification email (registration) + 1 summary.
+        self.assertEqual(self.transport.calls_to(email).__len__(), 2)
 
         # Job 2 with one identifier REMOVED: the phone finding is
         # resolved, nothing is new.
@@ -509,14 +529,16 @@ class TestMonitoringDb(PgClassMixin, LaneMixin, AccountMixin,
         self.assertEqual(summaries[1]["payload"]["resolved_count"], 1)
         self.assertEqual(summaries[1]["payload"]["new_count"], 0)
         self.assertEqual(self.notifications_for(uid, "new_finding"), [])
-        # Job 2 emailed ONLY its summary: 2 transport calls total
-        # (one summary per cycle), none for the resolved finding.
-        self.assertEqual(len(self.transport.calls_to(email)), 2)
+        # Job 2 emailed ONLY its summary: 3 transport calls total
+        # (registration verification + one summary per cycle),
+        # none for the resolved finding.
+        self.assertEqual(len(self.transport.calls_to(email)), 3)
 
         # Job 3 identical to job 2: no changes, still one summary.
         job3 = self.create_job(cookie)
         self.run_until_done(cookie, job3)
-        self.assertEqual(len(self.notifications_for(uid)), 4)
+        # 4 scan-lane rows + the registration verification row.
+        self.assertEqual(len(self.notifications_for(uid)), 5)
         summaries = self.notifications_for(uid, "scan_summary")
         self.assertEqual(summaries[2]["payload"]["score_delta"], 0)
 
@@ -550,9 +572,10 @@ class TestMonitoringDb(PgClassMixin, LaneMixin, AccountMixin,
         payload = summaries[1]["payload"]
         self.assertEqual(payload["new_count"], 6)
         self.assertEqual(payload["extra_new_count"], 1)
-        # Job 2 emailed ONLY its summary (plus job 1's summary):
-        # exactly one email per cycle, never one per finding.
-        self.assertEqual(len(self.transport.calls_to(email)), 1 + 1)
+        # Job 2 emailed ONLY its summary (plus job 1's summary and
+        # the one registration verification email): exactly one
+        # email per cycle, never one per finding.
+        self.assertEqual(len(self.transport.calls_to(email)), 1 + 1 + 1)
 
     # ---------- consent off: in-app only, lane untouched ----------
     def test_notifications_consent_off_in_app_only(self):
@@ -566,12 +589,18 @@ class TestMonitoringDb(PgClassMixin, LaneMixin, AccountMixin,
         job2 = self.create_job(cookie)
         self.run_until_done(cookie, job2)
 
-        rows = self.notifications_for(uid)
+        rows = [r for r in self.notifications_for(uid)
+                if r["kind"] != "email_verification"]
         self.assertTrue(rows)
         self.assertTrue(all(r["status"] == "in_app_only" for r in rows))
         self.assertEqual(
             [r["kind"] for r in rows].count("new_finding"), 1)
-        self.assertEqual(self.transport.calls_to(email), [])
+        # The only mail to this address is the transactional
+        # registration verification — the scan lane sent nothing.
+        scan_mail = [c for c in self.transport.calls_to(email)
+                     if "/verify?token="
+                     not in c["body"]["textContent"]]
+        self.assertEqual(scan_mail, [])
 
     # ---------- no lane: recorded unsent, never 'sent' ----------
     def test_no_lane_records_unsent_no_lane(self):
@@ -582,7 +611,8 @@ class TestMonitoringDb(PgClassMixin, LaneMixin, AccountMixin,
                        consents=("scanning", "notifications"))
         job1 = self.create_job(cookie)
         self.run_until_done(cookie, job1)
-        rows = self.notifications_for(uid)
+        rows = [r for r in self.notifications_for(uid)
+                if r["kind"] == "scan_summary"]
         self.assertEqual([r["kind"] for r in rows], ["scan_summary"])
         self.assertEqual(rows[0]["status"], "unsent_no_lane")
         self.assertIsNone(rows[0]["sent_at"])
@@ -591,7 +621,8 @@ class TestMonitoringDb(PgClassMixin, LaneMixin, AccountMixin,
         self.set_lane(True)
         job2 = self.create_job(cookie)
         self.run_until_done(cookie, job2)
-        rows = self.notifications_for(uid)
+        rows = [r for r in self.notifications_for(uid)
+                if r["kind"] == "scan_summary"]
         self.assertEqual(rows[1]["status"], "sent")
         self.assertIsNotNone(rows[1]["sent_at"])
 
@@ -735,7 +766,8 @@ class TestMonitoringDb(PgClassMixin, LaneMixin, AccountMixin,
         self.assertEqual(body["events"], [])
         status, _h, body = self.request_json(
             "GET", "/api/notifications", cookie=cookie_b)
-        self.assertEqual(body["notifications"], [])
+        self.assertEqual([n["kind"] for n in body["notifications"]],
+                         ["email_verification"])
 
     # ---------- password reset ----------
     def _token_rows(self, user_id):
@@ -780,7 +812,8 @@ class TestMonitoringDb(PgClassMixin, LaneMixin, AccountMixin,
         reset_url = notes[0]["payload"]["reset_url"]
         raw_token = urllib.parse.parse_qs(
             urllib.parse.urlparse(reset_url).query)["token"][0]
-        sent = self.transport.calls_to(email)
+        sent = [c for c in self.transport.calls_to(email)
+                if "/reset?token=" in c["body"]["textContent"]]
         self.assertEqual(len(sent), 1)
         self.assertIn("/reset?token=" + raw_token,
                       sent[0]["body"]["textContent"])

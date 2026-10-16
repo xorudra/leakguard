@@ -445,6 +445,11 @@ class Handler(BaseHTTPRequestHandler):
         route = _versioned_route(parsed.path)
         if route == "/" or route == "/index.html":
             return self._serve_file(STATIC / "index.html", "text/html; charset=utf-8")
+        if route == "/verify":
+            # Email-verification landing (audit 2026-10-16): the
+            # same SPA, which app.js puts into verify mode for this
+            # path and redeems the token before showing sign-in.
+            return self._serve_file(STATIC / "index.html", "text/html; charset=utf-8")
         if route == "/reset":
             # Password-reset landing (Stage S8): the same SPA, which
             # reads ?token= itself and shows the reset form.
@@ -919,12 +924,27 @@ class Handler(BaseHTTPRequestHandler):
             # stay as they are.
             self._enforce_rate_limit("register", "ip:" + self._client_ip())
             self._rate_limit_credentials(payload.get("email"))
-            user, token = self._call(
-                auth_service.register,
-                payload.get("email"), payload.get("password"),
-                payload.get("name"), payload.get("policy_accepted"))
-            return self._json(201, {"user": user}, extra_headers=[
-                ("Set-Cookie", sessions_mod.cookie_header(token))])
+            try:
+                self._call(
+                    auth_service.register,
+                    payload.get("email"), payload.get("password"),
+                    payload.get("name"), payload.get("policy_accepted"))
+            except errors.ApiError as exc:
+                if exc.code != "email_taken":
+                    raise
+                # Fall through to the uniform answer below.
+            # UNIFORM ANSWER (audit 2026-10-16, register-email-
+            # enumeration): a fresh registration and an address
+            # that already has an account return the SAME 201
+            # {"ok": true} — no user object, no Set-Cookie either
+            # way, so this endpoint is not an account-existence
+            # oracle, and it matches the forgot-password
+            # discipline. A fresh account also gets NO session:
+            # it must redeem the emailed verification link first
+            # (register-unverified-email-prehijack). The service
+            # arranges the mail; a taken address gets an owner
+            # notice or a fresh verification mail out-of-band.
+            return self._json(201, {"ok": True})
 
         if route == "/api/auth/login":
             payload = self._read_json_body()
@@ -969,6 +989,19 @@ class Handler(BaseHTTPRequestHandler):
                                      "ip:" + self._client_ip())
             self._call(auth_service.reset_password,
                        payload.get("token"), payload.get("new_password"))
+            return self._json(200, {"ok": True})
+
+        if route == "/api/auth/verify-email":
+            # Verification redemption (audit 2026-10-16): public
+            # like reset — the token itself is the proof of inbox
+            # control. Same per-IP cap class as reset attempts.
+            payload = self._read_json_body()
+            if payload is None:
+                return self._fail(errors.invalid_json())
+            self._enforce_rate_limit("reset_password",
+                                     "ip:" + self._client_ip())
+            self._call(auth_service.verify_email,
+                       payload.get("token"))
             return self._json(200, {"ok": True})
 
         if route == "/api/auth/passkey/login/options":

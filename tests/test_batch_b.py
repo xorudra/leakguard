@@ -288,7 +288,25 @@ class AccountMixin:
                   "policy_accepted": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
-        return self.session_cookie(headers), body["user"]["id"], email
+        # Audit 2026-10-16 fixes: registration returns a uniform
+        # {"ok": true} and NO session — the account must verify its
+        # email first. Tests flip the flag directly in the DB (the
+        # token flow itself is covered end-to-end in
+        # test_accounts.py) and log in for the session.
+        from accounts import auth as _auth_service
+        _digest = _auth_service.account_email_hmac(
+            _auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            _uid = str(conn.execute(
+                "UPDATE users SET email_verified = true"
+                " WHERE email_hmac = %s AND deleted_at IS NULL"
+                " RETURNING id", (_digest,)).fetchone()["id"])
+        status, headers, body = self.request_json(
+            "POST", "/api/auth/login",
+            body={"email": email, "password": self.PASSWORD},
+            headers=CSRF)
+        self.assertEqual(status, 200, body)
+        return self.session_cookie(headers), _uid, email
 
     def add_identifier(self, cookie, kind, value):
         status, _h, body = self.request_json(
@@ -429,8 +447,10 @@ class TestBatchBDb(PgClassMixin, ServerMixin, AccountMixin,
         self.assertEqual(formats, ["csv", "json"])
 
     def test_export_attempts_count_toward_credential_limit(self):
-        cookie, _user_id, _email = self.register()  # attempt #1
-        for attempt in range(9):  # attempts #2..#10: still 401s
+        # Attempts #1 (register) and #2 (the helper's post-verify
+        # login) already hit the shared credential bucket.
+        cookie, _user_id, _email = self.register()
+        for attempt in range(8):  # attempts #3..#10: still 401s
             status, _h, _p = self._export(cookie, "wrong-password-9")
             self.assertEqual(status, 401, attempt)
         # Attempt #11: the shared credential bucket is exhausted —

@@ -212,6 +212,26 @@ class TestPrivacyCenterWalk(ServerMixin, unittest.TestCase):
             "POST", "/api/auth/register",
             body={"email": email, "password": PASSWORD, "policy_accepted": True}, headers=CSRF)
         self.assertEqual(status, 201, body)
+        # Audit 2026-10-16: registration answers a uniform
+        # {"ok": true}, mails a verification link and sets NO
+        # session. The walk flips the verified flag in the DB
+        # (the token redemption itself is covered end-to-end in
+        # test_accounts.py), then logs in for the session the rest
+        # of the walk uses.
+        self.assertEqual(body, {"ok": True})
+        self.assertIsNone(self.session_cookie(headers))
+        from accounts import auth as auth_service
+        digest = auth_service.account_email_hmac(
+            auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            conn.execute(
+                "UPDATE users SET email_verified = true"
+                " WHERE email_hmac = %s AND deleted_at IS NULL",
+                (digest,))
+        status, headers, body = self.request_json(
+            "POST", "/api/auth/login",
+            body={"email": email, "password": PASSWORD}, headers=CSRF)
+        self.assertEqual(status, 200, body)
         user = body["user"]
         self.assertEqual(user["email_masked"], "w•••@example.com")
         register_cookie = self.session_cookie(headers)
@@ -388,11 +408,12 @@ class TestPrivacyCenterWalk(ServerMixin, unittest.TestCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(body["events"], [])
 
-        # --- notifications: empty ledger, well-formed -----------------
+        # --- notifications: only the registration verification ----
         status, _h, body = self.request_json(
             "GET", "/api/notifications", cookie=cookie)
         self.assertEqual(status, 200, body)
-        self.assertEqual(body["notifications"], [])
+        self.assertEqual([n["kind"] for n in body["notifications"]],
+                         ["email_verification"])
 
         # --- API tokens: create, list, use, revoke, dead --------------
         status, _h, body = self.request_json(
@@ -416,7 +437,8 @@ class TestPrivacyCenterWalk(ServerMixin, unittest.TestCase):
         status, _h, body = self.request_json(
             "GET", "/api/notifications", headers=self.bearer(raw_token))
         self.assertEqual(status, 200, body)
-        self.assertEqual(body["notifications"], [])
+        self.assertEqual([n["kind"] for n in body["notifications"]],
+                         ["email_verification"])
 
         status, _h, body = self.request_json(
             "DELETE", "/api/tokens/" + record["id"],

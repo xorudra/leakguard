@@ -29,7 +29,8 @@ EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$")
 _USER_COLUMNS = (
     "id, email_hmac, email_ciphertext, email_masked, name_ciphertext,"
     " password_hash, totp_secret_ciphertext, totp_enabled,"
-    " totp_last_step, created_at, updated_at, deleted_at"
+    " totp_last_step, created_at, updated_at, deleted_at,"
+    " email_verified"
 )
 
 
@@ -59,6 +60,7 @@ def public_user(row):
         "email_masked": row["email_masked"],
         "name": reveal_name(row),
         "totp_enabled": bool(row["totp_enabled"]),
+        "email_verified": bool(row["email_verified"]),
         "created_at": _iso(row["created_at"]),
     }
 
@@ -155,9 +157,13 @@ def _validate_name(name):
 
 
 def register(email, password, name=None, policy_accepted=False):
-    """Create an account + consent defaults + a first session.
-    Returns (public_user, raw_session_token). The optional name is
-    stored vault-encrypted only (0017), never in plaintext.
+    """Create an UNVERIFIED account + consent defaults, and mail a
+    verification link. Returns ({"pending_verification": True},
+    None) — deliberately NOT a session (audit 2026-10-16,
+    register-unverified-email-prehijack): the account can sign in
+    only after verify_email() proves control of the address. The
+    optional name is stored vault-encrypted only (0017), never in
+    plaintext.
 
     policy_accepted is the registration agreement (Launch Safety
     Standard F26): the web sign-up requires the "I agree to the
@@ -181,6 +187,7 @@ def register(email, password, name=None, policy_accepted=False):
     digest = account_email_hmac(normalized)
     from accounts import consents
 
+    row = None
     try:
         with pool.connection() as conn:
             existing = conn.execute(
@@ -188,35 +195,61 @@ def register(email, password, name=None, policy_accepted=False):
                 " AND deleted_at IS NULL",
                 (digest,),
             ).fetchone()
-            if existing is not None:
-                raise errors.conflict(
-                    "email_taken",
-                    "An account with this email already exists")
-            row = conn.execute(
-                "INSERT INTO users (email_hmac, email_ciphertext,"
-                " email_masked, name_ciphertext, password_hash)"
-                " VALUES (%s, %s, %s, %s, %s) RETURNING " + _USER_COLUMNS,
-                (
-                    digest,
-                    crypto.encrypt_value(_master_key(), normalized),
-                    vault_store.mask("email", normalized),
-                    crypto.encrypt_value(_master_key(), cleaned_name)
-                    if cleaned_name else None,
-                    passwords.hash_password(password),
-                ),
-            ).fetchone()
-            consents.seed_defaults(conn, row["id"])
-            consents.record_policy_acceptance(conn, row["id"])
-    except errors.ApiError:
-        raise
+            if existing is None:
+                # Audit 2026-10-16 (register-unverified-email-
+                # prehijack): the account is born UNVERIFIED and
+                # register() mints NO session. Sign-in opens only
+                # after verify_email() redeems the token mailed to
+                # the address (see the verification section below).
+                # Accounts created before this change carry
+                # email_verified = true from migration 0020's
+                # default and are untouched.
+                row = conn.execute(
+                    "INSERT INTO users (email_hmac, email_ciphertext,"
+                    " email_masked, name_ciphertext, password_hash,"
+                    " email_verified)"
+                    " VALUES (%s, %s, %s, %s, %s, false)"
+                    " RETURNING " + _USER_COLUMNS,
+                    (
+                        digest,
+                        crypto.encrypt_value(_master_key(), normalized),
+                        vault_store.mask("email", normalized),
+                        crypto.encrypt_value(_master_key(), cleaned_name)
+                        if cleaned_name else None,
+                        passwords.hash_password(password),
+                    ),
+                ).fetchone()
+                consents.seed_defaults(conn, row["id"])
+                consents.record_policy_acceptance(conn, row["id"])
     except Exception as exc:
         if type(exc).__name__ == "UniqueViolation":
-            raise errors.conflict(
-                "email_taken", "An account with this email already exists")
-        raise
-    token = sessions.create_session(row["id"])
+            row = None  # lost a registration race: the taken path
+        else:
+            raise
+    if row is None:
+        # The address already has a live account. The ROUTE answers
+        # this exactly like a fresh registration (audit 2026-10-16,
+        # register-email-enumeration), so all the client ever learns
+        # is inside these out-of-band lanes: a verified owner gets a
+        # 'registration_attempt' notice; an UNVERIFIED pending
+        # account gets a FRESH verification email — re-registering
+        # is the resend path, and a pre-hijack squatter can neither
+        # confirm an address they don't control nor block the real
+        # owner's confirmation.
+        existing = _get_user_by_email(normalized)
+        if existing is not None and not existing["email_verified"]:
+            _send_verification(existing["id"], normalized)
+        elif existing is not None:
+            from monitoring import notify
+
+            notify.create_notification(
+                existing["id"], "registration_attempt", {},
+                mode="always", email=normalized)
+        raise errors.conflict(
+            "email_taken", "An account with this email already exists")
     audit.record(row["id"], "user", "auth.registered", "user", row["id"])
-    return public_user(row), token
+    _send_verification(row["id"], normalized)
+    return {"pending_verification": True}, None
 
 
 def login(email, password, totp_code=None):
@@ -245,6 +278,17 @@ def login(email, password, totp_code=None):
                 " WHERE id = %s",
                 (passwords.hash_password(password), row["id"]),
             )
+    if not row["email_verified"]:
+        # Registration's ownership gate (audit 2026-10-16): the
+        # password is right, but the address was never confirmed.
+        # The password check runs FIRST so this state is revealed
+        # only to someone who knows the password — never as an
+        # enumeration oracle for strangers.
+        raise errors.forbidden(
+            "email_not_verified",
+            "Verify your email first — we sent a confirmation link "
+            "when you registered. Registering again with the same "
+            "address sends a fresh link.")
     if row["totp_enabled"]:
         if not totp_code:
             return {"totp_required": True}
@@ -321,6 +365,79 @@ def delete_account(user_id, password):
     # carries no FK, so "this account existed and was deleted" stays
     # answerable after the user row is soft-deleted.
     audit.record(user_id, "user", "account.deleted", "user", user_id)
+
+
+# ---------------------------------------------------------------------------
+# Email verification (audit 2026-10-16 — registration gates on
+# ownership of the address; the password_reset_tokens pattern)
+# ---------------------------------------------------------------------------
+
+VERIFY_TOKEN_TTL = timedelta(hours=24)
+
+
+def _send_verification(user_id, normalized_email):
+    """Mint a verification token (digest-only storage, previous
+    unused tokens superseded) and deliver the link through the
+    notification lane as transactional mail (mode='always': the
+    address itself is the recipient, consent or not)."""
+    raw_token = secrets.token_urlsafe(32)
+    digest = hashlib.sha256(raw_token.encode("utf-8")).digest()
+    now = datetime.now(timezone.utc)
+    with pool.connection() as conn:
+        conn.execute(
+            "UPDATE email_verification_tokens SET used_at = %s"
+            " WHERE user_id = %s AND used_at IS NULL",
+            (now, user_id),
+        )
+        conn.execute(
+            "INSERT INTO email_verification_tokens"
+            " (token_hash, user_id, expires_at) VALUES (%s, %s, %s)",
+            (digest, user_id, now + VERIFY_TOKEN_TTL),
+        )
+    verify_url = (RESET_URL_BASE.rstrip("/")
+                  + "/verify?token=" + raw_token)
+    from monitoring import notify
+
+    notify.create_notification(
+        user_id, "email_verification", {"verify_url": verify_url},
+        mode="always", email=normalized_email)
+
+
+def verify_email(raw_token):
+    """Redeem a verification token: single-use, expiring, one
+    error shape for unknown/used/expired (the _invalid_token
+    discipline). Success flips email_verified; sign-in then works
+    with the password chosen at registration."""
+    if not raw_token or not isinstance(raw_token, str):
+        raise _invalid_token()
+    digest = hashlib.sha256(
+        raw_token.strip().encode("utf-8")).digest()
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT id, user_id, expires_at, used_at"
+            " FROM email_verification_tokens WHERE token_hash = %s",
+            (digest,),
+        ).fetchone()
+    if row is None or row["used_at"] is not None:
+        raise _invalid_token()
+    if row["expires_at"] <= datetime.now(timezone.utc):
+        raise _invalid_token()
+    with pool.connection() as conn:
+        consumed = conn.execute(
+            "UPDATE email_verification_tokens SET used_at = now()"
+            " WHERE id = %s AND used_at IS NULL RETURNING id",
+            (row["id"],),
+        ).fetchone()
+        if consumed is None:  # a concurrent redeem won the race
+            raise _invalid_token()
+        conn.execute(
+            "UPDATE users SET email_verified = true,"
+            " updated_at = now() WHERE id = %s",
+            (row["user_id"],),
+        )
+    audit.record(row["user_id"], "user", "auth.email_verified",
+                 "user", row["user_id"])
+    return {"ok": True, "verified": True}
 
 
 # ---------------------------------------------------------------------------

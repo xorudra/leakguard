@@ -467,7 +467,25 @@ class UsageDbBase(ServerMixin):
             body={"email": email, "password": PASSWORD, "policy_accepted": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
-        return self.session_cookie(headers), body["user"]["id"], email
+        # Audit 2026-10-16 fixes: registration returns a uniform
+        # {"ok": true} and NO session — the account must verify its
+        # email first. Tests flip the flag directly in the DB (the
+        # token flow itself is covered end-to-end in
+        # test_accounts.py) and log in for the session.
+        from accounts import auth as _auth_service
+        _digest = _auth_service.account_email_hmac(
+            _auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            _uid = str(conn.execute(
+                "UPDATE users SET email_verified = true"
+                " WHERE email_hmac = %s AND deleted_at IS NULL"
+                " RETURNING id", (_digest,)).fetchone()["id"])
+        status, headers, body = self.request_json(
+            "POST", "/api/auth/login",
+            body={"email": email, "password": PASSWORD},
+            headers=CSRF)
+        self.assertEqual(status, 200, body)
+        return self.session_cookie(headers), _uid, email
 
     def db_exec(self, sql, params=()):
         with self.pool.connection() as conn:
@@ -650,7 +668,12 @@ class TestAlertProviderBudgetDb(UsageDbBase, unittest.TestCase):
                          "provider_budget")
         self.assertEqual(rows[0]["payload"]["provider"],
                          "XposedOrNot")
-        self.assertEqual(len(self.transport.to(self.admin_email)), 1)
+        # Registration's verification email also lands in the
+        # admin's inbox (audit 2026-10-16) — count ALERT mail only.
+        alerts_sent = [c for c in self.transport.to(self.admin_email)
+                       if "/verify?token="
+                       not in c.get("textContent", "")]
+        self.assertEqual(len(alerts_sent), 1)
         audit_row = self.db_one(
             "SELECT * FROM audit_log"
             " WHERE action = 'engineering_alert'"
@@ -670,7 +693,12 @@ class TestAlertProviderBudgetDb(UsageDbBase, unittest.TestCase):
             " AND status <> 'suppressed'",
             (self.admin_id,))
         self.assertEqual(len(rows), 1, rows)
-        self.assertEqual(len(self.transport.to(self.admin_email)), 1)
+        # Registration's verification email also lands in the
+        # admin's inbox (audit 2026-10-16) — count ALERT mail only.
+        alerts_sent = [c for c in self.transport.to(self.admin_email)
+                       if "/verify?token="
+                       not in c.get("textContent", "")]
+        self.assertEqual(len(alerts_sent), 1)
 
 
 class TestAlertProviderBudgetSilentDb(UsageDbBase,

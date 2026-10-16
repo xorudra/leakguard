@@ -279,7 +279,25 @@ class AccountMixin:
             body={"email": email, "password": self.PASSWORD, "policy_accepted": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
-        return self.session_cookie(headers), body["user"]["id"], email
+        # Audit 2026-10-16 fixes: registration returns a uniform
+        # {"ok": true} and NO session — the account must verify its
+        # email first. Tests flip the flag directly in the DB (the
+        # token flow itself is covered end-to-end in
+        # test_accounts.py) and log in for the session.
+        from accounts import auth as _auth_service
+        _digest = _auth_service.account_email_hmac(
+            _auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            _uid = str(conn.execute(
+                "UPDATE users SET email_verified = true"
+                " WHERE email_hmac = %s AND deleted_at IS NULL"
+                " RETURNING id", (_digest,)).fetchone()["id"])
+        status, headers, body = self.request_json(
+            "POST", "/api/auth/login",
+            body={"email": email, "password": self.PASSWORD},
+            headers=CSRF)
+        self.assertEqual(status, 200, body)
+        return self.session_cookie(headers), _uid, email
 
     def add_identifier(self, cookie, kind, value):
         status, _h, body = self.request_json(
@@ -651,6 +669,17 @@ class TestLifecycleMigrationUpgrade(PgClassMixin, AccountMixin,
             conn.execute(
                 "INSERT INTO schema_migrations (name) VALUES (%s)",
                 (path18.name,))
+            # 0020 (email verification, audit 2026-10-16) is likewise
+            # pre-applied out of order: current auth code writes
+            # users.email_verified when this class's fixture
+            # registers, and 0020 is independent of the 0012
+            # backfill under test.
+            path20 = [p for p in cls.migrate.migration_files()
+                      if p.name.startswith("0020")][0]
+            conn.execute(path20.read_text(encoding="utf-8"))
+            conn.execute(
+                "INSERT INTO schema_migrations (name) VALUES (%s)",
+                (path20.name,))
         from remediation import registry_seed
 
         registry_seed.seed_brokers()
@@ -703,6 +732,13 @@ class TestLifecycleMigrationUpgrade(PgClassMixin, AccountMixin,
                                  status="failed")
         self.insert_finding(failed, uid, iid, "BreachF")
 
+        # The fixture's registration created an 'email_verification'
+        # notification (0020 kind, pre-applied above); 0013 re-adds
+        # its own narrower kind CHECK and would reject that row.
+        # The row is fixture noise for this migration test — remove
+        # it so the historical sequence replays exactly.
+        self.db_exec(
+            "DELETE FROM notifications WHERE kind = 'email_verification'")
         applied = self.migrate.run_migrations()
         # 0012 is the migration under test; 0013 (error ledger,
         # Phase 76), 0014 (provider usage, Phases 66/124),

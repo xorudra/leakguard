@@ -223,7 +223,25 @@ class ObsDbBase(ServerMixin):
             body={"email": email, "password": PASSWORD, "policy_accepted": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
-        return self.session_cookie(headers), body["user"]["id"], email
+        # Audit 2026-10-16 fixes: registration returns a uniform
+        # {"ok": true} and NO session — the account must verify its
+        # email first. Tests flip the flag directly in the DB (the
+        # token flow itself is covered end-to-end in
+        # test_accounts.py) and log in for the session.
+        from accounts import auth as _auth_service
+        _digest = _auth_service.account_email_hmac(
+            _auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            _uid = str(conn.execute(
+                "UPDATE users SET email_verified = true"
+                " WHERE email_hmac = %s AND deleted_at IS NULL"
+                " RETURNING id", (_digest,)).fetchone()["id"])
+        status, headers, body = self.request_json(
+            "POST", "/api/auth/login",
+            body={"email": email, "password": PASSWORD},
+            headers=CSRF)
+        self.assertEqual(status, 200, body)
+        return self.session_cookie(headers), _uid, email
 
     def db_exec(self, sql, params=()):
         with self.pool.connection() as conn:
@@ -426,11 +444,15 @@ class TestAdminMetricsDb(ObsDbBase, unittest.TestCase):
 
         # The overview embeds the same block; a login's audit row
         # ('auth.login', one of the security-action patterns) is
-        # counted by kind in the trailing 24h.
+        # counted by kind in the trailing 24h. Registration helpers
+        # log in too (post-verification), so the count is asserted
+        # as a delta around this test's own explicit login.
         status, _h, overview = self.request_json(
             "GET", "/api/admin/overview", cookie=admin_cookie)
         self.assertEqual(status, 200, overview)
         self.assertEqual(overview["metrics"]["queue"]["active"], 3)
+        before = overview["metrics"][
+            "security_events_by_kind_last_24h"].get("auth.login", 0)
         status, _h, _b = self.request_json(
             "POST", "/api/auth/login",
             body={"email": self.ADMIN_EMAIL, "password": PASSWORD},
@@ -440,7 +462,7 @@ class TestAdminMetricsDb(ObsDbBase, unittest.TestCase):
             "GET", "/api/admin/metrics", cookie=admin_cookie)
         self.assertEqual(
             body["security_events_by_kind_last_24h"].get("auth.login"),
-            1)
+            before + 1)
 
 
 # ---------------------------------------------------------------------------
@@ -490,7 +512,12 @@ class AlertDbBase(ObsDbBase):
             (self.admin_id,))
         self.assertEqual(len(rows), 1, rows)
         self.assertEqual(rows[0]["payload"]["rule"], rule)
-        self.assertEqual(len(self.transport.to(self.admin_email)), 1)
+        # Registration's verification email also lands in the
+        # admin's inbox (audit 2026-10-16) — count ALERT mail only.
+        alerts_sent = [c for c in self.transport.to(self.admin_email)
+                       if "/verify?token="
+                       not in c.get("textContent", "")]
+        self.assertEqual(len(alerts_sent), 1)
         audit_row = self.db_one(
             "SELECT * FROM audit_log"
             " WHERE action = 'engineering_alert'"

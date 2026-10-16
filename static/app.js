@@ -690,6 +690,9 @@ let lgResetToken = null;
    it is on, the auth panel is the whole page, and a successful
    sign-in leaves for the app home (renderAccount honours this). */
 let lgSigninMode = false;
+/* Email-verification landing (/verify?token=<redacted> same landing
+   pattern — set synchronously by the boot code at the bottom. */
+let lgVerifyMode = false;
 
 async function apiJson(path, opts) {
   const resp = await fetch(path, opts || {});
@@ -726,6 +729,15 @@ function renderAccount() {
     $("actionCenter").hidden = true;
     $("adminCard").hidden = true;
     $("resetBox").hidden = false;
+    return;
+  }
+  if (lgVerifyMode) {
+    $("acctBtn").textContent = "Sign in";
+    $("authForms").hidden = true;
+    $("privacyCenter").hidden = true;
+    $("actionCenter").hidden = true;
+    $("adminCard").hidden = true;
+    $("verifyBox").hidden = false;
     return;
   }
   const signedIn = !!meUser;
@@ -870,10 +882,13 @@ $("acRegisterBtn").addEventListener("click", async () => {
       body: JSON.stringify({ email, password, name, policy_accepted: true }),
     });
     if (!r.ok) throw new Error(errMsg(r.data, "Could not create the account"));
-    meUser = r.data.user;
+    // Registration no longer signs you in: the account opens only
+    // after the emailed verification link is clicked. The server's
+    // answer is deliberately identical for a new address and one
+    // that already has an account, so this copy is too.
     $("acPassword").value = "";
-    $("acStatus").textContent = "";
-    renderAccount();
+    setRegisterMode(false);
+    $("acStatus").textContent = "Check your inbox — we've sent a verification link. Click it, then sign in here. (You see this same message whether the address is new or already registered.)";
   } catch (err) {
     $("acStatus").textContent = err.message;
   }
@@ -3021,6 +3036,40 @@ loadMe();
     $("rsStatus").textContent = "This reset link is missing its token — request a new one from the sign-in form.";
     $("rsBtn").disabled = true;
   }
+  panel.scrollIntoView();
+})();
+
+/* ---------------- Email-verification landing (/verify?token=...) ----------------
+   Same landing pattern as /reset: redeem the token first, and
+   only a successful redemption hands the visitor the sign-in
+   form. A failed one explains itself inside the verify box. */
+(function () {
+  if (location.pathname !== "/verify") return;
+  lgVerifyMode = true;
+  const token = new URLSearchParams(location.search).get("token");
+  const panel = $("account");
+  panel.hidden = false;
+  $("authForms").hidden = true;
+  $("privacyCenter").hidden = true;
+  $("verifyBox").hidden = false;
+  if (!token) {
+    $("vfStatus").textContent = "This verification link is missing its token — register again to get a fresh one.";
+    return;
+  }
+  apiJson("/api/auth/verify-email", {
+    method: "POST", headers: AH, body: JSON.stringify({ token }),
+  }).then((r) => {
+    if (r.ok) {
+      lgVerifyMode = false;
+      history.replaceState(null, "", "/");
+      $("verifyBox").hidden = true;
+      renderAccount();
+      $("acStatus").textContent = "Email confirmed ✓ — sign in with your password to finish.";
+      $("account").scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      $("vfStatus").textContent = errMsg(r.data, "That verification link is not valid or has expired — register again to get a fresh one.");
+    }
+  });
   panel.scrollIntoView();
 })();
 

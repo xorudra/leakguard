@@ -435,12 +435,31 @@ class TestScanningDb(ServerMixin, unittest.TestCase):
         return "detail-%s@example.com" % uuid.uuid4().hex[:16]
 
     def register(self):
+        email = self.unique_email()
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            body={"email": self.unique_email(), "password": self.PASSWORD, "policy_accepted": True},
+            body={"email": email, "password": self.PASSWORD, "policy_accepted": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
-        return self.session_cookie(headers), body["user"]["id"]
+        # Audit 2026-10-16 fixes: registration returns a uniform
+        # {"ok": true} and NO session — the account must verify its
+        # email first. Tests flip the flag directly in the DB (the
+        # token flow itself is covered end-to-end in
+        # test_accounts.py) and log in for the session.
+        from accounts import auth as _auth_service
+        _digest = _auth_service.account_email_hmac(
+            _auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            _uid = str(conn.execute(
+                "UPDATE users SET email_verified = true"
+                " WHERE email_hmac = %s AND deleted_at IS NULL"
+                " RETURNING id", (_digest,)).fetchone()["id"])
+        status, headers, body = self.request_json(
+            "POST", "/api/auth/login",
+            body={"email": email, "password": self.PASSWORD},
+            headers=CSRF)
+        self.assertEqual(status, 200, body)
+        return self.session_cookie(headers), _uid
 
     def add_identifier(self, cookie, kind, value):
         status, _h, body = self.request_json(

@@ -69,7 +69,7 @@ from remediation import engine as engine_mod
 from remediation import registry_seed
 from remediation import service, verify as verify_mod, worker as worker_mod
 
-PASSWORD = "test-password-123"
+PASSWORD = "Zz!fixture-9274"
 PERSON = "Zztest Personman"
 _PUBLIC_IPS = [ipaddress.ip_address("93.184.216.34")]
 
@@ -266,6 +266,13 @@ class TestFakeBrokerWorkflowDb(ServerMixin, unittest.TestCase):
 
     def setUp(self):
         self.start_server()
+        # Registration now also logs in (post-verification), which
+        # doubles the credential-limiter hits per fixture person —
+        # reset both limiters per test like the other suites do.
+        from accounts import ratelimit as account_ratelimit
+        from core import ratelimit as core_ratelimit
+        account_ratelimit.reset()
+        core_ratelimit.reset()
         self._patches = []
         self.addCleanup(self.stop_server)
         self.addCleanup(self._stop_patches)
@@ -320,8 +327,21 @@ class TestFakeBrokerWorkflowDb(ServerMixin, unittest.TestCase):
             "POST", "/api/auth/register",
             {"email": email, "password": PASSWORD, "policy_accepted": True})
         self.assertEqual(status, 201)
+        # Audit 2026-10-16: register returns no user/session —
+        # verify the address in the DB, then log in.
+        from accounts import auth as auth_service
+        digest = auth_service.account_email_hmac(
+            auth_service.normalize_email(email))
+        with pool.connection() as conn:
+            user_id = str(conn.execute(
+                "UPDATE users SET email_verified = true"
+                " WHERE email_hmac = %s AND deleted_at IS NULL"
+                " RETURNING id", (digest,)).fetchone()["id"])
+        status, headers, body = self.request_json(
+            "POST", "/api/auth/login",
+            {"email": email, "password": PASSWORD})
+        self.assertEqual(status, 200)
         cookie = headers.get("Set-Cookie").split(";")[0]
-        user_id = body["user"]["id"]
         for kind, value in (
                 ("name", self.person_name), ("email", email),
                 ("address", "Pune, %s %s Example Street"

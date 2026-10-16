@@ -93,19 +93,27 @@ def _default_fetcher(url):
     ssrf.assert_public_url(url)
     deadline = time.monotonic() + FETCH_TIMEOUT_SECONDS
     req = urllib.request.Request(url, headers=agent_engine.UA)
-    try:
-        # Connection-pinned fetch (Phase 70): the pinned connection
-        # re-resolves and validates inside connect(), so the guard
-        # above cannot be raced by a DNS rebinding; a pinning
-        # refusal raises here exactly like a transport failure.
-        with ssrf.pinned_urlopen(
-                req, timeout=FETCH_TIMEOUT_SECONDS) as resp:
-            return resp.status, _read_deadline(resp, deadline)
-    except urllib.error.HTTPError as exc:
+
+    def _fetch():
+        # The whole fetch runs inside this callable so the total
+        # deadline bounds the connect/header phase too, not only
+        # body reads (run-2 revalidation).
         try:
-            return exc.code, _read_deadline(exc, deadline)
-        except Exception:
-            return exc.code, b""
+            # Connection-pinned fetch (Phase 70): the pinned
+            # connection re-resolves and validates inside
+            # connect(), so the guard above cannot be raced by a
+            # DNS rebinding; a pinning refusal raises here exactly
+            # like a transport failure.
+            with ssrf.pinned_urlopen(
+                    req, timeout=FETCH_TIMEOUT_SECONDS) as resp:
+                return resp.status, _read_deadline(resp, deadline)
+        except urllib.error.HTTPError as exc:
+            try:
+                return exc.code, _read_deadline(exc, deadline)
+            except Exception:
+                return exc.code, b""
+
+    return ssrf.run_with_deadline(_fetch, FETCH_TIMEOUT_SECONDS)
 
 
 def brokers_to_check():

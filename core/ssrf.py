@@ -62,8 +62,40 @@ import http.client
 import ipaddress
 import socket
 import sys
+import threading
 import urllib.parse
 import urllib.request
+
+
+def run_with_deadline(fn, deadline_seconds):
+    """Run fn() under a TOTAL wall-clock deadline (run-2
+    revalidation, 2026-10-16): a socket timeout bounds each
+    single operation, so a peer dripping response HEADERS one
+    byte at a time — every byte inside the per-op timeout —
+    could hold a fetch open far past its nominal deadline
+    before any body-read check ran. fn executes on a daemon
+    worker thread; on expiry TimeoutError is raised to the
+    caller and the abandoned worker is left to die with its
+    socket (daemon threads never block shutdown, and the
+    caller treats the operation as failed). fn's own exception
+    is re-raised unchanged."""
+    box = {}
+
+    def target():
+        try:
+            box["value"] = fn()
+        except BaseException as exc:  # re-raised in the caller
+            box["error"] = exc
+
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    worker.join(deadline_seconds)
+    if worker.is_alive():
+        raise TimeoutError(
+            "operation exceeded its %ss deadline" % deadline_seconds)
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
 
 
 class SsrfError(ValueError):

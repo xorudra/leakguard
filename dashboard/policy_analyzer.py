@@ -281,23 +281,35 @@ def fetch_url(url):
     ssrf.assert_public_url(url)
     deadline = time.monotonic() + TOTAL_FETCH_DEADLINE_SECONDS
     req = urllib.request.Request(url, headers=_USER_AGENT)
-    try:
-        with _FETCH_OPENER.open(
-                req, timeout=FETCH_TIMEOUT_SECONDS) as resp:
-            raw = _read_capped(resp, deadline)
-            status = resp.status
-            charset = "utf-8"
-            try:
-                charset = resp.headers.get_content_charset() or charset
-            except Exception:
-                pass
-    except urllib.error.HTTPError as exc:
+
+    def _fetch():
+        # The WHOLE fetch — connect, response headers, redirects,
+        # body — runs inside this callable so run_with_deadline
+        # bounds every phase (run-2 revalidation: the read-side
+        # deadline alone never consulted time spent inside open()
+        # itself, where a header slow-drip could park the fetch).
         try:
-            raw = _read_capped(exc, deadline)
-        except Exception:
-            raw = b""
-        status = exc.code
-        charset = "utf-8"
+            with _FETCH_OPENER.open(
+                    req, timeout=FETCH_TIMEOUT_SECONDS) as resp:
+                raw = _read_capped(resp, deadline)
+                status = resp.status
+                charset = "utf-8"
+                try:
+                    charset = resp.headers.get_content_charset() or charset
+                except Exception:
+                    pass
+        except urllib.error.HTTPError as exc:
+            try:
+                raw = _read_capped(exc, deadline)
+            except Exception:
+                raw = b""
+            status = exc.code
+            charset = "utf-8"
+        return status, raw, charset
+
+    try:
+        status, raw, charset = ssrf.run_with_deadline(
+            _fetch, TOTAL_FETCH_DEADLINE_SECONDS)
     except ssrf.SsrfError as exc:
         raise errors.bad_request(
             "policy_url_not_public",

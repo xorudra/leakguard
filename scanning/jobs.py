@@ -109,6 +109,17 @@ def create_job(user_id, idempotency_key):
         raise errors.bad_request(
             "invalid_idempotency_key",
             "A non-empty idempotency key is required")
+    if idempotency_key.startswith(budgets.MONITOR_KEY_PREFIX):
+        # The 'monitor-' prefix is how the worker, the budget
+        # enforcer and the replay marker recognize monitoring-
+        # scheduler jobs (scanning/budgets.py); a caller-supplied
+        # key in that namespace would inherit the monitor lane's
+        # budget exclusion and priority (audit 2026-10-16,
+        # scanning.monitor-prefix-budget-bypass). The prefix is
+        # reserved — only the scheduler may mint it.
+        raise errors.bad_request(
+            "invalid_idempotency_key",
+            "That idempotency key prefix is reserved")
     if not _scanning_consented(user_id):
         raise errors.forbidden(
             "consent_required",

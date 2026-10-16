@@ -504,6 +504,22 @@ class TestUserScanBudgetDb(DbBase, unittest.TestCase):
             status, _h, body = self.post_scan(cookie, "today-2")
             self.assertEqual(status, 429, body)
 
+    def test_caller_cannot_mint_monitor_prefixed_keys(self):
+        # Audit 2026-10-16 (scanning.monitor-prefix-budget-
+        # bypass): a caller-chosen 'monitor-' key would inherit
+        # the monitor lane's budget exclusion and priority — the
+        # prefix is reserved for the scheduler.
+        cookie, uid, _iid = self.scan_ready_user()
+        status, _h, body = self.post_scan(
+            cookie, "monitor-%s-2026-10-16" % uid)
+        self.assertEqual(status, 400, body)
+        self.assertEqual(body["error"]["code"],
+                         "invalid_idempotency_key")
+        row = self.db_row(
+            "SELECT COUNT(*) AS n FROM scan_jobs"
+            " WHERE idempotency_key LIKE 'monitor-%%'", ())
+        self.assertEqual(row["n"], 0)
+
     def test_fresh_users_first_scan_fits_the_real_budget(self):
         # Ungenerous budgets would break the product's first-run
         # promise; the shipped value sits far above a first day.

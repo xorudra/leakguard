@@ -25,10 +25,15 @@ Design notes
   and LEAKGUARD_DB_POOL=0 disables pooling entirely (rollback switch).
 * psycopg is imported lazily inside functions. Importing this module
   never fails, even where the driver is not installed.
-* db_status() never raises, and caches its probe result briefly so the
-  health endpoint does not open a database connection on every poll
-  (UptimeRobot hits /api/health every 5 minutes; external callers may
-  poll more often).
+* db_status() never raises, and caches its probe result for 10 minutes
+  so the health endpoint does not open a database connection on every
+  poll. The cache window is sized against Neon free-tier autosuspend
+  (~5 idle minutes): with every external poller slower than the cache,
+  the database can actually sleep between real user traffic instead of
+  being kept awake — and billed — by health checks alone (owner order
+  2026-10-17, after Neon reported 80% of the monthly free compute
+  used). Trade-off: /api/health may report a cached db status up to
+  10 minutes old; real user requests never use the cache.
 """
 
 import os
@@ -40,7 +45,7 @@ from contextlib import contextmanager
 # wake (plus TLS + auth) can take several seconds. A 5s timeout turned
 # every cold start into a spurious "db error".
 _CONNECT_TIMEOUT_SECONDS = 15
-_PROBE_CACHE_SECONDS = 15.0
+_PROBE_CACHE_SECONDS = 600.0
 
 _probe_cache = {"value": None, "at": 0.0}
 

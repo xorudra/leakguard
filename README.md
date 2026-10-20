@@ -4,9 +4,9 @@
 
 ### Your data got leaked. Find it. Remove it.
 
-### 🌐 Live Website: [leakguard.is-a.dev](https://leakguard.is-a.dev)
+### 🌐 Live Website: [leakguard.duckdns.org](https://leakguard.duckdns.org)
 
-[![Live Demo](https://img.shields.io/badge/▶_Live_Demo-leakguard.is-a.dev-2ea043?style=for-the-badge)](https://leakguard.is-a.dev)
+[![Live Demo](https://img.shields.io/badge/▶_Live_Demo-leakguard.duckdns.org-2ea043?style=for-the-badge)](https://leakguard.duckdns.org)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Dependencies](https://img.shields.io/badge/Dependencies-3_runtime-important?style=for-the-badge)
 ![Cost](https://img.shields.io/badge/Cost-₹0_Free-success?style=for-the-badge)
@@ -124,7 +124,7 @@ Tokens are **read-only by construction**: they authenticate `GET` requests only,
 
 ```bash
 TOKEN="lg_REPLACE_WITH_YOUR_TOKEN"
-BASE="https://leakguard.is-a.dev"
+BASE="https://leakguard.duckdns.org"
 
 curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/action-center
 curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/scans
@@ -134,7 +134,7 @@ curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/notifications
 curl -H "Authorization: Bearer $TOKEN" $BASE/api/v1/monitoring/timeline
 ```
 
-Token management itself is session-only (`GET`/`POST /api/tokens`, `DELETE /api/tokens/<id>` from the Privacy Center). A revoked or unknown token answers the same `401` as being signed out. `GET /api/providers/health` stays public. What the platform stores, who processes data, and how long anything is kept: **[Trust & security](https://leakguard.is-a.dev/trust)**.
+Token management itself is session-only (`GET`/`POST /api/tokens`, `DELETE /api/tokens/<id>` from the Privacy Center). A revoked or unknown token answers the same `401` as being signed out. `GET /api/providers/health` stays public. What the platform stores, who processes data, and how long anything is kept: **[Trust & security](https://leakguard.duckdns.org/trust)**.
 
 ## 🗂️ Project layout
 

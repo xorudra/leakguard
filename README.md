@@ -17,6 +17,15 @@
 
 ---
 
+
+## 🧊 3D Architecture
+
+![LeakGuard architecture in 3D](docs/3d/architecture.gif)
+
+You type an email and the single Python app checks real breach databases and, if you ask, your password — only five characters of its hash ever leave the server. It scores your exposure from 0 to 100 and builds a removal plan across 40 data brokers; Agent Mode does the boring steps with plain scripts, partly on your own device.
+
+**Interactive:** open [`docs/3d/index.html`](docs/3d/index.html) in a browser — drag to orbit, scroll to zoom.
+
 ## ✨ What it does
 
 | Step | What happens |

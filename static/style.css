@@ -235,6 +235,8 @@ footer a{color:var(--muted)}
 /* niceties */
 input:-webkit-autofill{-webkit-box-shadow:0 0 0 60px var(--elev) inset;-webkit-text-fill-color:#fff;caret-color:#fff}
 :focus-visible{outline:2px solid var(--green);outline-offset:2px}
+/* standard scrollbar props (modern browsers); the webkit rules below are the fallback */
+html{scrollbar-width:thin;scrollbar-color:#4d4d4d var(--bg)}
 ::-webkit-scrollbar{width:10px}
 ::-webkit-scrollbar-thumb{background:#4d4d4d;border-radius:99px;border:2px solid var(--bg)}
 ::-webkit-scrollbar-track{background:var(--bg)}

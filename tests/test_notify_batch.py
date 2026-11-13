@@ -292,7 +292,7 @@ class TestNotifyBatchDb(unittest.TestCase):
         email = "batch-%s@example.com" % uuid.uuid4().hex[:12]
         # Audit 2026-10-16: service register returns a pending
         # marker, not a user — fetch the new account's id.
-        auth.register(email, "correct-horse-9", policy_accepted=True)
+        auth.register(email, "correct-horse-9", policy_accepted=True, age_confirmed=True)
         uid = str(self._db(
             "SELECT id FROM users WHERE email_hmac = %s"
             " AND deleted_at IS NULL",

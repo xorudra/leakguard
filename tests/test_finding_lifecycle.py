@@ -276,7 +276,7 @@ class AccountMixin:
         email = "lc-%s@example.com" % self.uniq()
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            body={"email": email, "password": self.PASSWORD, "policy_accepted": True},
+            body={"email": email, "password": self.PASSWORD, "policy_accepted": True, "age_confirmed": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
         # Audit 2026-10-16 fixes: registration returns a uniform

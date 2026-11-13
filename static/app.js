@@ -844,6 +844,7 @@ function setRegisterMode(on) {
   registerMode = on;
   $("acNameWrap").hidden = !on;
   $("acPolicyWrap").hidden = !on;
+  $("acAgeWrap").hidden = !on;
   $("acRegisterBtn").textContent = on ? "Create my account" : "Create free account";
   if (on) $("acName").focus();
 }
@@ -875,11 +876,18 @@ $("acRegisterBtn").addEventListener("click", async () => {
     $("acPolicy").focus();
     return;
   }
+  if (!$("acAge").checked) {
+    // Client-side mirror of the server rule (the API refuses
+    // without age_confirmed too): adults only, no account otherwise.
+    $("acStatus").textContent = "Please tick the box to confirm you are 18 years or older first.";
+    $("acAge").focus();
+    return;
+  }
   $("acStatus").textContent = "Creating your account…";
   try {
     const r = await apiJson("/api/auth/register", {
       method: "POST", headers: AH,
-      body: JSON.stringify({ email, password, name, policy_accepted: true }),
+      body: JSON.stringify({ email, password, name, policy_accepted: true, age_confirmed: true }),
     });
     if (!r.ok) throw new Error(errMsg(r.data, "Could not create the account"));
     // Registration no longer signs you in: the account opens only

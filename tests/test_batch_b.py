@@ -197,7 +197,7 @@ class TestVersioningNoDb(ServerMixin, unittest.TestCase):
         # CSRF guard answering (an unnormalized path would 404).
         status, _h, body = self.request_json(
             "POST", "/api/v1/auth/register",
-            body={"email": "a@example.com", "password": "long-enough-1", "policy_accepted": True})
+            body={"email": "a@example.com", "password": "long-enough-1", "policy_accepted": True, "age_confirmed": True})
         self.assertEqual(status, 403)
         self.assertEqual(body["error"]["code"], "csrf_failed")
 
@@ -285,7 +285,7 @@ class AccountMixin:
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
             body={"email": email, "password": self.PASSWORD,
-                  "policy_accepted": True},
+                  "policy_accepted": True, "age_confirmed": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
         # Audit 2026-10-16 fixes: registration returns a uniform

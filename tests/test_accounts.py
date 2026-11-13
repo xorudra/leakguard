@@ -246,7 +246,7 @@ class TestAccountsUnavailable(ServerMixin, unittest.TestCase):
     def test_register_503_structured(self):
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            body={"email": "a@example.com", "password": "long-enough-1", "policy_accepted": True},
+            body={"email": "a@example.com", "password": "long-enough-1", "policy_accepted": True, "age_confirmed": True},
             headers=CSRF)
         self.assertEqual(status, 503)
         self.assertEqual(body["error"]["code"], "db_unavailable")
@@ -355,7 +355,7 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
         by test_email_verification_flow)."""
         email = email or self.unique_email()
         payload = {"email": email, "password": password or self.PASSWORD,
-                   "policy_accepted": True}
+                   "policy_accepted": True, "age_confirmed": True}
         if name is not None:
             payload["name"] = name
         status, headers, body = self.request_json(
@@ -462,13 +462,13 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
             body={"email": email, "password": self.PASSWORD,
-                  "policy_accepted": True},
+                  "policy_accepted": True, "age_confirmed": True},
             headers=CSRF)
         self.assertEqual(status, 201)
         self.assertEqual(body, {"ok": True})
         self.assertIsNone(self.session_cookie(headers))
         with self.assertRaises(errors.ApiError) as ctx:
-            auth_service.register(email, self.PASSWORD, None, True)
+            auth_service.register(email, self.PASSWORD, None, True, True)
         self.assertEqual(ctx.exception.code, "email_taken")
         digest = auth_service.account_email_hmac(
             auth_service.normalize_email(email))
@@ -508,14 +508,14 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
                 "POST", "/api/auth/register",
                 body={"email": email,
                       "password": "squatter-pass-123",
-                      "policy_accepted": True},
+                      "policy_accepted": True, "age_confirmed": True},
                 headers=CSRF)
             self.assertEqual(status, 201)
             status, _h, _b = self.request_json(
                 "POST", "/api/auth/register",
                 body={"email": email,
                       "password": "victim-pass-456",
-                      "policy_accepted": True},
+                      "policy_accepted": True, "age_confirmed": True},
                 headers=CSRF)
             self.assertEqual(status, 201)
         finally:
@@ -582,7 +582,7 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
             status, _h, _b = self.request_json(
                 "POST", "/api/auth/register",
                 body={"email": email, "password": pw,
-                      "policy_accepted": True},
+                      "policy_accepted": True, "age_confirmed": True},
                 headers=CSRF)
             self.assertEqual(status, 201)
 
@@ -688,7 +688,7 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
             status, _h, _b = self.request_json(
                 "POST", "/api/auth/register",
                 body={"email": email, "password": "pending-pass-123",
-                      "policy_accepted": True}, headers=CSRF)
+                      "policy_accepted": True, "age_confirmed": True}, headers=CSRF)
             self.assertEqual(status, 201)
             verify_token = self._token_from(
                 sent[-1].get("textContent", ""), "/verify?token=")
@@ -717,7 +717,7 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
                 "POST", "/api/auth/register",
                 body={"email": email,
                       "password": "replacement-pass-9",
-                      "policy_accepted": True}, headers=CSRF)
+                      "policy_accepted": True, "age_confirmed": True}, headers=CSRF)
             self.assertEqual(status, 201)
             fresh = self._token_from(
                 sent[-1].get("textContent", ""), "/verify?token=")
@@ -743,7 +743,7 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
             status, _h, _b = self.request_json(
                 "POST", "/api/auth/register",
                 body={"email": email, "password": "pending-pass-123",
-                      "policy_accepted": True}, headers=CSRF)
+                      "policy_accepted": True, "age_confirmed": True}, headers=CSRF)
             self.assertEqual(status, 201)
             token = self._token_from(
                 sent[-1].get("textContent", ""), "/verify?token=")
@@ -814,7 +814,7 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
                         "POST", "/api/auth/register",
                         body={"email": email,
                               "password": "another-pass-123",
-                              "policy_accepted": True},
+                              "policy_accepted": True, "age_confirmed": True},
                         headers=CSRF)
                     self.assertEqual(status, 201)
             # Timing discipline: every taken attempt burned a hash.
@@ -836,7 +836,7 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
                     "POST", "/api/auth/register",
                     body={"email": pending,
                           "password": "pending-pass-123",
-                          "policy_accepted": True},
+                          "policy_accepted": True, "age_confirmed": True},
                     headers=CSRF,
                     raw_headers={"X-Forwarded-For":
                                  "10.8.0.%d" % (i + 1)})
@@ -877,7 +877,7 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
             status, headers, body = self.request_json(
                 "POST", "/api/auth/register",
                 body={"email": email, "password": self.PASSWORD,
-                      "policy_accepted": True},
+                      "policy_accepted": True, "age_confirmed": True},
                 headers=CSRF)
             self.assertEqual(status, 201)
             self.assertEqual(body, {"ok": True})
@@ -892,7 +892,7 @@ class TestAccountsDb(ServerMixin, unittest.TestCase):
             status, _h, body = self.request_json(
                 "POST", "/api/auth/register",
                 body={"email": email, "password": self.PASSWORD,
-                      "policy_accepted": True},
+                      "policy_accepted": True, "age_confirmed": True},
                 headers=CSRF)
             self.assertEqual(status, 201)
         finally:

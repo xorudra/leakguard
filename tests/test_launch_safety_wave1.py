@@ -189,6 +189,7 @@ class DbServerMixin(ServerMixin):
         payload = {"email": email, "password": PASSWORD, "name": name}
         if policy:
             payload["policy_accepted"] = True
+            payload["age_confirmed"] = True
         status, headers, body = self.request_json(
             "POST", "/api/auth/register", body=payload, headers=CSRF)
         if status == 201:
@@ -237,6 +238,16 @@ class TestWave1StaticPins(unittest.TestCase):
         js = (REPO_ROOT / "static" / "app.js").read_text(encoding="utf-8")
         self.assertIn("policy_accepted: true", js)
         self.assertIn('$("acPolicy").checked', js)
+
+    def test_register_form_has_age_checkbox(self):
+        html = (REPO_ROOT / "static" / "index.html").read_text(
+            encoding="utf-8")
+        self.assertIn('id="acAge"', html)
+        self.assertIn('type="checkbox" id="acAge"', html)
+        self.assertIn("I confirm I am 18 years or older", html)
+        js = (REPO_ROOT / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("age_confirmed: true", js)
+        self.assertIn('$("acAge").checked', js)
 
     def test_signin_in_a11y_pages(self):
         import importlib.util
@@ -422,7 +433,7 @@ class TestPolicyAcceptance(DbServerMixin, unittest.TestCase):
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
             body={"email": email, "password": PASSWORD,
-                  "name": "Wave One", "policy_accepted": True},
+                  "name": "Wave One", "policy_accepted": True, "age_confirmed": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
         # Register returns no user object any more (audit
@@ -474,6 +485,50 @@ class TestPolicyAcceptance(DbServerMixin, unittest.TestCase):
         self.assertTrue(acceptance[0]["granted"])
         self.assertEqual(acceptance[0]["policy_version"],
                          consents.CURRENT_POLICY_VERSION)
+
+
+# ---------------------------------------------------------------------------
+# Age confirmation at registration (database): 18-or-older checkbox,
+# enforced server-side on the same terms as the F26 agreement.
+# ---------------------------------------------------------------------------
+
+class TestAgeConfirmation(DbServerMixin, unittest.TestCase):
+    def test_register_without_age_confirmation_refused(self):
+        email = "wave1-age-%s@example.com" % uuid.uuid4().hex[:16]
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/register",
+            body={"email": email, "password": PASSWORD,
+                  "name": "Wave One", "policy_accepted": True},
+            headers=CSRF)
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"],
+                         "age_confirmation_required")
+        # No account was created: the same address registers fine
+        # once the confirmation is given.
+        status, headers, body = self.request_json(
+            "POST", "/api/auth/register",
+            body={"email": email, "password": PASSWORD,
+                  "name": "Wave One", "policy_accepted": True,
+                  "age_confirmed": True},
+            headers=CSRF)
+        self.assertEqual(status, 201, body)
+        from accounts import auth as auth_service
+        digest = auth_service.account_email_hmac(
+            auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                "SELECT id FROM users WHERE email_hmac = %s"
+                " AND deleted_at IS NULL", (digest,)).fetchone()
+        self.user_ids.append(str(row["id"]))
+
+    def test_service_layer_refuses_without_age_confirmation(self):
+        from accounts import auth
+        from core import errors
+        with self.assertRaises(errors.ApiError) as ctx:
+            auth.register("wave1-age-svc-%s@example.com"
+                          % uuid.uuid4().hex[:12], PASSWORD,
+                          policy_accepted=True)
+        self.assertEqual(ctx.exception.code, "age_confirmation_required")
 
 
 # ---------------------------------------------------------------------------

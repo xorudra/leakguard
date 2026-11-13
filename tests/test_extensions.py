@@ -167,7 +167,7 @@ class TestServingAndPwaFiles(ServerMixin, unittest.TestCase):
             status, headers, payload = self.request("GET", path)
             self.assertEqual(status, 200, path)
             self.assertIn("javascript", headers.get("Content-Type"))
-            self.assertIn(b"leakguard-shell-v5", payload)
+            self.assertIn(b"leakguard-shell-v6", payload)
 
     def test_icons_served_as_png(self):
         for name in ("icon-192.png", "icon-512.png"):
@@ -197,7 +197,7 @@ class TestServingAndPwaFiles(ServerMixin, unittest.TestCase):
     def test_service_worker_rules(self):
         sw = (STATIC / "sw.js").read_text("utf-8")
         # Versioned cache name + the shell it may cache.
-        self.assertIn('"leakguard-shell-v5"', sw)
+        self.assertIn('"leakguard-shell-v6"', sw)
         for shell_path in ("/", "/static/style.css", "/static/app.js",
                            "/static/manifest.webmanifest",
                            "/static/icons/icon-192.png",
@@ -394,7 +394,7 @@ class TestGraphDb(ServerMixin, unittest.TestCase):
         email = "graph-%s@example.com" % self.uniq()
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            body={"email": email, "password": self.PASSWORD, "policy_accepted": True},
+            body={"email": email, "password": self.PASSWORD, "policy_accepted": True, "age_confirmed": True},
             headers=CSRF)
         self.assertEqual(status, 201, body)
         # Audit 2026-10-16 fixes: registration returns a uniform

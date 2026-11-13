@@ -365,7 +365,7 @@ class TestRouteLimitsDb(PgMixin, ServerMixin, unittest.TestCase):
         self._last_register_email = email
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            body={"email": email, "password": self.PASSWORD, "policy_accepted": True}, headers=CSRF)
+            body={"email": email, "password": self.PASSWORD, "policy_accepted": True, "age_confirmed": True}, headers=CSRF)
         return status, headers, body
 
     def test_register_ip_cap(self):

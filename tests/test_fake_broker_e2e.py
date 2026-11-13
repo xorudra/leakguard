@@ -325,7 +325,7 @@ class TestFakeBrokerWorkflowDb(ServerMixin, unittest.TestCase):
             tag, self._run_tag[:4])
         status, headers, body = self.request_json(
             "POST", "/api/auth/register",
-            {"email": email, "password": PASSWORD, "policy_accepted": True})
+            {"email": email, "password": PASSWORD, "policy_accepted": True, "age_confirmed": True})
         self.assertEqual(status, 201)
         # Audit 2026-10-16: register returns no user/session —
         # verify the address in the DB, then log in.

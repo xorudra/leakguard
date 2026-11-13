@@ -951,7 +951,8 @@ class Handler(BaseHTTPRequestHandler):
                     self._call(
                         auth_service.register,
                         payload.get("email"), payload.get("password"),
-                        payload.get("name"), payload.get("policy_accepted"))
+                        payload.get("name"), payload.get("policy_accepted"),
+                        payload.get("age_confirmed"))
             except errors.ApiError as exc:
                 if exc.code != "email_taken":
                     raise

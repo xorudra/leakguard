@@ -156,7 +156,8 @@ def _validate_name(name):
     return cleaned
 
 
-def register(email, password, name=None, policy_accepted=False):
+def register(email, password, name=None, policy_accepted=False,
+             age_confirmed=False):
     """Create an UNVERIFIED account + consent defaults, and mail a
     verification link. Returns ({"pending_verification": True},
     None) — deliberately NOT a session (audit 2026-10-16,
@@ -173,7 +174,14 @@ def register(email, password, name=None, policy_accepted=False):
     recorded in the consent ledger (accounts/consents.py) inside
     the same transaction as the account. Internal/test callers
     that create accounts directly pass policy_accepted=True to
-    state the agreement on the caller's behalf."""
+    state the agreement on the caller's behalf.
+
+    age_confirmed is the matching 18-or-older confirmation
+    (DPDP: a child's data needs a parent or guardian's consent,
+    so LeakGuard registers adults only): the web sign-up requires
+    the "I confirm I am 18 years or older" checkbox and this
+    service refuses without it, on the same terms as
+    policy_accepted."""
     normalized = normalize_email(email)
     if not EMAIL_RE.match(normalized):
         raise errors.bad_request("invalid_email", "Enter a valid email address")
@@ -183,6 +191,11 @@ def register(email, password, name=None, policy_accepted=False):
         raise errors.bad_request(
             "policy_acceptance_required",
             "Please agree to the Privacy Policy and Terms to create"
+            " an account")
+    if age_confirmed is not True:
+        raise errors.bad_request(
+            "age_confirmation_required",
+            "Please confirm you are 18 years or older to create"
             " an account")
     digest = account_email_hmac(normalized)
     from accounts import consents

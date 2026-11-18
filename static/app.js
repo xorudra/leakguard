@@ -1681,35 +1681,44 @@ async function loadAdmin() {
       const labels = { scanning: "Scanning", monitoring: "Monitoring",
         automated_remediation: "Removals",
         notifications: "Notifications" };
+      const line = (label, value) => {
+        const l = document.createElement("div");
+        l.className = "srLine";
+        const k = document.createElement("span");
+        k.className = "srLabel";
+        k.textContent = label;
+        l.appendChild(k);
+        if (typeof value === "string") {
+          const v = document.createElement("span");
+          v.className = "srValue";
+          v.textContent = value;
+          l.appendChild(v);
+        } else {
+          l.appendChild(value);
+        }
+        return l;
+      };
       c.data.consents.forEach((rec) => {
         const row = document.createElement("div");
         row.className = "softRow";
         const em = document.createElement("div");
         em.className = "srEmail";
         em.textContent = rec.email;
-        const meta = document.createElement("div");
-        meta.className = "srMeta";
-        const bits = [];
-        bits.push(rec.policy
-          ? "Policy " + (rec.policy.policy_version || "")
-            + " agreed " + new Date(rec.policy.at).toLocaleString()
-          : "Policy not recorded");
-        bits.push(rec.age_confirmation
-          ? "18+ confirmed "
-            + new Date(rec.age_confirmation.at).toLocaleString()
-          : "18+ not recorded");
-        meta.textContent = bits.join(" · ");
-        const pills = document.createElement("div");
-        pills.className = "srPills";
+        row.appendChild(em);
+        row.appendChild(line("Policy agreed", rec.policy
+          ? (rec.policy.policy_version || "") + " · "
+            + new Date(rec.policy.at).toLocaleString()
+          : "Not recorded"));
+        row.appendChild(line("18+ confirmed", rec.age_confirmation
+          ? new Date(rec.age_confirmation.at).toLocaleString()
+          : "Not recorded"));
         Object.keys(labels).forEach((p) => {
           const pill = document.createElement("span");
           const on = !!(rec.consents && rec.consents[p]);
           pill.className = "softPill " + (on ? "on" : "off");
-          pill.textContent = labels[p] + (on ? " On" : " Off");
-          pills.appendChild(pill);
+          pill.textContent = on ? "On" : "Off";
+          row.appendChild(line(labels[p], pill));
         });
-        row.appendChild(em); row.appendChild(meta);
-        row.appendChild(pills);
         cn.appendChild(row);
       });
     } else {

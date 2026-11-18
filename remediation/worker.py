@@ -40,6 +40,7 @@ values, never user data.
 """
 
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from core import logging_setup
@@ -49,10 +50,41 @@ from remediation import engine
 POLL_SECONDS = 2.0
 STALE_RUNNING_MINUTES = 10
 MAX_CONCURRENT = 5
+# Idle polling (owner order 2026-11-18): with an empty queue the
+# top-up below used to launch a fresh round of drainers every
+# POLL_SECONDS, each making a claim query, which kept the Neon
+# compute awake around the clock and burned the free monthly
+# compute allowance by mid-month (110 of 100 CU-hrs, project
+# paused 2026-11-17). A round that finds no work now waits
+# IDLE_POLL_SECONDS before the next round; every in-process
+# enqueue path calls wake(), so real work still starts at once
+# and the long wait is only a safety net. A round whose claims
+# failed retries on ERROR_RETRY_SECONDS instead, so a short
+# database blip still recovers within a minute.
+IDLE_POLL_SECONDS = 1800.0
+ERROR_RETRY_SECONDS = 60.0
 
 _thread = None
 _thread_lock = threading.Lock()
 _stop = threading.Event()
+_wake = threading.Event()
+
+
+def wake():
+    """Ask the worker to poll now (new work was just enqueued)."""
+    _wake.set()
+
+
+def _idle_wait():
+    """Wait up to IDLE_POLL_SECONDS, returning at once on wake()
+    or stop. The wait is sliced so shutdown stays responsive."""
+    deadline = time.monotonic() + IDLE_POLL_SECONDS
+    while not _stop.is_set() and not _wake.is_set():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        _stop.wait(min(POLL_SECONDS, remaining))
+    _wake.clear()
 
 
 def _log(message):
@@ -132,10 +164,15 @@ def run_once(executor=None):
 def _drain(executor):
     """Claim and process cases until the queue is empty (or a stop
     is signalled). Runs on a pool thread; the SKIP LOCKED claim means
-    concurrent drainers can never take the same case."""
+    concurrent drainers can never take the same case. Returns True
+    when at least one case was claimed, so the loop can tell a
+    worked round from an empty one."""
+    worked = False
     while not _stop.is_set():
         if not run_once(executor):
-            return
+            return worked
+        worked = True
+    return worked
 
 
 def _loop(executor=None):
@@ -149,6 +186,12 @@ def _loop(executor=None):
     with ThreadPoolExecutor(max_workers=MAX_CONCURRENT,
                             thread_name_prefix="leakguard-remediation") as pool:
         futures = set()
+        # The first pass tops up immediately (round_worked starts
+        # True); after that, a completed round with no work and no
+        # error means the queue is empty and the next round waits
+        # out the idle poll instead of re-claiming every 2 seconds.
+        round_worked = True
+        round_error = False
         while not _stop.is_set():
             # Reap finished drainers. A drainer raises only when the
             # claim itself failed (e.g. database down) — run_once
@@ -159,12 +202,23 @@ def _loop(executor=None):
                     futures.discard(fut)
                     exc = fut.exception()
                     if exc is not None:
+                        round_error = True
                         logging_setup.log_error(
                             None, "remediation worker cycle failed: "
                             + type(exc).__name__)
+                    elif fut.result():
+                        round_worked = True
+            if futures:
+                _stop.wait(POLL_SECONDS)
+                continue
+            if round_error:
+                _stop.wait(ERROR_RETRY_SECONDS)
+            elif not round_worked:
+                _idle_wait()
+            round_worked = False
+            round_error = False
             while len(futures) < MAX_CONCURRENT:
                 futures.add(pool.submit(_drain, executor))
-            _stop.wait(POLL_SECONDS)
     # Leaving the with-block waits for the pool: drainers check _stop
     # between cases, so each finishes its in-flight case and exits.
 

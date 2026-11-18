@@ -153,6 +153,10 @@ def create_job(user_id, idempotency_key):
             job = {"id": str(row["id"]), "status": row["status"]}
             audit.record(user_id, "user", "scan.job_created",
                          "scan_job", job["id"], {"source": "manual"})
+            # New work: start the worker now instead of leaving it
+            # to the idle poll (2026-11-18).
+            from scanning import worker as scan_worker
+            scan_worker.wake()
             return job, True
         row = conn.execute(
             "SELECT id, status FROM scan_jobs"

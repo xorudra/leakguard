@@ -29,6 +29,7 @@ never user data.
 """
 
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 from core import logging_setup
@@ -39,10 +40,40 @@ POLL_SECONDS = 2.0
 MAX_ATTEMPTS = 3
 BACKOFF_SECONDS = (30, 120)
 STALE_RUNNING_MINUTES = 10
+# Idle polling (owner order 2026-11-18): with an empty queue this
+# worker used to re-query every POLL_SECONDS, which kept the Neon
+# compute awake around the clock and burned the free monthly
+# compute allowance by mid-month (110 of 100 CU-hrs, project
+# paused 2026-11-17). An empty queue now waits IDLE_POLL_SECONDS
+# between checks; every in-process enqueue path calls wake(), so
+# real work still starts at once and the long wait is only the
+# safety net for work that arrives without a wake. A failed cycle
+# retries on ERROR_RETRY_SECONDS instead, so a short database
+# blip still recovers within a minute.
+IDLE_POLL_SECONDS = 1800.0
+ERROR_RETRY_SECONDS = 60.0
 
 _thread = None
 _thread_lock = threading.Lock()
 _stop = threading.Event()
+_wake = threading.Event()
+
+
+def wake():
+    """Ask the worker to poll now (new work was just enqueued)."""
+    _wake.set()
+
+
+def _idle_wait():
+    """Wait up to IDLE_POLL_SECONDS, returning at once on wake()
+    or stop. The wait is sliced so shutdown stays responsive."""
+    deadline = time.monotonic() + IDLE_POLL_SECONDS
+    while not _stop.is_set() and not _wake.is_set():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        _stop.wait(min(POLL_SECONDS, remaining))
+    _wake.clear()
 
 
 def _log(message):
@@ -194,12 +225,16 @@ def _loop():
     while not _stop.is_set():
         try:
             worked = run_once()
+            failed = False
         except Exception as exc:
             logging_setup.log_error(None, "scan worker cycle failed: "
                                     + type(exc).__name__)
             worked = False
-        if not worked:
-            _stop.wait(POLL_SECONDS)
+            failed = True
+        if failed:
+            _stop.wait(ERROR_RETRY_SECONDS)
+        elif not worked:
+            _idle_wait()
 
 
 def start_worker():

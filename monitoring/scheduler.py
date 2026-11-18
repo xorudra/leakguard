@@ -131,6 +131,10 @@ def tick(now=None):
                          "scan_job", row["id"], {"source": "monitor"})
     if created:
         _log("monitoring_scheduler enqueued=%d" % len(created))
+        # New work: start the scan worker now instead of leaving
+        # it to the idle poll (2026-11-18).
+        from scanning import worker as scan_worker
+        scan_worker.wake()
     # Phase 77: engineering alerts ride the tick, after its real
     # work and behind the same flag (the early return above already
     # honored it). Guarded hard — an alerts failure must never

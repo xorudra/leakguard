@@ -108,6 +108,11 @@ def create_cases_for_user(user_id):
     for case_id in created_ids:
         records.removal_snapshot(case_id)
     by_status = {row["status"]: int(row["n"]) for row in rows}
+    if created:
+        # New work: start the worker now instead of leaving it to
+        # the idle poll (2026-11-18).
+        from remediation import worker as remediation_worker
+        remediation_worker.wake()
     return {
         "cases_created": created,
         "cases_total": sum(by_status.values()),
@@ -300,4 +305,8 @@ def retry_case(user_id, case_id):
     from core import records
 
     records.removal_snapshot(case_id)
+    # The case is queued again: start the worker now instead of
+    # leaving it to the idle poll (2026-11-18).
+    from remediation import worker as remediation_worker
+    remediation_worker.wake()
     return public_case(_case_row(user_id, case_id))

@@ -220,12 +220,13 @@ footer a{color:var(--muted)}
 .policyTable{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px}
 .policyTable th,.policyTable td{border:1px solid var(--line);padding:9px 10px;text-align:left;vertical-align:top}
 .policyTable th{background:var(--surface2)}
-/* Consent records table (owner order 2026-11-18): the soft form —
-   rounded shell, no hard grid, quiet row dividers, pill states. */
-.softTable{width:100%;border-collapse:separate;border-spacing:0;background:var(--surface2);border-radius:14px;overflow:hidden;font-size:14px;margin:12px 0}
-.softTable th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;text-align:left;padding:12px 14px;border-bottom:1px solid var(--line)}
-.softTable td{padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
-.softTable tr:last-child td{border-bottom:none}
+/* Consent records (owner order 2026-11-18): rows only, no
+   columns — one soft rounded row per account, category states
+   as named pills. */
+.softRow{background:var(--surface2);border-radius:14px;padding:14px 16px;margin:10px 0}
+.softRow .srEmail{font-weight:700}
+.softRow .srMeta{color:var(--muted);font-size:13px;margin-top:4px}
+.softRow .srPills{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
 .softPill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12.5px;font-weight:700}
 .softPill.on{background:rgba(30,215,96,.15);color:var(--green)}
 .softPill.off{background:var(--elev);color:var(--muted)}
@@ -261,8 +262,7 @@ html{scrollbar-width:thin;scrollbar-color:#4d4d4d var(--bg)}
      cells + anywhere-wrapping lets it fit small phones. */
   .policyTable{font-size:13px}
   .policyTable th,.policyTable td{padding:7px 6px;overflow-wrap:anywhere}
-  .softTable{font-size:13px}
-  .softTable th,.softTable td{padding:9px 8px;overflow-wrap:anywhere}
+  .softRow{padding:12px}
 }
 @media (prefers-reduced-motion:reduce){
   *{transition:none!important;animation:none!important;scroll-behavior:auto!important}

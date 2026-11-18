@@ -1678,47 +1678,40 @@ async function loadAdmin() {
     const c = await apiJson("/api/admin/consents?limit=50");
     cn.innerHTML = "";
     if (c.ok && c.data.consents && c.data.consents.length) {
-      const table = document.createElement("table");
-      table.className = "softTable";
-      const head = document.createElement("tr");
-      ["Email", "Policy agreed", "18+ confirmed", "Scanning",
-       "Monitoring", "Removals", "Notifications"].forEach((h) => {
-        const th = document.createElement("th");
-        th.scope = "col";
-        th.textContent = h;
-        head.appendChild(th);
-      });
-      table.appendChild(head);
+      const labels = { scanning: "Scanning", monitoring: "Monitoring",
+        automated_remediation: "Removals",
+        notifications: "Notifications" };
       c.data.consents.forEach((rec) => {
-        const tr = document.createElement("tr");
-        const cells = [
-          rec.email,
-          rec.policy
-            ? (rec.policy.policy_version || "") + " · "
-              + new Date(rec.policy.at).toLocaleString()
-            : "Not recorded",
-          rec.age_confirmation
-            ? new Date(rec.age_confirmation.at).toLocaleString()
-            : "Not recorded",
-        ];
-        cells.forEach((text) => {
-          const td = document.createElement("td");
-          td.textContent = text;
-          tr.appendChild(td);
-        });
-        ["scanning", "monitoring", "automated_remediation",
-         "notifications"].forEach((p) => {
-          const td = document.createElement("td");
+        const row = document.createElement("div");
+        row.className = "softRow";
+        const em = document.createElement("div");
+        em.className = "srEmail";
+        em.textContent = rec.email;
+        const meta = document.createElement("div");
+        meta.className = "srMeta";
+        const bits = [];
+        bits.push(rec.policy
+          ? "Policy " + (rec.policy.policy_version || "")
+            + " agreed " + new Date(rec.policy.at).toLocaleString()
+          : "Policy not recorded");
+        bits.push(rec.age_confirmation
+          ? "18+ confirmed "
+            + new Date(rec.age_confirmation.at).toLocaleString()
+          : "18+ not recorded");
+        meta.textContent = bits.join(" · ");
+        const pills = document.createElement("div");
+        pills.className = "srPills";
+        Object.keys(labels).forEach((p) => {
           const pill = document.createElement("span");
           const on = !!(rec.consents && rec.consents[p]);
           pill.className = "softPill " + (on ? "on" : "off");
-          pill.textContent = on ? "On" : "Off";
-          td.appendChild(pill);
-          tr.appendChild(td);
+          pill.textContent = labels[p] + (on ? " On" : " Off");
+          pills.appendChild(pill);
         });
-        table.appendChild(tr);
+        row.appendChild(em); row.appendChild(meta);
+        row.appendChild(pills);
+        cn.appendChild(row);
       });
-      cn.appendChild(table);
     } else {
       cn.innerHTML = "<p class='hint'>No accounts yet.</p>";
     }

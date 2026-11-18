@@ -1678,29 +1678,41 @@ async function loadAdmin() {
     const c = await apiJson("/api/admin/consents?limit=50");
     cn.innerHTML = "";
     if (c.ok && c.data.consents && c.data.consents.length) {
-      c.data.consents.forEach((rec) => {
-        const row = document.createElement("div");
-        row.className = "idRow";
-        const l = document.createElement("span");
-        l.className = "idVal";
-        l.textContent = rec.email_masked;
-        const det = document.createElement("span");
-        det.className = "hint";
-        const bits = [];
-        bits.push(rec.policy
-          ? "Policy " + (rec.policy.policy_version || "")
-            + " agreed " + new Date(rec.policy.at).toLocaleString()
-          : "Policy not recorded");
-        bits.push(rec.age_confirmation
-          ? "18+ confirmed " + new Date(rec.age_confirmation.at).toLocaleString()
-          : "18+ not recorded");
-        const on = Object.keys(rec.consents || {})
-          .filter((k) => rec.consents[k]);
-        bits.push("On: " + (on.length ? on.join(", ") : "none"));
-        det.textContent = bits.join(" · ");
-        row.appendChild(l); row.appendChild(det);
-        cn.appendChild(row);
+      const table = document.createElement("table");
+      table.className = "policyTable";
+      const head = document.createElement("tr");
+      ["Email", "Policy agreed", "18+ confirmed", "Scanning",
+       "Monitoring", "Removals", "Notifications"].forEach((h) => {
+        const th = document.createElement("th");
+        th.scope = "col";
+        th.textContent = h;
+        head.appendChild(th);
       });
+      table.appendChild(head);
+      c.data.consents.forEach((rec) => {
+        const tr = document.createElement("tr");
+        const cells = [
+          rec.email,
+          rec.policy
+            ? (rec.policy.policy_version || "") + " · "
+              + new Date(rec.policy.at).toLocaleString()
+            : "Not recorded",
+          rec.age_confirmation
+            ? new Date(rec.age_confirmation.at).toLocaleString()
+            : "Not recorded",
+        ];
+        ["scanning", "monitoring", "automated_remediation",
+         "notifications"].forEach((p) => {
+          cells.push(rec.consents && rec.consents[p] ? "On" : "Off");
+        });
+        cells.forEach((text) => {
+          const td = document.createElement("td");
+          td.textContent = text;
+          tr.appendChild(td);
+        });
+        table.appendChild(tr);
+      });
+      cn.appendChild(table);
     } else {
       cn.innerHTML = "<p class='hint'>No accounts yet.</p>";
     }

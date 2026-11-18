@@ -21,12 +21,14 @@ leaves it. Non-admins cannot even tell the routes exist — the
 handlers answer 404, not 403.
 
 One deliberate exception, ordered by the owner 2026-11-18:
-consent_records() returns per-user CONSENT facts only — the masked
-email, what was agreed (policy edition, the 18-or-older
-confirmation), when, and the current purpose switches. That is the
-record the DPDP consent proof requires the owner to be able to
-show. It still never returns a full address, an identifier, a
-finding or a letter.
+consent_records() returns per-user CONSENT facts only — the
+account email (decrypted in memory for the owner only, never
+logged; the owner reviewed the masked form and ordered the full
+address shown), what was agreed (policy edition, the 18-or-older
+confirmation), when, and the current purpose switches. That is
+the record the DPDP consent proof requires the owner to be able
+to show. It still never returns an identifier, a finding or a
+letter.
 """
 
 import os
@@ -582,11 +584,13 @@ def list_audit(admin_user_id, limit=100):
 
 def consent_records(admin_user_id, limit=100):
     """The owner's consent records (owner order 2026-11-18): one row
-    per live account, newest first — masked email, the registration
-    agreements (policy edition + when; the 18-or-older confirmation
-    + when, or None where no record exists — accounts older than
-    the recording are shown honestly as not recorded, never
-    backfilled), and the current state of the four purpose
+    per live account, newest first — the account email (revealed
+    for the owner only; a row the vault key cannot read falls back
+    to its masked form rather than breaking the whole view), the
+    registration agreements (policy edition + when; the 18-or-older
+    confirmation + when, or None where no record exists — accounts
+    older than the recording are shown honestly as not recorded,
+    never backfilled), and the current state of the four purpose
     switches. Consent facts only, per the module docstring's
     exception; the view itself is audit-recorded like every other
     admin read."""
@@ -597,7 +601,8 @@ def consent_records(admin_user_id, limit=100):
     limit = max(1, min(limit, 500))
     with db_pool.connection() as conn:
         users = conn.execute(
-            "SELECT id, email_masked, created_at FROM users"
+            "SELECT id, email_ciphertext, email_masked, created_at"
+            " FROM users"
             " WHERE deleted_at IS NULL"
             " ORDER BY created_at DESC LIMIT %s",
             (limit,),
@@ -619,8 +624,12 @@ def consent_records(admin_user_id, limit=100):
         by_purpose = latest.get(str(user["id"]), {})
         policy = by_purpose.get(consents_service.POLICY_PURPOSE)
         age = by_purpose.get(consents_service.AGE_PURPOSE)
+        try:
+            email = auth_service.reveal_email(user)
+        except Exception:
+            email = user["email_masked"]
         records.append({
-            "email_masked": user["email_masked"],
+            "email": email,
             "registered_at": _iso(user["created_at"]),
             "policy": ({
                 "granted": bool(policy["granted"]),

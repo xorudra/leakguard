@@ -598,9 +598,10 @@ class Handler(BaseHTTPRequestHandler):
             })
         if route == "/api/admin/consents":
             # The owner's consent records (2026-11-18): who agreed
-            # to the policy and confirmed 18+, and when — masked
-            # emails only, same owner-only 404 gate as every admin
-            # route. See accounts/admin.py's privacy contract.
+            # to the policy and confirmed 18+, and when — full
+            # emails for the owner (his order), same owner-only
+            # 404 gate as every admin route. See
+            # accounts/admin.py's privacy contract.
             admin = self._require_admin()
             query = urllib.parse.parse_qs(parsed.query)
             limit = query.get("limit", [None])[0]

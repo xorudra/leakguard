@@ -1679,7 +1679,7 @@ async function loadAdmin() {
     cn.innerHTML = "";
     if (c.ok && c.data.consents && c.data.consents.length) {
       const table = document.createElement("table");
-      table.className = "policyTable";
+      table.className = "softTable";
       const head = document.createElement("tr");
       ["Email", "Policy agreed", "18+ confirmed", "Scanning",
        "Monitoring", "Removals", "Notifications"].forEach((h) => {
@@ -1701,13 +1701,19 @@ async function loadAdmin() {
             ? new Date(rec.age_confirmation.at).toLocaleString()
             : "Not recorded",
         ];
-        ["scanning", "monitoring", "automated_remediation",
-         "notifications"].forEach((p) => {
-          cells.push(rec.consents && rec.consents[p] ? "On" : "Off");
-        });
         cells.forEach((text) => {
           const td = document.createElement("td");
           td.textContent = text;
+          tr.appendChild(td);
+        });
+        ["scanning", "monitoring", "automated_remediation",
+         "notifications"].forEach((p) => {
+          const td = document.createElement("td");
+          const pill = document.createElement("span");
+          const on = !!(rec.consents && rec.consents[p]);
+          pill.className = "softPill " + (on ? "on" : "off");
+          pill.textContent = on ? "On" : "Off";
+          td.appendChild(pill);
           tr.appendChild(td);
         });
         table.appendChild(tr);

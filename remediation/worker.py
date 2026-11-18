@@ -71,6 +71,10 @@ def requeue_stale():
             " RETURNING id",
             (str(STALE_RUNNING_MINUTES),),
         ).fetchall()
+    from core import records
+
+    for row in rows:
+        records.removal_snapshot(row["id"])
     return len(rows)
 
 

@@ -461,5 +461,8 @@ def run_scan_job(job_id):
             " error_kind = NULL, finished_at = now() WHERE id = %s",
             (score, json.dumps(explanation), json.dumps(summary), job_id),
         )
+    from core import records
+
+    records.scan_snapshot(job_id)
     return {"job_id": str(job_id), "score": score,
             "findings": len(all_findings), "degraded": degraded}

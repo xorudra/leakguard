@@ -47,6 +47,7 @@ def _clean_detail(detail):
 def record(actor_user_id, actor_kind, action, target_kind=None,
            target_id=None, detail=None):
     """Append one audit row. Never raises."""
+    cleaned = _clean_detail(detail)
     try:
         with pool.connection() as conn:
             conn.execute(
@@ -60,9 +61,18 @@ def record(actor_user_id, actor_kind, action, target_kind=None,
                     str(action)[:80],
                     target_kind,
                     str(target_id) if target_id is not None else None,
-                    json.dumps(_clean_detail(detail)),
+                    json.dumps(cleaned),
                 ),
             )
     except Exception as exc:  # the audit trail must never break a flow
         logging_setup.log_error(
             None, "audit record failed: " + type(exc).__name__)
+        return
+    # Records queue (2026-11-18): every audit row is also a Drive
+    # record. audit_event never raises, and this runs only after
+    # the row itself is committed.
+    from core import records
+
+    records.audit_event(
+        actor_user_id, actor_kind, str(action)[:80], target_kind,
+        str(target_id) if target_id is not None else None, cleaned)

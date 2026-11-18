@@ -125,6 +125,9 @@ def _record_failure(job_id, attempts_before, exc):
                 (attempts, error_kind, next_at, job_id),
             )
             outcome = "failed"
+    from core import records
+
+    records.scan_snapshot(job_id)
     _log("scan_worker job=%s outcome=%s attempts=%d kind=%s"
          % (job_id, outcome, attempts, error_kind))
 
@@ -140,6 +143,9 @@ def _mark_cancelled(job_id, reason):
             " finished_at = now() WHERE id = %s",
             (reason, job_id),
         )
+    from core import records
+
+    records.scan_snapshot(job_id)
     _log("scan_worker job=%s outcome=cancelled kind=%s"
          % (job_id, reason))
 

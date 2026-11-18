@@ -1674,6 +1674,36 @@ async function loadAdmin() {
       row.appendChild(l); row.appendChild(v);
       ov.appendChild(row);
     });
+    const cn = $("adminConsents");
+    const c = await apiJson("/api/admin/consents?limit=50");
+    cn.innerHTML = "";
+    if (c.ok && c.data.consents && c.data.consents.length) {
+      c.data.consents.forEach((rec) => {
+        const row = document.createElement("div");
+        row.className = "idRow";
+        const l = document.createElement("span");
+        l.className = "idVal";
+        l.textContent = rec.email_masked;
+        const det = document.createElement("span");
+        det.className = "hint";
+        const bits = [];
+        bits.push(rec.policy
+          ? "Policy " + (rec.policy.policy_version || "")
+            + " agreed " + new Date(rec.policy.at).toLocaleString()
+          : "Policy not recorded");
+        bits.push(rec.age_confirmation
+          ? "18+ confirmed " + new Date(rec.age_confirmation.at).toLocaleString()
+          : "18+ not recorded");
+        const on = Object.keys(rec.consents || {})
+          .filter((k) => rec.consents[k]);
+        bits.push("On: " + (on.length ? on.join(", ") : "none"));
+        det.textContent = bits.join(" · ");
+        row.appendChild(l); row.appendChild(det);
+        cn.appendChild(row);
+      });
+    } else {
+      cn.innerHTML = "<p class='hint'>No accounts yet.</p>";
+    }
     const a = await apiJson("/api/admin/audit?limit=25");
     au.innerHTML = "";
     if (a.ok && a.data.audit && a.data.audit.length) {

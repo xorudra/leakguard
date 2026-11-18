@@ -234,11 +234,25 @@ def register(email, password, name=None, policy_accepted=False,
                 ).fetchone()
                 consents.seed_defaults(conn, row["id"])
                 consents.record_policy_acceptance(conn, row["id"])
+                consents.record_age_confirmation(conn, row["id"])
     except Exception as exc:
         if type(exc).__name__ == "UniqueViolation":
             row = None  # lost a registration race: the taken path
         else:
             raise
+    if row is not None:
+        # Records queue (2026-11-18): the two registration
+        # agreements are Drive consent records, copied by the sync.
+        # Masked email only; appends never raise.
+        from core import records
+
+        records.consent_event(
+            row["id"], consents.POLICY_PURPOSE, True,
+            policy_version=consents.CURRENT_POLICY_VERSION,
+            event="registered")
+        records.consent_event(
+            row["id"], consents.AGE_PURPOSE, True,
+            event="registered")
     if row is None:
         # The address already has a live account. The ROUTE answers
         # this exactly like a fresh registration (audit 2026-10-16,

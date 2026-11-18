@@ -771,5 +771,59 @@ class TestAdminDb(OrgsDbBase, unittest.TestCase):
         self.assertIn("admin.audit_viewed", actions)
 
 
+class TestAdminConsentsDb(OrgsDbBase, unittest.TestCase):
+    """The owner's consent records view (2026-11-18): who agreed to
+    the policy and confirmed 18+, and when — masked emails only."""
+
+    def test_consents_gate_and_records(self):
+        admin_cookie, _auid, admin_email = self.register()
+        user_cookie, user_id, user_email = self.register()
+        # The regular user flips one purpose switch on.
+        self.set_consent(user_cookie, "monitoring", True)
+        # Simulate a pre-recording account: drop its age row. The
+        # view must show it as not recorded, never backfilled.
+        legacy_cookie, legacy_id, legacy_email = self.register()
+        with self.pool.connection() as conn:
+            conn.execute(
+                "DELETE FROM consents WHERE user_id = %s"
+                " AND purpose = 'age_confirmation'", (legacy_id,))
+        # Gate: signed-in non-admin and anonymous both get 404.
+        for ck in (user_cookie, None):
+            status, _h, _b = self.request_json(
+                "GET", "/api/admin/consents", cookie=ck)
+            self.assertEqual(status, 404, ck)
+        os.environ["ADMIN_EMAILS"] = admin_email
+        status, _h, body = self.request_json(
+            "GET", "/api/admin/consents", cookie=admin_cookie)
+        self.assertEqual(status, 200, body)
+        # Consent facts only: full addresses never appear.
+        blob = json.dumps(body)
+        self.assertNotIn(user_email, blob)
+        self.assertNotIn(legacy_email, blob)
+        user_rec = next(
+            rec for rec in body["consents"]
+            if rec["policy"] and rec["age_confirmation"])
+        self.assertTrue(user_rec["policy"]["granted"])
+        self.assertEqual(user_rec["policy"]["policy_version"],
+                         "2026-10-07")
+        self.assertIsNotNone(user_rec["policy"]["at"])
+        self.assertTrue(user_rec["age_confirmation"]["granted"])
+        self.assertIsNotNone(user_rec["age_confirmation"]["at"])
+        # Exactly one record carries the monitoring switch on.
+        monitoring_on = [rec for rec in body["consents"]
+                         if rec["consents"]["monitoring"]]
+        self.assertEqual(len(monitoring_on), 1)
+        self.assertFalse(monitoring_on[0]["consents"]["scanning"])
+        # The legacy account: policy present, age honestly absent.
+        legacy_recs = [rec for rec in body["consents"]
+                       if rec["policy"] and not rec["age_confirmation"]]
+        self.assertEqual(len(legacy_recs), 1)
+        # The view itself is audit-recorded.
+        status, _h, body = self.request_json(
+            "GET", "/api/admin/audit?limit=500", cookie=admin_cookie)
+        actions = [row["action"] for row in body["audit"]]
+        self.assertIn("admin.consents_viewed", actions)
+
+
 if __name__ == "__main__":
     unittest.main()

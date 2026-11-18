@@ -80,6 +80,7 @@ def create_cases_for_user(user_id):
     {cases_created, cases_total, by_status} over ALL the user's
     cases (closed history included in the counts)."""
     created = 0
+    created_ids = []
     with pool.connection() as conn:
         brokers = conn.execute(
             "SELECT slug FROM brokers WHERE active = true"
@@ -96,11 +97,16 @@ def create_cases_for_user(user_id):
             ).fetchone()
             if row is not None:
                 created += 1
+                created_ids.append(row["id"])
         rows = conn.execute(
             "SELECT status, COUNT(*) AS n FROM remediation_cases"
             " WHERE user_id = %s GROUP BY status",
             (user_id,),
         ).fetchall()
+    from core import records
+
+    for case_id in created_ids:
+        records.removal_snapshot(case_id)
     by_status = {row["status"]: int(row["n"]) for row in rows}
     return {
         "cases_created": created,
@@ -291,4 +297,7 @@ def retry_case(user_id, case_id):
             " reason = NULL, updated_at = now() WHERE id = %s",
             (case_id,),
         )
+    from core import records
+
+    records.removal_snapshot(case_id)
     return public_case(_case_row(user_id, case_id))

@@ -19,6 +19,14 @@ Never another user's identifiers, emails, findings or letters: this
 module's queries count rows and group them; no per-user row ever
 leaves it. Non-admins cannot even tell the routes exist — the
 handlers answer 404, not 403.
+
+One deliberate exception, ordered by the owner 2026-11-18:
+consent_records() returns per-user CONSENT facts only — the masked
+email, what was agreed (policy edition, the 18-or-older
+confirmation), when, and the current purpose switches. That is the
+record the DPDP consent proof requires the owner to be able to
+show. It still never returns a full address, an identifier, a
+finding or a letter.
 """
 
 import os
@@ -570,6 +578,69 @@ def list_audit(admin_user_id, limit=100):
     audit.record(admin_user_id, "admin", "admin.audit_viewed",
                  detail={"limit": limit})
     return entries
+
+
+def consent_records(admin_user_id, limit=100):
+    """The owner's consent records (owner order 2026-11-18): one row
+    per live account, newest first — masked email, the registration
+    agreements (policy edition + when; the 18-or-older confirmation
+    + when, or None where no record exists — accounts older than
+    the recording are shown honestly as not recorded, never
+    backfilled), and the current state of the four purpose
+    switches. Consent facts only, per the module docstring's
+    exception; the view itself is audit-recorded like every other
+    admin read."""
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 500))
+    with db_pool.connection() as conn:
+        users = conn.execute(
+            "SELECT id, email_masked, created_at FROM users"
+            " WHERE deleted_at IS NULL"
+            " ORDER BY created_at DESC LIMIT %s",
+            (limit,),
+        ).fetchall()
+        latest = {}
+        if users:
+            rows = conn.execute(
+                "SELECT DISTINCT ON (user_id, purpose) user_id,"
+                " purpose, granted, policy_version, created_at"
+                " FROM consents WHERE user_id = ANY(%s)"
+                " ORDER BY user_id, purpose, version DESC",
+                ([row["id"] for row in users],),
+            ).fetchall()
+            for row in rows:
+                latest.setdefault(str(row["user_id"]), {})[
+                    row["purpose"]] = row
+    records = []
+    for user in users:
+        by_purpose = latest.get(str(user["id"]), {})
+        policy = by_purpose.get(consents_service.POLICY_PURPOSE)
+        age = by_purpose.get(consents_service.AGE_PURPOSE)
+        records.append({
+            "email_masked": user["email_masked"],
+            "registered_at": _iso(user["created_at"]),
+            "policy": ({
+                "granted": bool(policy["granted"]),
+                "policy_version": policy["policy_version"],
+                "at": _iso(policy["created_at"]),
+            } if policy else None),
+            "age_confirmation": ({
+                "granted": bool(age["granted"]),
+                "at": _iso(age["created_at"]),
+            } if age else None),
+            "consents": {
+                purpose: (bool(by_purpose[purpose]["granted"])
+                          if purpose in by_purpose else False)
+                for purpose in consents_service.PURPOSES
+            },
+        })
+    # Recorded AFTER the read, so a view never lists itself.
+    audit.record(admin_user_id, "admin", "admin.consents_viewed",
+                 detail={"limit": limit})
+    return records
 
 
 # ---------------------------------------------------------------------------

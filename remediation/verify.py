@@ -89,6 +89,9 @@ def _apply_outcome(case, outcome, method, evidence_ref):
                 " WHERE id = %s",
                 (case["id"],),
             )
+    from core import records
+
+    records.removal_snapshot(case["id"])
     if flipped:
         _resolve_findings(case)
 

@@ -636,6 +636,9 @@ def _transition(case_id, status, reason, action=None, result=None,
             )
         if action is not None:
             _insert_attempt(conn, case_id, action, result, detail)
+    from core import records
+
+    records.removal_snapshot(case_id)
 
 
 def _record_attempt(case_id, action, result, detail):

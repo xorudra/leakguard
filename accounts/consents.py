@@ -30,6 +30,11 @@ PURPOSES = ("scanning", "monitoring", "automated_remediation", "notifications")
 # reports exactly the four toggles, and set_consent() must never
 # let a client flip the policy acceptance itself.
 POLICY_PURPOSE = "policy_acceptance"
+# The 18-or-older confirmation (owner order 2026-11-18): recorded
+# at registration on the same terms as POLICY_PURPOSE — kept OUT of
+# PURPOSES, so it is not a toggle and set_consent() can never flip
+# it; it exists so "who confirmed 18+, and when" is answerable.
+AGE_PURPOSE = "age_confirmation"
 # The policy edition new registrations accept: the effective date
 # shown on the /privacy and /terms pages (static/index.html). Bump
 # this when those pages' effective date changes — registrations
@@ -60,6 +65,19 @@ def record_policy_acceptance(conn, user_id,
         " policy_version) VALUES (%s, %s, 1, true, %s)"
         " ON CONFLICT DO NOTHING",
         (user_id, POLICY_PURPOSE, policy_version),
+    )
+
+
+def record_age_confirmation(conn, user_id):
+    """Append the registration 18-or-older confirmation for a new
+    user. Runs inside the caller's transaction/connection, like
+    record_policy_acceptance. granted=true, ledger version 1.
+    Accounts created before this recording existed have no row —
+    the admin view shows them as not recorded, never backfilled."""
+    conn.execute(
+        "INSERT INTO consents (user_id, purpose, version, granted)"
+        " VALUES (%s, %s, 1, true) ON CONFLICT DO NOTHING",
+        (user_id, AGE_PURPOSE),
     )
 
 
@@ -135,4 +153,9 @@ def set_consent(user_id, purpose, granted):
         )
     audit.record(user_id, "user", "consent.changed", "consent", purpose,
                  {"consent": purpose, "granted": granted})
+    # Records queue (2026-11-18): the switch change is a Drive
+    # consent record too, masked email only.
+    from core import records
+
+    records.consent_event(user_id, purpose, granted)
     return current_consents(user_id)

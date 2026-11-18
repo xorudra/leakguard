@@ -530,6 +530,40 @@ class TestAgeConfirmation(DbServerMixin, unittest.TestCase):
                           policy_accepted=True)
         self.assertEqual(ctx.exception.code, "age_confirmation_required")
 
+    def test_age_confirmation_recorded_in_ledger(self):
+        email = "wave1-age-rec-%s@example.com" % uuid.uuid4().hex[:16]
+        status, _h, body = self.request_json(
+            "POST", "/api/auth/register",
+            body={"email": email, "password": PASSWORD,
+                  "name": "Wave One", "policy_accepted": True,
+                  "age_confirmed": True},
+            headers=CSRF)
+        self.assertEqual(status, 201, body)
+        from accounts import auth as auth_service
+        from accounts import consents
+        from core import errors
+        digest = auth_service.account_email_hmac(
+            auth_service.normalize_email(email))
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                "SELECT id FROM users WHERE email_hmac = %s"
+                " AND deleted_at IS NULL", (digest,)).fetchone()
+            user_id = str(row["id"])
+            ledger = conn.execute(
+                "SELECT granted, version, created_at FROM consents"
+                " WHERE user_id = %s AND purpose = %s",
+                (user_id, consents.AGE_PURPOSE)).fetchall()
+        self.user_ids.append(user_id)
+        # Exactly one timestamped, granted ledger row.
+        self.assertEqual(len(ledger), 1)
+        self.assertTrue(ledger[0]["granted"])
+        self.assertEqual(ledger[0]["version"], 1)
+        self.assertIsNotNone(ledger[0]["created_at"])
+        # And it is not a toggle: the consent API refuses to flip it.
+        with self.assertRaises(errors.ApiError) as ctx:
+            consents.set_consent(user_id, consents.AGE_PURPOSE, False)
+        self.assertEqual(ctx.exception.code, "unknown_purpose")
+
 
 # ---------------------------------------------------------------------------
 # F29 — export completeness (database)

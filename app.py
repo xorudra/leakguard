@@ -596,6 +596,18 @@ class Handler(BaseHTTPRequestHandler):
                 "audit": self._call(
                     admin_service.list_audit, admin["id"], limit),
             })
+        if route == "/api/admin/consents":
+            # The owner's consent records (2026-11-18): who agreed
+            # to the policy and confirmed 18+, and when — masked
+            # emails only, same owner-only 404 gate as every admin
+            # route. See accounts/admin.py's privacy contract.
+            admin = self._require_admin()
+            query = urllib.parse.parse_qs(parsed.query)
+            limit = query.get("limit", [None])[0]
+            return self._json(200, {
+                "consents": self._call(
+                    admin_service.consent_records, admin["id"], limit),
+            })
         if route == "/api/admin/metrics":
             # Phase 76: the overview's metrics block, standalone —
             # same owner-only 404 gate as every admin route.
